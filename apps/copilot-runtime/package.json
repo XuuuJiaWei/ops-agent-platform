@@ -1,0 +1,13 @@
+{
+  "name": "@ops-agent-platform/copilot-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node src/index.mjs",
+    "start": "node src/index.mjs"
+  },
+  "dependencies": {
+    "@copilotkit/runtime": "^1.64.2"
+  }
+}

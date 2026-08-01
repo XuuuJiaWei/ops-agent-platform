@@ -1,0 +1,37 @@
+# Local env and secrets
+.env
+.env.*
+!.env.example
+dt-config.yaml
+config/dt-config.yaml
+config/mcp.local.json
+*token*
+*secret*
+*.log
+
+# Local archives
+archives/*.zip
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+.langgraph_api/
+.python-version
+
+# Node / Vite
+node_modules/
+.next/
+.vite/
+*.tsbuildinfo
+out/
+dist/
+coverage/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

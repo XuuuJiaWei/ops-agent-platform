@@ -1,0 +1,24 @@
+{
+  "name": "ops-agent-platform",
+  "private": true,
+  "packageManager": "pnpm@10.33.2",
+  "scripts": {
+    "dev": "pnpm run dev:check && concurrently --names web,chat,copilot,a2a --prefix-colors cyan,green,yellow,magenta --kill-others-on-fail \"WEB_WAIT_FOR_BACKENDS=true pnpm run dev:web\" \"pnpm run dev:chat\" \"pnpm run dev:copilot\" \"pnpm run dev:a2a\"",
+    "dev:web": "sh ./scripts/dev-web.sh",
+    "dev:chat": "sh ./scripts/dev-chat.sh",
+    "dev:langgraph": "sh ./scripts/dev-langgraph.sh",
+    "dev:copilot": "sh ./scripts/dev-copilot-runtime.sh",
+    "dev:a2a": "sh ./scripts/dev-a2a.sh",
+    "dev:check": "sh ./scripts/dev-check.sh",
+    "lint": "pnpm --filter \"./apps/web\" lint",
+    "test": "pnpm run test:backend",
+    "test:backend": "cd services/agent && uv run pytest",
+    "smoke:local": "sh ./scripts/smoke-local.sh",
+    "smoke:model": "cd services/agent && uv run ops_pilot smoke model",
+    "smoke:agent": "cd services/agent && uv run ops_pilot smoke agent",
+    "smoke:a2a": "cd services/agent && uv run ops_pilot smoke a2a"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.4"
+  }
+}
