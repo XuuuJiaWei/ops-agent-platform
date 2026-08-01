@@ -3,6 +3,7 @@ set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 WEB_WAIT_TIMEOUT=${WEB_WAIT_TIMEOUT:-120}
+WEB_WAIT_FOR_BACKENDS=${WEB_WAIT_FOR_BACKENDS:-true}
 WEB_WAIT_COPILOT_HEALTH_URL=${WEB_WAIT_COPILOT_HEALTH_URL:-http://127.0.0.1:4001/health}
 WEB_WAIT_CHAT_HEALTH_URL=${WEB_WAIT_CHAT_HEALTH_URL:-http://127.0.0.1:8123/health}
 
@@ -35,7 +36,7 @@ wait_for_url() {
   done
 }
 
-case "${WEB_WAIT_FOR_BACKENDS:-false}" in
+case "$WEB_WAIT_FOR_BACKENDS" in
   true|1|yes)
     wait_for_url "Copilot runtime" "$WEB_WAIT_COPILOT_HEALTH_URL" "$WEB_WAIT_TIMEOUT"
     wait_for_url "AG-UI chat backend" "$WEB_WAIT_CHAT_HEALTH_URL" "$WEB_WAIT_TIMEOUT"
@@ -43,4 +44,4 @@ case "${WEB_WAIT_FOR_BACKENDS:-false}" in
 esac
 
 cd "$ROOT_DIR"
-exec pnpm --filter "./apps/web" dev
+exec pnpm --filter "./apps/web" dev:vite

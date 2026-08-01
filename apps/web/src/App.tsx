@@ -1,6 +1,10 @@
-import { CopilotChat, CopilotKit } from "@copilotkit/react-core/v2";
+import { CopilotKit } from "@copilotkit/react-core/v2";
+import { AppShell } from "@/app/AppShell";
 import { ChatRenderers } from "@/copilot/ChatRenderers";
+import { KibanaFrontendTools } from "@/copilot/kibana/KibanaFrontendTools";
 import { browserEnv } from "@/lib/env";
+
+const enableCopilotInspector = import.meta.env.DEV;
 
 export function App() {
   return (
@@ -8,11 +12,11 @@ export function App() {
       runtimeUrl={browserEnv.copilotRuntimeUrl}
       agent={browserEnv.assistantId}
       showDevConsole={browserEnv.showDevConsole}
+      enableInspector={enableCopilotInspector}
     >
+      <KibanaFrontendTools config={browserEnv.kibana} />
       <ChatRenderers />
-      <main className="h-dvh min-h-screen bg-white">
-        <CopilotChat agentId={browserEnv.assistantId} className="h-full" />
-      </main>
+      <AppShell env={browserEnv} />
     </CopilotKit>
   );
 }
