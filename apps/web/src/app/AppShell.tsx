@@ -104,7 +104,12 @@ export function AppShell({ env }: AppShellProps) {
           </header>
 
           <div className="min-h-0 flex-1">
-            {mainView === "chat" ? <CopilotChat className="h-full" key={chatKey} /> : <AgentNativeAppView activeThreadId={activeThreadId} />}
+            {mainView === "chat" ? <CopilotChat className="h-full" key={chatKey} /> : null}
+            {/* Keep the App view mounted so its agent-state subscription stays live
+                even while the Chat tab is shown; hide it instead of unmounting. */}
+            <div className={mainView === "app" ? "h-full" : "hidden"}>
+              <AgentNativeAppView activeThreadId={activeThreadId} env={env} />
+            </div>
           </div>
         </section>
       </main>

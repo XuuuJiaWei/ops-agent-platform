@@ -60,6 +60,7 @@ class Settings:
     mcp_config_path: Path | None = None
     skills_paths: tuple[Path, ...] = field(default_factory=tuple)
     enable_smoke_tools: bool = True
+    enable_dynatrace_dashboard: bool = True
     langfuse_public_key: str | None = None
     langfuse_secret_key: str | None = None
     langfuse_base_url: str | None = "https://cloud.langfuse.com"
@@ -115,6 +116,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         mcp_config_path=resolve_path(mcp_config) if mcp_config else None,
         skills_paths=skill_paths,
         enable_smoke_tools=_env_bool(source, "ENABLE_SMOKE_TOOLS", True),
+        enable_dynatrace_dashboard=_env_bool(source, "ENABLE_DYNATRACE_DASHBOARD", True),
         langfuse_public_key=_optional_text(source, "LANGFUSE_PUBLIC_KEY"),
         langfuse_secret_key=_optional_text(source, "LANGFUSE_SECRET_KEY"),
         langfuse_base_url=_optional_text(source, "LANGFUSE_BASE_URL"),

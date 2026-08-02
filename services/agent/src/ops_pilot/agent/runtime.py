@@ -6,12 +6,14 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ops_pilot.agent.middleware import NormalizeSystemMessagesMiddleware
+from ops_pilot.agent.state import OpsPilotState
 from ops_pilot.config.settings import Settings, load_settings
 from ops_pilot.mcp.registry import MCPRegistry, create_mcp_registry
 from ops_pilot.models.sap_genai import create_chat_model
 from ops_pilot.observability.langfuse import TracingSetup, create_callback_handler
 from ops_pilot.observability.metadata import build_runnable_config
 from ops_pilot.skills.resolver import resolve_skill_paths
+from ops_pilot.tools.dynatrace_dashboard import get_dynatrace_dashboard_tools
 from ops_pilot.tools.smoke_tools import get_smoke_tools
 
 
@@ -96,6 +98,8 @@ async def build_agent_runtime(
     tools = list(mcp_registry.tools)
     if resolved_settings.enable_smoke_tools:
         tools.extend(get_smoke_tools())
+    if resolved_settings.enable_dynatrace_dashboard:
+        tools.extend(get_dynatrace_dashboard_tools())
 
     graph = _create_deep_agent(
         model=model,
@@ -132,6 +136,7 @@ def _create_deep_agent(
     kwargs: dict[str, Any] = {
         "model": model,
         "tools": tools,
+        "state_schema": OpsPilotState,
     }
     if system_prompt:
         kwargs["system_prompt"] = system_prompt

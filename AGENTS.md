@@ -23,7 +23,7 @@ Backend tests use `pytest`; place unit tests in `services/agent/tests/unit` and 
 
 ## Commit & Pull Request Guidelines
 
-No Git history is available in this workspace to infer an established convention. Use short, imperative commit messages, preferably Conventional Commit style, for example `fix: stabilize copilot runtime routing` or `docs: update product README`. Pull requests should include a concise summary, validation commands run, screenshots for UI changes, and notes about configuration or data-boundary impacts.
+Use short, imperative commit messages, preferably Conventional Commit style, for example `fix: stabilize copilot runtime routing` or `docs: update product README`. Pull requests should include a concise summary, validation commands run, screenshots for UI changes, and notes about configuration or data-boundary impacts.
 
 ## Security & Configuration Tips
 
