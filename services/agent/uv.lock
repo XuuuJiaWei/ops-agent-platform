@@ -1240,6 +1240,7 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "sap-ai-sdk-gen", extra = ["amazon"] },
     { name = "uvicorn" },
+    { name = "websockets" },
 ]
 
 [package.dev-dependencies]
@@ -1265,6 +1266,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.2.1,<2" },
     { name = "sap-ai-sdk-gen", extras = ["amazon"], specifier = ">=7.2.0,<8" },
     { name = "uvicorn", specifier = ">=0.52.0,<1" },
+    { name = "websockets", specifier = ">=15.0.1,<16" },
 ]
 
 [package.metadata.requires-dev]

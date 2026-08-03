@@ -10,9 +10,7 @@ const [{ CopilotRuntime }, { createCopilotNodeListener }, { LangGraphHttpAgent }
 
 const basePath = normalizeBasePath(process.env.COPILOT_RUNTIME_BASE_PATH ?? "/api/copilotkit");
 const graphId = process.env.ASSISTANT_ID?.trim() || "agent";
-const agentUrl = ensureTrailingSlash(
-  process.env.AGUI_AGENT_URL?.trim() || process.env.AGENT_API_URL?.trim() || "http://127.0.0.1:8123",
-);
+const agentUrl = ensureTrailingSlash(resolveAgentUrl());
 const port = Number(process.env.COPILOT_RUNTIME_PORT ?? "4001");
 const host = process.env.COPILOT_RUNTIME_HOST ?? "127.0.0.1";
 
@@ -60,6 +58,32 @@ function trimTrailingSlash(value) {
 function ensureTrailingSlash(value) {
   const trimmed = value.trim();
   return `${trimTrailingSlash(trimmed)}/`;
+}
+
+function resolveAgentUrl() {
+  const aguiUrl = process.env.AGUI_AGENT_URL?.trim();
+  if (aguiUrl) {
+    return aguiUrl;
+  }
+
+  const legacyAgentUrl = process.env.AGENT_API_URL?.trim();
+  if (legacyAgentUrl) {
+    return appendDefaultChatPath(legacyAgentUrl);
+  }
+
+  return "http://127.0.0.1:8123/chat";
+}
+
+function appendDefaultChatPath(value) {
+  try {
+    const url = new URL(value);
+    if (url.pathname === "/") {
+      url.pathname = "/chat";
+    }
+    return url.toString();
+  } catch {
+    return value;
+  }
 }
 
 function normalizeBasePath(value) {

@@ -19,7 +19,7 @@ The product currently exposes three primary surfaces:
 - CopilotKit-compatible chat streaming through AG-UI.
 - A2A agent card discovery and JSON-RPC execution through the official Python SDK.
 - Optional Langfuse tracing when credentials are configured.
-- Local development stack with frontend, Copilot runtime, AG-UI backend, and A2A backend started from one command.
+- Local development stack with frontend, Copilot runtime, and one unified backend started from one command.
 
 ## Architecture
 
@@ -27,12 +27,12 @@ The product currently exposes three primary surfaces:
 Browser
   -> Vite / CopilotKit chat frontend
   -> local CopilotKit Runtime
-  -> AG-UI FastAPI backend
+  -> unified FastAPI backend
   -> ops_pilot DeepAgent runtime
   -> SAP AI Core / Generative AI Hub + configured MCP tools
 
 A2A client
-  -> A2A JSON-RPC backend
+  -> unified FastAPI backend
   -> ops_pilot DeepAgent runtime
 ```
 
@@ -44,10 +44,9 @@ The frontend does not implement agent policy or tool orchestration. It renders t
 | --- | --- | --- |
 | Web app | `http://localhost:3000` | CopilotKit chat frontend |
 | Copilot runtime | `http://127.0.0.1:4001/api/copilotkit` | Runtime bridge between browser and AG-UI |
-| AG-UI backend | `http://127.0.0.1:8123` | Chat protocol backend for CopilotKit |
-| A2A backend | `http://127.0.0.1:41241` | Agent2Agent server |
-| A2A agent card | `http://127.0.0.1:41241/a2a/.well-known/agent-card.json` | Agent discovery metadata |
-| A2A JSON-RPC | `http://127.0.0.1:41241/a2a/jsonrpc` | Programmatic agent execution |
+| Backend | `http://127.0.0.1:8123` | AG-UI, A2A, health, and MCP tunnel relay |
+| A2A agent card | `http://127.0.0.1:8123/a2a/.well-known/agent-card.json` | Agent discovery metadata |
+| A2A JSON-RPC | `http://127.0.0.1:8123/a2a/jsonrpc` | Programmatic agent execution |
 
 ## Local Development
 
@@ -72,16 +71,15 @@ Start the full development stack:
 pnpm dev
 ```
 
-`pnpm dev` runs a preflight check, then starts the web app, AG-UI backend, CopilotKit Runtime, and A2A backend. The web process waits for the Copilot runtime and AG-UI health endpoints before Vite starts, so the browser does not call `/api/copilotkit` before the runtime is ready.
+`pnpm dev` runs a preflight check, then starts the web app, unified backend, and CopilotKit Runtime. The web process waits for the Copilot runtime and backend health endpoints before Vite starts, so the browser does not call `/api/copilotkit` before the runtime is ready.
 
 | Process | Script | Default command |
 | --- | --- | --- |
 | Frontend | `pnpm run dev:web` | `pnpm --filter "./apps/web" dev` |
-| Chat backend | `pnpm run dev:chat` | `uv run ops_pilot chat serve --host 127.0.0.1 --port 8123` from `services/agent` |
+| Backend | `pnpm run dev:backend` | `uv run ops_pilot serve --host 127.0.0.1 --port 8123` from `services/agent` |
 | Copilot runtime | `pnpm run dev:copilot` | `pnpm --filter "./apps/copilot-runtime" dev` |
-| A2A backend | `pnpm run dev:a2a` | `uv run ops_pilot a2a serve --host 127.0.0.1 --port 41241` from `services/agent` |
 
-The Vite development server proxies `/api/copilotkit/*` to the Copilot runtime and `/a2a/*` to the A2A backend.
+The Vite development server proxies `/api/copilotkit/*` to the Copilot runtime and `/a2a/*` to the unified backend.
 
 ## Configuration
 
@@ -93,8 +91,7 @@ Example configuration lives in `config/`:
 Useful development overrides:
 
 ```bash
-CHAT_SERVER_CMD="uv run ops_pilot chat serve" pnpm run dev:chat
-A2A_SERVER_CMD="uv run ops_pilot a2a serve" pnpm run dev:a2a
+BACKEND_SERVER_CMD="uv run ops_pilot serve" pnpm run dev:backend
 WEB_WAIT_TIMEOUT=180 pnpm dev
 SMOKE_LOCAL_CMD="pnpm run smoke:a2a" pnpm run smoke:local
 ```

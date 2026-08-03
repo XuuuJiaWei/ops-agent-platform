@@ -11,7 +11,8 @@ function trimTrailingSlash(value: string): string {
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, workspaceRoot, "");
-  const a2aApiUrl = trimTrailingSlash(env.A2A_API_URL ?? "http://localhost:41241");
+  const backendUrl = trimTrailingSlash(env.BACKEND_URL ?? env.VITE_BACKEND_URL ?? "http://127.0.0.1:8123");
+  const a2aApiUrl = trimTrailingSlash(env.A2A_API_URL ?? backendUrl);
   const copilotRuntimeUrl = trimTrailingSlash(env.COPILOT_RUNTIME_URL ?? "http://127.0.0.1:4001");
   const webPort = Number(process.env.WEB_PORT ?? env.WEB_PORT ?? "3000");
 
@@ -26,7 +27,7 @@ export default defineConfig(({ mode }) => {
     server: {
       host: "0.0.0.0",
       port: webPort,
-      strictPort: true,
+      strictPort: false,
       proxy: {
         "/api/copilotkit": {
           target: copilotRuntimeUrl,
@@ -36,12 +37,16 @@ export default defineConfig(({ mode }) => {
           target: a2aApiUrl,
           changeOrigin: true,
         },
+        "/dev/mcp-tunnels": {
+          target: backendUrl,
+          changeOrigin: true,
+        },
       },
     },
     preview: {
       host: "0.0.0.0",
       port: webPort,
-      strictPort: true,
+      strictPort: false,
     },
   };
 });

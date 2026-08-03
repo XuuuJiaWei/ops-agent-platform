@@ -15,6 +15,7 @@ from ops_pilot.agent.factory import create_agent_runtime_async
 from ops_pilot.config.settings import load_settings
 from ops_pilot.health.status import build_runtime_status, health_snapshot
 from ops_pilot.models.smoke import smoke_bind_tools, smoke_invoke, smoke_model_invocation
+from ops_pilot.tunnel.profile import resolve_tunnel_mcp_spec
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -25,17 +26,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     subcommands.add_parser("status", help="Build the runtime and print status metadata.")
     subcommands.add_parser("health", help="Print lightweight health metadata without model init.")
 
-    a2a = subcommands.add_parser("a2a", help="Run A2A protocol commands.")
-    a2a_subcommands = a2a.add_subparsers(dest="a2a_command", required=True)
-    a2a_serve = a2a_subcommands.add_parser("serve", help="Start the local A2A server.")
-    a2a_serve.add_argument("--host", default=None)
-    a2a_serve.add_argument("--port", type=int, default=None)
+    serve = subcommands.add_parser("serve", help="Start the unified backend server.")
+    serve.add_argument("--host", default=None)
+    serve.add_argument("--port", type=int, default=None)
 
-    chat = subcommands.add_parser("chat", help="Run CopilotKit/AG-UI chat protocol commands.")
-    chat_subcommands = chat.add_subparsers(dest="chat_command", required=True)
-    chat_serve = chat_subcommands.add_parser("serve", help="Start the local AG-UI chat server.")
-    chat_serve.add_argument("--host", default=None)
-    chat_serve.add_argument("--port", type=int, default=None)
+    tunnel = subcommands.add_parser("tunnel", help="Run local MCP tunnel commands.")
+    tunnel_subcommands = tunnel.add_subparsers(dest="tunnel_command", required=True)
+    tunnel_run = tunnel_subcommands.add_parser(
+        "run",
+        help="Connect a local stdio MCP server to the backend through an outbound tunnel.",
+    )
+    tunnel_run.add_argument("--server-url", default="http://127.0.0.1:8123")
+    tunnel_run.add_argument("--tunnel-id", required=True)
+    tunnel_run.add_argument("--token", default=None)
+    tunnel_run.add_argument("--mcp-command", default=None)
+    tunnel_run.add_argument("--mcp-config", default=None)
+    tunnel_run.add_argument("--mcp-server", default=None)
+    tunnel_run.add_argument("--cwd", default=None)
 
     smoke = subcommands.add_parser("smoke", help="Run local smoke checks.")
     smoke_subcommands = smoke.add_subparsers(dest="smoke_command", required=True)
@@ -51,10 +58,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "health":
         print(json.dumps(health_snapshot(load_settings()), indent=2, sort_keys=True))
         return 0
-    if args.command == "a2a" and args.a2a_command == "serve":
-        return _run_server(_serve_a2a(args.host, args.port))
-    if args.command == "chat" and args.chat_command == "serve":
-        return _run_server(_serve_chat(args.host, args.port))
+    if args.command == "serve":
+        return _run_server(_serve_backend(args.host, args.port))
+    if args.command == "tunnel" and args.tunnel_command == "run":
+        return _run_server(
+            _run_tunnel(
+                server_url=args.server_url,
+                tunnel_id=args.tunnel_id,
+                token=args.token,
+                mcp_command=args.mcp_command,
+                mcp_config=args.mcp_config,
+                mcp_server=args.mcp_server,
+                cwd=args.cwd,
+            )
+        )
     if args.command == "smoke":
         return _smoke(args.smoke_command)
     return 2
@@ -95,17 +112,17 @@ async def _print_status() -> int:
     return 0
 
 
-async def _serve_a2a(host: str | None, port: int | None) -> int:
-    from ops_pilot.a2a.app import create_a2a_app
+async def _serve_backend(host: str | None, port: int | None) -> int:
+    from ops_pilot.backend import create_backend_app
 
     settings = load_settings()
     settings = replace(
         settings,
-        a2a_host=host or settings.a2a_host,
-        a2a_port=port or settings.a2a_port,
+        chat_host=host or settings.chat_host,
+        chat_port=port or settings.chat_port,
     )
-    app = await create_a2a_app(settings)
-    config = uvicorn.Config(app, host=settings.a2a_host, port=settings.a2a_port, log_level="info")
+    app = await create_backend_app(settings)
+    config = uvicorn.Config(app, host=settings.chat_host, port=settings.chat_port, log_level="info")
     server = uvicorn.Server(config)
     try:
         await server.serve()
@@ -114,23 +131,33 @@ async def _serve_a2a(host: str | None, port: int | None) -> int:
     return 0
 
 
-async def _serve_chat(host: str | None, port: int | None) -> int:
-    from ops_pilot.agui.app import create_agui_app
+async def _run_tunnel(
+    *,
+    server_url: str,
+    tunnel_id: str,
+    token: str | None,
+    mcp_command: str | None,
+    mcp_config: str | None,
+    mcp_server: str | None,
+    cwd: str | None,
+) -> int:
+    from ops_pilot.tunnel.client import TunnelClientConfig, run_local_tunnel_client
 
-    settings = load_settings()
-    settings = replace(
-        settings,
-        chat_host=host or settings.chat_host,
-        chat_port=port or settings.chat_port,
-        chat_base_path="/",
+    spec = resolve_tunnel_mcp_spec(
+        mcp_command=mcp_command,
+        mcp_config=mcp_config,
+        mcp_server=mcp_server,
     )
-    app = await create_agui_app(settings)
-    config = uvicorn.Config(app, host=settings.chat_host, port=settings.chat_port, log_level="info")
-    server = uvicorn.Server(config)
-    try:
-        await server.serve()
-    except KeyboardInterrupt:
-        return 0
+    await run_local_tunnel_client(
+        TunnelClientConfig(
+            server_url=server_url,
+            tunnel_id=tunnel_id,
+            token=token,
+            mcp_command=spec.command,
+            cwd=cwd,
+            env=spec.env,
+        )
+    )
     return 0
 
 

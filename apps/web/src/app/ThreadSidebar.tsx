@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import type { ConversationThread, ConversationThreadsState } from "./conversationThreads";
+import { TunnelControlPanel } from "./TunnelControlPanel";
 import type { BrowserEnv } from "@/lib/env";
 
 type SidebarView = "conversations" | "settings";
@@ -331,12 +332,7 @@ function SettingsPanel({ env, onBack }: { env: BrowserEnv; onBack: () => void })
           <PilotBridgeInstallAction installUrl={env.pilotBridge.installUrl} />
         </section>
 
-        <section>
-          <SectionHeader icon={<Settings aria-hidden="true" className="size-4" />} title="Kibana" />
-          <SettingRow label="Base URL" value={env.kibana.baseUrl ?? "Not configured"} />
-          <SettingRow label="Space" value={env.kibana.defaultSpace} />
-          <SettingRow label="OpenAPI" value={env.kibana.openApiSpecUrl} />
-        </section>
+        <TunnelControlPanel env={env} />
       </div>
     </div>
   );

@@ -7,8 +7,10 @@ from typing import Any
 
 from ops_pilot.agent.middleware import NormalizeSystemMessagesMiddleware
 from ops_pilot.agent.state import OpsPilotState
+from ops_pilot.config.mcp_schema import MCPConfig
 from ops_pilot.config.settings import Settings, load_settings
 from ops_pilot.mcp.registry import MCPRegistry, create_mcp_registry
+from ops_pilot.mcp.status import MCPLoadStatus
 from ops_pilot.models.sap_genai import create_chat_model
 from ops_pilot.observability.langfuse import TracingSetup, create_callback_handler
 from ops_pilot.observability.metadata import build_runnable_config
@@ -81,6 +83,7 @@ class AgentRuntime:
 async def build_agent_runtime(
     settings: Settings | None = None,
     *,
+    dynamic_mcp_config: MCPConfig | None = None,
     use_memory_checkpointer: bool = True,
 ) -> AgentRuntime:
     """Build the shared DeepAgent runtime.
@@ -92,6 +95,9 @@ async def build_agent_runtime(
     resolved_settings = settings or load_settings()
     model = create_chat_model(resolved_settings)
     mcp_registry = await create_mcp_registry(resolved_settings)
+    if dynamic_mcp_config is not None and dynamic_mcp_config.servers:
+        dynamic_registry = await MCPRegistry.from_config(dynamic_mcp_config, config_path="dynamic")
+        mcp_registry = _combine_mcp_registries(mcp_registry, dynamic_registry)
     skills = tuple(resolve_skill_paths(resolved_settings))
     tracing = create_callback_handler(resolved_settings)
 
@@ -116,6 +122,24 @@ async def build_agent_runtime(
         skills=skills,
         mcp=mcp_registry,
         tracing=tracing,
+    )
+
+
+def _combine_mcp_registries(*registries: MCPRegistry) -> MCPRegistry:
+    tools: list[Any] = []
+    server_statuses = []
+    config_paths: list[str] = []
+    for registry in registries:
+        tools.extend(registry.tools)
+        server_statuses.extend(registry.status.servers)
+        if registry.status.config_path:
+            config_paths.append(registry.status.config_path)
+    return MCPRegistry(
+        tools=tuple(tools),
+        status=MCPLoadStatus(
+            config_path=", ".join(config_paths) if config_paths else None,
+            servers=tuple(server_statuses),
+        ),
     )
 
 

@@ -114,12 +114,20 @@ def _expand_env_value(value: str) -> str:
     return ENV_PATTERN.sub(replace_match, value)
 
 
-def _safe_error(exc: Exception) -> str:
-    text = str(exc) or exc.__class__.__name__
+def _safe_error(exc: BaseException) -> str:
+    text = _error_text(exc)
     for key, value in os.environ.items():
         if _looks_secret(key) and value:
             text = text.replace(value, "[redacted]")
     return text
+
+
+def _error_text(exc: BaseException) -> str:
+    if isinstance(exc, BaseExceptionGroup):
+        parts = [_error_text(child) for child in exc.exceptions]
+        joined = "; ".join(part for part in parts if part)
+        return joined or (str(exc) or exc.__class__.__name__)
+    return str(exc) or exc.__class__.__name__
 
 
 def _looks_secret(key: str) -> bool:

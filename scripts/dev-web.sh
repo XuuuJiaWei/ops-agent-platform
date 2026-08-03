@@ -39,7 +39,7 @@ wait_for_url() {
 case "$WEB_WAIT_FOR_BACKENDS" in
   true|1|yes)
     wait_for_url "Copilot runtime" "$WEB_WAIT_COPILOT_HEALTH_URL" "$WEB_WAIT_TIMEOUT"
-    wait_for_url "AG-UI chat backend" "$WEB_WAIT_CHAT_HEALTH_URL" "$WEB_WAIT_TIMEOUT"
+    wait_for_url "Backend" "$WEB_WAIT_CHAT_HEALTH_URL" "$WEB_WAIT_TIMEOUT"
     ;;
 esac
 
