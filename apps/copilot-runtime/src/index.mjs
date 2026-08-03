@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 
 process.env.COPILOTKIT_TELEMETRY_DISABLED ??= "true";
 
-const [{ CopilotRuntime }, { createCopilotNodeListener }, { LangGraphHttpAgent }] = await Promise.all([
+const [{ CopilotRuntime, InMemoryAgentRunner }, { createCopilotNodeListener }, { LangGraphHttpAgent }] = await Promise.all([
   import("@copilotkit/runtime/v2"),
   import("@copilotkit/runtime/v2/node"),
   import("@copilotkit/runtime/langgraph"),
@@ -20,6 +20,7 @@ const runtime = new CopilotRuntime({
       url: agentUrl,
     }),
   },
+  runner: new InMemoryAgentRunner(),
 });
 
 const copilotNodeListener = createCopilotNodeListener({
@@ -29,24 +30,7 @@ const copilotNodeListener = createCopilotNodeListener({
   cors: true,
 });
 
-const server = createServer((req, res) => {
-  const url = new URL(req.url ?? "/", `http://${req.headers.host ?? `${host}:${port}`}`);
-
-  if (url.pathname.startsWith(basePath)) {
-    return copilotNodeListener(req, res);
-  }
-
-  if (url.pathname === "/health") {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ status: "ok", graphId, agentUrl }));
-    return;
-  }
-
-  res.writeHead(404, { "Content-Type": "application/json" });
-  res.end(JSON.stringify({ error: "not_found" }));
-});
-
-server.listen(port, host, () => {
+createServer(copilotNodeListener).listen(port, host, () => {
   console.log(`Copilot runtime listening on http://${host}:${port}${basePath}`);
   console.log(`Forwarding agent '${graphId}' to AG-UI at ${agentUrl}`);
 });
