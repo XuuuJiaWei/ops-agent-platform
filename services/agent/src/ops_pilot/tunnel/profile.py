@@ -33,8 +33,7 @@ def resolve_tunnel_mcp_spec(
     server = select_mcp_server(config, mcp_server)
     if server.transport != "stdio":
         raise ValueError(
-            "Tunnel local MCP config must select a stdio server; "
-            f"'{server.name}' uses {server.transport}."
+            f"Tunnel local MCP config must select a stdio server; '{server.name}' uses {server.transport}."
         )
     command = [server.command or "", *server.args]
     return MCPProcessSpec(command=shlex.join(command), env=dict(server.env))

@@ -31,4 +31,3 @@ def validate_skill_path(path: Path) -> None:
     if any(child.name == "SKILL.md" for child in path.rglob("SKILL.md")):
         return
     raise SkillValidationError(f"Configured skills directory contains no SKILL.md files: {path}")
-

@@ -92,9 +92,7 @@ class TunnelConnection:
             relay_id = str(payload.get("id", ""))
             future = self.pending.get(relay_id)
             if future is not None and not future.done():
-                future.set_exception(
-                    TunnelRequestError(str(payload.get("error") or "MCP tunnel error"))
-                )
+                future.set_exception(TunnelRequestError(str(payload.get("error") or "MCP tunnel error")))
             return
 
         if message_type == "mcp.notification":

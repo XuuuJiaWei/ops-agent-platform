@@ -77,8 +77,7 @@ def _create_bedrock_chat_model(settings: Settings, proxy_client: Any) -> Any:
         from gen_ai_hub.proxy.langchain.amazon import ChatBedrock
     except ImportError as exc:
         raise SAPModelInitializationError(
-            "SAP SDK Bedrock LangChain integration is not installed. "
-            "Run 'uv sync' in services/agent."
+            "SAP SDK Bedrock LangChain integration is not installed. Run 'uv sync' in services/agent."
         ) from exc
 
     deployment = proxy_client.select_deployment(model_name=settings.sap_model_name)

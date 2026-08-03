@@ -30,4 +30,3 @@ def test_mcp_config_accepts_stdio_and_http_servers():
 def test_mcp_config_rejects_missing_required_connection_fields():
     with pytest.raises(MCPConfigError):
         MCPConfig.from_mapping({"mcpServers": {"broken": {"transport": "http"}}})
-

@@ -41,9 +41,7 @@ def sync_skill_paths_to_backend(
         responses = backend.upload_files(uploads)
         failures = [response for response in responses if getattr(response, "error", None)]
         if failures:
-            failed_paths = ", ".join(
-                getattr(response, "path", "<unknown>") for response in failures
-            )
+            failed_paths = ", ".join(getattr(response, "path", "<unknown>") for response in failures)
             raise RuntimeError(f"Failed to upload skill files to sandbox: {failed_paths}")
 
     return SkillSyncResult(remote_paths=tuple(remote_sources), file_count=len(uploads))
@@ -93,9 +91,7 @@ def _build_single_skill_plan(skill_dir: Path, index: int, remote_root: str) -> _
     )
 
 
-def _source_root_for(
-    source_dir: Path, index: int, remote_root: str, sub_index: int, total: int
-) -> str:
+def _source_root_for(source_dir: Path, index: int, remote_root: str, sub_index: int, total: int) -> str:
     prefix = f"{index:02d}" if total == 1 else f"{index:02d}-{sub_index:02d}"
     return _remote_path(remote_root, f"{prefix}-{_safe_name(source_dir.name)}")
 

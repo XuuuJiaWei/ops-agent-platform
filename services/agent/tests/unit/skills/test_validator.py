@@ -17,4 +17,3 @@ def test_validate_skill_paths_rejects_missing_skill_files(tmp_path):
 
     with pytest.raises(SkillValidationError):
         validate_skill_paths((empty_dir,))
-

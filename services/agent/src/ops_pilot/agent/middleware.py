@@ -48,10 +48,7 @@ def _normalize_system_messages(request: ModelRequest) -> ModelRequest:
         return request
 
     normalized_system_message = SystemMessage(content=_join_system_contents(system_messages))
-    if (
-        normalized_system_message == request.system_message
-        and remaining_messages == request.messages
-    ):
+    if normalized_system_message == request.system_message and remaining_messages == request.messages:
         return request
     return request.override(system_message=normalized_system_message, messages=remaining_messages)
 

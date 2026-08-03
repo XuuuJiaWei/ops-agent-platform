@@ -25,9 +25,7 @@ def create_executor(runtime: AgentRuntime, settings: Settings):
             updater = TaskUpdater(event_queue=event_queue, task_id=task_id, context_id=context_id)
 
             await updater.submit()
-            await updater.start_work(
-                message=updater.new_agent_message(parts=[Part(text="Processing request...")])
-            )
+            await updater.start_work(message=updater.new_agent_message(parts=[Part(text="Processing request...")]))
 
             try:
                 response = await runtime.ainvoke_text(
@@ -39,9 +37,7 @@ def create_executor(runtime: AgentRuntime, settings: Settings):
                 )
             except Exception as exc:  # noqa: BLE001 - protocol adapter must publish failure event.
                 logger.exception("A2A task failed")
-                await updater.failed(
-                    message=updater.new_agent_message(parts=[Part(text=_public_error(exc))])
-                )
+                await updater.failed(message=updater.new_agent_message(parts=[Part(text=_public_error(exc))]))
                 return
 
             await updater.add_artifact(

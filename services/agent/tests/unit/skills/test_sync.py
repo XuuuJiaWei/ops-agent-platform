@@ -52,9 +52,7 @@ def test_sync_collection_skills_directory_to_remote_backend(tmp_path) -> None:
         "/remote/00-examples/ops-basic/SKILL.md",
         "/remote/00-examples/ops-basic/scripts/check.py",
     }
-    assert backend.commands == [
-        "mkdir -p -- /remote/00-examples/ops-basic /remote/00-examples/ops-basic/scripts"
-    ]
+    assert backend.commands == ["mkdir -p -- /remote/00-examples/ops-basic /remote/00-examples/ops-basic/scripts"]
 
 
 def test_sync_nested_skills_container_expands_to_discoverable_sources(tmp_path) -> None:
@@ -66,9 +64,7 @@ def test_sync_nested_skills_container_expands_to_discoverable_sources(tmp_path) 
     result = sync_skill_paths_to_backend([tmp_path / "skills"], backend, remote_root="/remote")
 
     assert result.remote_paths == ("/remote/00-examples",)
-    assert backend.uploads == [
-        ("/remote/00-examples/ops-basic/SKILL.md", b"---\nname: ops-basic\n---\n")
-    ]
+    assert backend.uploads == [("/remote/00-examples/ops-basic/SKILL.md", b"---\nname: ops-basic\n---\n")]
 
 
 def test_sync_mixed_real_and_example_skills_uploads_only_skill_dirs(tmp_path) -> None:
@@ -100,9 +96,7 @@ def test_sync_single_skill_directory_as_discoverable_source(tmp_path) -> None:
     result = sync_skill_paths_to_backend([skill_dir], backend, remote_root="/remote")
 
     assert result.remote_paths == ("/remote/00-ops-basic",)
-    assert backend.uploads == [
-        ("/remote/00-ops-basic/ops-basic/SKILL.md", b"---\nname: ops-basic\n---\n")
-    ]
+    assert backend.uploads == [("/remote/00-ops-basic/ops-basic/SKILL.md", b"---\nname: ops-basic\n---\n")]
 
 
 def test_sync_skill_md_file_as_discoverable_source(tmp_path) -> None:
@@ -115,9 +109,7 @@ def test_sync_skill_md_file_as_discoverable_source(tmp_path) -> None:
     result = sync_skill_paths_to_backend([skill_md], backend, remote_root="/remote")
 
     assert result.remote_paths == ("/remote/00-ops-basic",)
-    assert backend.uploads == [
-        ("/remote/00-ops-basic/ops-basic/SKILL.md", b"---\nname: ops-basic\n---\n")
-    ]
+    assert backend.uploads == [("/remote/00-ops-basic/ops-basic/SKILL.md", b"---\nname: ops-basic\n---\n")]
 
 
 def test_sync_reports_upload_failures(tmp_path) -> None:

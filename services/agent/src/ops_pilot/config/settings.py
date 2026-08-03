@@ -81,9 +81,7 @@ class Settings:
 
     @property
     def langfuse_enabled(self) -> bool:
-        return bool(
-            self.langfuse_public_key and self.langfuse_secret_key and self.langfuse_base_url
-        )
+        return bool(self.langfuse_public_key and self.langfuse_secret_key and self.langfuse_base_url)
 
     @property
     def tracing_enabled(self) -> bool:
@@ -139,23 +137,14 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         open_sandbox_use_server_proxy=open_sandbox_use_server_proxy
         if open_sandbox_use_server_proxy is not None
         else True,
-        open_sandbox_disable_metrics=open_sandbox_disable_metrics
-        if open_sandbox_disable_metrics is not None
-        else True,
-        open_sandbox_image=_env_text(source, "OPEN_SANDBOX_IMAGE", "python:3.11")
-        or "python:3.11",
+        open_sandbox_disable_metrics=open_sandbox_disable_metrics if open_sandbox_disable_metrics is not None else True,
+        open_sandbox_image=_env_text(source, "OPEN_SANDBOX_IMAGE", "python:3.11") or "python:3.11",
         open_sandbox_timeout_seconds=_optional_int(source, "OPEN_SANDBOX_TIMEOUT_SECONDS") or 600,
-        open_sandbox_ready_timeout_seconds=_optional_int(
-            source, "OPEN_SANDBOX_READY_TIMEOUT_SECONDS"
-        )
-        or 240,
+        open_sandbox_ready_timeout_seconds=_optional_int(source, "OPEN_SANDBOX_READY_TIMEOUT_SECONDS") or 240,
         open_sandbox_cpu_limit=_env_text(source, "OPEN_SANDBOX_CPU_LIMIT", "250m") or "250m",
-        open_sandbox_memory_limit=_env_text(source, "OPEN_SANDBOX_MEMORY_LIMIT", "256Mi")
-        or "256Mi",
-        open_sandbox_cpu_request=_env_text(source, "OPEN_SANDBOX_CPU_REQUEST", "100m")
-        or "100m",
-        open_sandbox_memory_request=_env_text(source, "OPEN_SANDBOX_MEMORY_REQUEST", "128Mi")
-        or "128Mi",
+        open_sandbox_memory_limit=_env_text(source, "OPEN_SANDBOX_MEMORY_LIMIT", "256Mi") or "256Mi",
+        open_sandbox_cpu_request=_env_text(source, "OPEN_SANDBOX_CPU_REQUEST", "100m") or "100m",
+        open_sandbox_memory_request=_env_text(source, "OPEN_SANDBOX_MEMORY_REQUEST", "128Mi") or "128Mi",
     )
 
 

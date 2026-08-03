@@ -66,6 +66,4 @@ def test_tunnel_client_config_builds_websocket_url() -> None:
         mcp_command="python server.py",
     )
 
-    assert config.websocket_url() == (
-        "wss://ops.example.com/api/dev/mcp-tunnels/local%20dev/client?token=secret+token"
-    )
+    assert config.websocket_url() == ("wss://ops.example.com/api/dev/mcp-tunnels/local%20dev/client?token=secret+token")

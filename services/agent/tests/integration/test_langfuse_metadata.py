@@ -29,4 +29,3 @@ def test_trace_metadata_contains_protocol_ids():
     assert metadata["protocol"] == "a2a"
     assert metadata["thread_id"] == "thread-1"
     assert metadata["a2a_task_id"] == "task-1"
-

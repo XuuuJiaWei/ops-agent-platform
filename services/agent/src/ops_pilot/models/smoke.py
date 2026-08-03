@@ -68,4 +68,3 @@ def _summarize_response(response: Any) -> str:
     content = getattr(response, "content", response)
     text = str(content).replace("\n", " ").strip()
     return text[:200]
-

@@ -88,9 +88,7 @@ class LocalBridgeManager:
                 detail = handle.last_error or "Local MCP bridge stopped before connecting."
                 raise RuntimeError(detail)
             if asyncio.get_running_loop().time() >= deadline:
-                raise TimeoutError(
-                    f"Timed out waiting for local MCP bridge '{tunnel_id}' to connect."
-                )
+                raise TimeoutError(f"Timed out waiting for local MCP bridge '{tunnel_id}' to connect.")
             await asyncio.sleep(0.1)
 
     def status(self) -> dict[str, Any]:
@@ -132,9 +130,7 @@ class LocalBridgeManager:
         except Exception as exc:  # noqa: BLE001 - stopping should be best effort.
             handle.last_error = _public_error(exc, handle.config.token)
         try:
-            await self._tunnel_manager.get(tunnel_id).fail_pending(
-                RuntimeError("Local MCP bridge stopped.")
-            )
+            await self._tunnel_manager.get(tunnel_id).fail_pending(RuntimeError("Local MCP bridge stopped."))
         except Exception:
             pass
 

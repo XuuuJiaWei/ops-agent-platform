@@ -32,6 +32,5 @@ def create_agent_runtime(
             )
         )
     raise RuntimeError(
-        "create_agent_runtime() cannot run inside an active event loop; "
-        "use create_agent_runtime_async() instead."
+        "create_agent_runtime() cannot run inside an active event loop; use create_agent_runtime_async() instead."
     )

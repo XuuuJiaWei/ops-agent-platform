@@ -37,9 +37,7 @@ def main() -> int:
         default=[],
         help="Optionally keep only exact metric IDs from the descriptor response.",
     )
-    parser.add_argument(
-        "--dry-run", action="store_true", help="Print query payloads without calling Dynatrace"
-    )
+    parser.add_argument("--dry-run", action="store_true", help="Print query payloads without calling Dynatrace")
     parser.add_argument(
         "--response-file",
         help="Optional metric descriptor/probe response JSON file. Use '-' for stdin.",
@@ -73,10 +71,7 @@ def build_discovery_plan(args: argparse.Namespace) -> dict[str, Any]:
                 },
             }
         ],
-        "note": (
-            "Default execution calls Dynatrace metric descriptors directly and follows "
-            "nextPageKey pagination."
-        ),
+        "note": ("Default execution calls Dynatrace metric descriptors directly and follows nextPageKey pagination."),
     }
 
 
@@ -102,9 +97,7 @@ class DynatraceClient:
             "DYNATRACE_API_TOKEN",
         )
         if not token:
-            raise SystemExit(
-                f"Missing Dynatrace token. Set DT_{env_key(environment_alias)}_TOKEN."
-            )
+            raise SystemExit(f"Missing Dynatrace token. Set DT_{env_key(environment_alias)}_TOKEN.")
         endpoint = config.get("apiEndpointUrl") or config.get("dynatraceUrl")
         environment_id = config.get("environmentId")
         if not endpoint:
@@ -193,9 +186,7 @@ def parse_metrics(args: argparse.Namespace, raw_payload: Any) -> dict[str, Any]:
     merged = merge_metric_sources(descriptors, query_metrics)
     if args.metrics:
         selected = set(args.metrics)
-        merged = {
-            metric_id: metric for metric_id, metric in merged.items() if metric_id in selected
-        }
+        merged = {metric_id: metric for metric_id, metric in merged.items() if metric_id in selected}
     categories = defaultdict(list)
     for metric in sorted(merged.values(), key=lambda item: item["metricId"]):
         categories[categorize_metric(metric["metricId"])].append(metric)
@@ -446,10 +437,7 @@ def load_dynatrace_config(environment_alias: str) -> dict[str, str]:
     alias_key = env_key(environment_alias)
     config = {
         "alias": environment_alias,
-        "apiEndpointUrl": first_env(
-            f"DT_{alias_key}_URL", f"DT_{alias_key}_API_ENDPOINT_URL"
-        )
-        or "",
+        "apiEndpointUrl": first_env(f"DT_{alias_key}_URL", f"DT_{alias_key}_API_ENDPOINT_URL") or "",
         "environmentId": first_env(f"DT_{alias_key}_ENVIRONMENT_ID") or "",
         "apiToken": first_env(f"DT_{alias_key}_TOKEN") or "",
     }
@@ -495,7 +483,7 @@ def parse_simple_dt_config(content: str) -> list[dict[str, str]]:
                 continue
         if ":" in line and current is not None:
             key, value = line.split(":", 1)
-            current[key.strip()] = value.strip().strip('"\'')
+            current[key.strip()] = value.strip().strip("\"'")
     if current:
         entries.append(current)
     return entries

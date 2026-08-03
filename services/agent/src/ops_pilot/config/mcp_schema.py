@@ -97,8 +97,7 @@ class MCPConfig:
             raise MCPConfigError("MCP config field 'mcpServers' must be an object.")
         return cls(
             servers=tuple(
-                MCPServerConfig.from_mapping(str(name), server_data)
-                for name, server_data in raw_servers.items()
+                MCPServerConfig.from_mapping(str(name), server_data) for name, server_data in raw_servers.items()
             )
         )
 
@@ -144,8 +143,6 @@ def _string_mapping(name: str, field_name: str, value: Any) -> Mapping[str, str]
     parsed: dict[str, str] = {}
     for key, item in value.items():
         if not isinstance(key, str) or not isinstance(item, str):
-            raise MCPConfigError(
-                f"MCP server '{name}' field '{field_name}' must contain only string keys/values."
-            )
+            raise MCPConfigError(f"MCP server '{name}' field '{field_name}' must contain only string keys/values.")
         parsed[key] = item
     return parsed

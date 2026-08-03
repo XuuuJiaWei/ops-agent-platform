@@ -67,4 +67,3 @@ def build_runnable_config(
     if effective_configurable:
         config["configurable"] = effective_configurable
     return config
-

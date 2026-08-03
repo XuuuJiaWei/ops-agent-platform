@@ -29,10 +29,7 @@ def create_callback_handler(settings: Settings) -> TracingSetup:
     if missing:
         return TracingSetup(
             enabled=False,
-            warning=(
-                "Langfuse tracing disabled; missing required environment values: "
-                + ", ".join(missing)
-            ),
+            warning=("Langfuse tracing disabled; missing required environment values: " + ", ".join(missing)),
         )
 
     try:
@@ -64,4 +61,3 @@ def _missing_langfuse_keys(settings: Settings) -> tuple[str, ...]:
     if not settings.langfuse_base_url:
         missing.append("LANGFUSE_BASE_URL")
     return tuple(missing)
-

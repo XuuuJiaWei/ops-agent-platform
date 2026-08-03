@@ -114,9 +114,7 @@ def _load_opensandbox_symbols() -> _OpenSandboxSymbols:
         from opensandbox import SandboxSync
         from opensandbox.config import ConnectionConfigSync
     except ImportError as exc:
-        raise RuntimeError(
-            "OpenSandbox support is not installed. Run 'uv sync' in services/agent."
-        ) from exc
+        raise RuntimeError("OpenSandbox support is not installed. Run 'uv sync' in services/agent.") from exc
     return _OpenSandboxSymbols(
         backend_cls=OpensandboxBackend,
         sandbox_cls=SandboxSync,
@@ -126,9 +124,7 @@ def _load_opensandbox_symbols() -> _OpenSandboxSymbols:
 
 def _dynatrace_sandbox_env() -> dict[str, str]:
     values = {
-        key: value
-        for key, value in os.environ.items()
-        if key.startswith("DT_") and key.endswith("_TOKEN") and value
+        key: value for key, value in os.environ.items() if key.startswith("DT_") and key.endswith("_TOKEN") and value
     }
     for entry in _read_dt_config_entries(REPO_ROOT / "config" / "dt-config.yaml"):
         alias = entry.get("alias")
@@ -161,7 +157,7 @@ def _read_dt_config_entries(path: Path) -> list[dict[str, str]]:
                 continue
         if ":" in line and current is not None:
             key, value = line.split(":", 1)
-            current[key.strip()] = value.strip().strip('"\'')
+            current[key.strip()] = value.strip().strip("\"'")
     if current:
         entries.append(current)
     return entries

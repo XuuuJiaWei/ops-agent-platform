@@ -88,9 +88,7 @@ async def _load_single_server(server: MCPServerConfig) -> list[Any]:
     try:
         from langchain_mcp_adapters.client import MultiServerMCPClient
     except ImportError as exc:
-        raise MCPLoadError(
-            "langchain-mcp-adapters is not installed. Run 'uv sync' in services/agent."
-        ) from exc
+        raise MCPLoadError("langchain-mcp-adapters is not installed. Run 'uv sync' in services/agent.") from exc
 
     client = MultiServerMCPClient({server.name: server.to_client_connection()})
     return list(await client.get_tools(server_name=server.name))

@@ -137,9 +137,7 @@ async def build_agent_runtime(
     )
 
 
-def _resolve_backend_skill_paths(
-    local_skills: tuple[str, ...], sandbox: SandboxRuntime | None
-) -> tuple[str, ...]:
+def _resolve_backend_skill_paths(local_skills: tuple[str, ...], sandbox: SandboxRuntime | None) -> tuple[str, ...]:
     if sandbox is None or not local_skills:
         return local_skills
     sync_result = sync_skill_paths_to_backend(local_skills, sandbox.backend)

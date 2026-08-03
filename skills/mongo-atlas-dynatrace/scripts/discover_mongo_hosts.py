@@ -99,9 +99,7 @@ def main() -> int:
     parser.add_argument("--to", dest="to_time", default=DEFAULT_TO)
     parser.add_argument("--resolution", default=DEFAULT_RESOLUTION)
     parser.add_argument("--metric", action="append", dest="metrics", default=[])
-    parser.add_argument(
-        "--dry-run", action="store_true", help="Print query payloads without calling Dynatrace"
-    )
+    parser.add_argument("--dry-run", action="store_true", help="Print query payloads without calling Dynatrace")
     parser.add_argument(
         "--response-file",
         help="Optional combined Dynatrace response JSON file. Use '-' to read stdin explicitly.",
@@ -176,9 +174,7 @@ class DynatraceClient:
             "DYNATRACE_API_TOKEN",
         )
         if not token:
-            raise SystemExit(
-                f"Missing Dynatrace token. Set DT_{env_key(environment_alias)}_TOKEN."
-            )
+            raise SystemExit(f"Missing Dynatrace token. Set DT_{env_key(environment_alias)}_TOKEN.")
         endpoint = config.get("apiEndpointUrl") or config.get("dynatraceUrl")
         environment_id = config.get("environmentId")
         if not endpoint:
@@ -236,8 +232,7 @@ def build_role_probes(args: argparse.Namespace) -> dict[str, Any]:
             for metric in metrics
         ],
         "notes": [
-            "Use these host-level probes only if the host-list response has no explicit "
-            "role/state dimension.",
+            "Use these host-level probes only if the host-list response has no explicit role/state dimension.",
             "The process.type_name dimension can provide primary/secondary evidence when "
             "Dynatrace exports it for MongoDB Atlas process metrics.",
         ],
@@ -271,15 +266,9 @@ def parse_responses(args: argparse.Namespace, raw_payload: Any) -> dict[str, Any
         consume_metrics(role_payload, records, db_name=db_name, host_list=False, source_label=label)
 
     infer_primary_from_secondary_evidence(records)
-    hosts = [
-        serialize_record(record) for record in sorted(records.values(), key=lambda item: item.host)
-    ]
-    primary_hosts = [
-        host["host"] for host in hosts if host["role"] in {"primary", "primary_candidate"}
-    ]
-    secondary_hosts = [
-        host["host"] for host in hosts if host["role"] in {"secondary", "secondary_candidate"}
-    ]
+    hosts = [serialize_record(record) for record in sorted(records.values(), key=lambda item: item.host)]
+    primary_hosts = [host["host"] for host in hosts if host["role"] in {"primary", "primary_candidate"}]
+    secondary_hosts = [host["host"] for host in hosts if host["role"] in {"secondary", "secondary_candidate"}]
     unknown_hosts = [host["host"] for host in hosts if host["role"] == "unknown"]
 
     return {
@@ -302,9 +291,7 @@ def split_input_payload(payload: Any) -> tuple[Any, dict[str, Any]]:
         host_payload = payload.get("host_list") or payload.get("host_response") or payload
         role_payloads = payload.get("role_metrics") or payload.get("role_responses") or {}
         if isinstance(role_payloads, list):
-            role_payloads = {
-                f"role_probe_{index}": item for index, item in enumerate(role_payloads)
-            }
+            role_payloads = {f"role_probe_{index}": item for index, item in enumerate(role_payloads)}
         if not isinstance(role_payloads, dict):
             role_payloads = {}
         return host_payload, role_payloads
@@ -360,19 +347,13 @@ def apply_role_evidence(
             return
 
     if any(token in lowered_metric for token in ("replication", "oplog", "lag")):
-        record.set_role(
-            "secondary_candidate", "medium", f"secondary-like metric present: {metric_id}"
-        )
+        record.set_role("secondary_candidate", "medium", f"secondary-like metric present: {metric_id}")
 
 
 def infer_primary_from_secondary_evidence(records: dict[str, HostRecord]) -> None:
     if not records:
         return
-    secondary_like = {
-        host
-        for host, record in records.items()
-        if record.role in {"secondary", "secondary_candidate"}
-    }
+    secondary_like = {host for host, record in records.items() if record.role in {"secondary", "secondary_candidate"}}
     unknown = [record for host, record in records.items() if host not in secondary_like]
     if len(unknown) == 1 and secondary_like:
         unknown[0].set_role(
@@ -468,8 +449,7 @@ def next_actions(hosts: list[dict[str, Any]]) -> list[str]:
         return [
             "Role probes did not find explicit replica-state evidence. Check Dynatrace "
             "metric availability or widen the timeframe.",
-            "If an explicit replica-state metric is available, prefer it over "
-            "replication-lag inference.",
+            "If an explicit replica-state metric is available, prefer it over replication-lag inference.",
         ]
     return []
 
@@ -519,10 +499,7 @@ def load_dynatrace_config(environment_alias: str) -> dict[str, str]:
     alias_key = env_key(environment_alias)
     config = {
         "alias": environment_alias,
-        "apiEndpointUrl": first_env(
-            f"DT_{alias_key}_URL", f"DT_{alias_key}_API_ENDPOINT_URL"
-        )
-        or "",
+        "apiEndpointUrl": first_env(f"DT_{alias_key}_URL", f"DT_{alias_key}_API_ENDPOINT_URL") or "",
         "environmentId": first_env(f"DT_{alias_key}_ENVIRONMENT_ID") or "",
         "apiToken": first_env(f"DT_{alias_key}_TOKEN") or "",
     }
@@ -568,7 +545,7 @@ def parse_simple_dt_config(content: str) -> list[dict[str, str]]:
                 continue
         if ":" in line and current is not None:
             key, value = line.split(":", 1)
-            current[key.strip()] = value.strip().strip('"\'')
+            current[key.strip()] = value.strip().strip("\"'")
     if current:
         entries.append(current)
     return entries
