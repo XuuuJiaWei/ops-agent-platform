@@ -1,25 +1,21 @@
+import type { Thread as CopilotThread } from "@copilotkit/react-core/v2";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-export type ConversationThread = {
-  id: string;
-  agentId: string;
-  name: string | null;
-  archived: boolean;
-  createdAt: string;
-  updatedAt: string;
-  lastRunAt?: string;
-};
+export type ConversationThread = CopilotThread;
 
 export type ConversationThreadsState = {
   archiveThread: (threadId: string) => Promise<void>;
-  createThread: () => ConversationThread;
   deleteThread: (threadId: string) => Promise<void>;
   error: Error | null;
   fetchMoreThreads: () => void;
   hasMoreThreads: boolean;
   isFetchingMoreThreads: boolean;
   isLoading: boolean;
+  isMutating: boolean;
   refetchThreads: () => void;
+  setThreadTitle: (threadId: string, title: string) => void;
+  source: "copilot" | "local";
+  startNewThread: () => ConversationThread;
   threads: ConversationThread[];
   touchThread: (threadId: string) => void;
 };
@@ -35,14 +31,18 @@ type StoredThreadPayload = {
   threads: ConversationThread[];
 };
 
+export function createConversationThreadId(): string {
+  return `thread-${crypto.randomUUID()}`;
+}
+
 export function useConversationThreads({ agentId }: UseConversationThreadsInput): ConversationThreadsState {
   const storageKey = useMemo(() => `ops-agent-platform:threads:${agentId}`, [agentId]);
-  const [threads, setThreads] = useState<ConversationThread[]>(() => readLocalThreads(storageKey));
+  const [localThreads, setLocalThreads] = useState<ConversationThread[]>(() => readLocalThreads(storageKey));
 
   useEffect(() => {
     function handleStorage(event: StorageEvent) {
       if (event.key === storageKey) {
-        setThreads(readLocalThreads(storageKey));
+        setLocalThreads(readLocalThreads(storageKey));
       }
     }
 
@@ -50,9 +50,9 @@ export function useConversationThreads({ agentId }: UseConversationThreadsInput)
     return () => window.removeEventListener("storage", handleStorage);
   }, [storageKey]);
 
-  const updateThreads = useCallback(
+  const updateLocalThreads = useCallback(
     (updater: (current: ConversationThread[]) => ConversationThread[]) => {
-      setThreads((current) => {
+      setLocalThreads((current) => {
         const next = sortThreads(updater(current));
         writeLocalThreads(storageKey, next);
         return next;
@@ -61,64 +61,109 @@ export function useConversationThreads({ agentId }: UseConversationThreadsInput)
     [storageKey],
   );
 
-  const createThread = useCallback(() => {
-    const now = new Date().toISOString();
-    const thread: ConversationThread = {
-      id: `thread-${crypto.randomUUID()}`,
-      agentId,
-      name: "New conversation",
-      archived: false,
-      createdAt: now,
-      updatedAt: now,
-      lastRunAt: now,
-    };
-
-    updateThreads((current) => [thread, ...current.filter((item) => item.id !== thread.id)]);
+  const startNewThread = useCallback(() => {
+    const thread = createLocalThread(agentId);
+    updateLocalThreads((current) => [thread, ...current.filter((item) => item.id !== thread.id)]);
     return thread;
-  }, [agentId, updateThreads]);
+  }, [agentId, updateLocalThreads]);
 
   const touchThread = useCallback(
     (threadId: string) => {
       const now = new Date().toISOString();
-      updateThreads((current) =>
-        current.map((thread) => (thread.id === threadId ? { ...thread, updatedAt: now, lastRunAt: now } : thread)),
-      );
+      updateLocalThreads((current) => {
+        const existing = current.find((thread) => thread.id === threadId);
+        if (!existing) {
+          return [createLocalThread(agentId, threadId, now), ...current];
+        }
+        return current.map((thread) => (thread.id === threadId ? { ...thread, updatedAt: now, lastRunAt: now } : thread));
+      });
     },
-    [updateThreads],
+    [agentId, updateLocalThreads],
   );
+
+  const visibleLocalThreads = useMemo(() => localThreads.filter((thread) => !thread.archived), [localThreads]);
 
   const archiveThread = useCallback(
     async (threadId: string) => {
-      updateThreads((current) =>
-        current.map((thread) =>
-          thread.id === threadId ? { ...thread, archived: true, updatedAt: new Date().toISOString() } : thread,
-        ),
+      updateLocalThreads((current) =>
+        current.map((thread) => (thread.id === threadId ? { ...thread, archived: true, updatedAt: new Date().toISOString() } : thread)),
       );
     },
-    [updateThreads],
+    [updateLocalThreads],
   );
 
   const deleteThread = useCallback(
     async (threadId: string) => {
-      updateThreads((current) => current.filter((thread) => thread.id !== threadId));
+      updateLocalThreads((current) => current.filter((thread) => thread.id !== threadId));
     },
-    [updateThreads],
+    [updateLocalThreads],
   );
 
-  const refetchThreads = useCallback(() => setThreads(readLocalThreads(storageKey)), [storageKey]);
+  const refetchThreads = useCallback(() => {
+    setLocalThreads(readLocalThreads(storageKey));
+  }, [storageKey]);
+
+  const setThreadTitle = useCallback(
+    (threadId: string, title: string) => {
+      const normalizedTitle = normalizeThreadTitle(title);
+      if (!normalizedTitle) {
+        return;
+      }
+
+      const now = new Date().toISOString();
+      updateLocalThreads((current) => {
+        const existing = current.find((thread) => thread.id === threadId);
+        if (!existing) {
+          return [{ ...createLocalThread(agentId, threadId, now), name: normalizedTitle }, ...current];
+        }
+
+        if (existing.name === normalizedTitle) {
+          return current;
+        }
+
+        return current.map((thread) =>
+          thread.id === threadId ? { ...thread, name: normalizedTitle, updatedAt: now, lastRunAt: now } : thread,
+        );
+      });
+    },
+    [agentId, updateLocalThreads],
+  );
 
   return {
     archiveThread,
-    createThread,
     deleteThread,
     error: null,
     fetchMoreThreads: () => undefined,
     hasMoreThreads: false,
     isFetchingMoreThreads: false,
     isLoading: false,
+    isMutating: false,
     refetchThreads,
-    threads: threads.filter((thread) => !thread.archived),
+    setThreadTitle,
+    source: "local",
+    startNewThread,
+    threads: visibleLocalThreads,
     touchThread,
+  };
+}
+
+function normalizeThreadTitle(title: string): string {
+  const normalized = title.replace(/\s+/g, " ").trim();
+  if (normalized.length <= 80) {
+    return normalized;
+  }
+  return `${normalized.slice(0, 77).trimEnd()}...`;
+}
+
+function createLocalThread(agentId: string, threadId = createConversationThreadId(), now = new Date().toISOString()): ConversationThread {
+  return {
+    id: threadId,
+    agentId,
+    name: "New conversation",
+    archived: false,
+    createdAt: now,
+    updatedAt: now,
+    lastRunAt: now,
   };
 }
 

@@ -1,12 +1,22 @@
 import {
   CopilotChat,
+  CopilotChatAssistantMessage,
   CopilotChatConfigurationProvider,
+  type CopilotChatAssistantMessageProps,
 } from "@copilotkit/react-core/v2";
 import { LayoutDashboard, MessageSquareText, PanelLeftOpen } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AgentNativeAppView } from "./AgentNativeAppView";
+import { LocalThreadMessagePersistence } from "./LocalThreadMessagePersistence";
 import { ThreadSidebar } from "./ThreadSidebar";
-import { useConversationThreads } from "./conversationThreads";
+import {
+  appConfigStorageKey,
+  readPersistedAppConfig,
+  writePersistedAppConfig,
+  type PersistedAppConfig,
+  type PersistedThreadSource,
+} from "./appConfigPersistence";
+import { createConversationThreadId, useConversationThreads } from "./conversationThreads";
 import type { BrowserEnv } from "@/lib/env";
 
 type AppShellProps = {
@@ -16,16 +26,31 @@ type AppShellProps = {
 type SidebarView = "conversations" | "settings";
 type MainView = "chat" | "app";
 const viewSwitcherFrameClass = import.meta.env.DEV ? "relative z-[2147483647] ml-auto mr-14" : "relative z-40 ml-auto";
+const chatMessageView = {
+  assistantMessage: Object.assign(AssistantMessageWithTerminalToolbar, {
+    CopyButton: CopilotChatAssistantMessage.CopyButton,
+    MarkdownRenderer: CopilotChatAssistantMessage.MarkdownRenderer,
+    ReadAloudButton: CopilotChatAssistantMessage.ReadAloudButton,
+    RegenerateButton: CopilotChatAssistantMessage.RegenerateButton,
+    ThumbsDownButton: CopilotChatAssistantMessage.ThumbsDownButton,
+    ThumbsUpButton: CopilotChatAssistantMessage.ThumbsUpButton,
+    Toolbar: CopilotChatAssistantMessage.Toolbar,
+    ToolbarButton: CopilotChatAssistantMessage.ToolbarButton,
+  }),
+};
 
 export function AppShell({ env }: AppShellProps) {
-  const [activeThreadId, setActiveThreadId] = useState<string | undefined>();
-  const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true);
+  const initialConfig = useMemo(() => normalizeInitialConfig(readPersistedAppConfig(env.assistantId)), [env.assistantId]);
+  const [activeThreadId, setActiveThreadId] = useState<string>(initialConfig.activeThreadId);
+  const [activeThreadSource, setActiveThreadSource] = useState<PersistedThreadSource>(initialConfig.activeThreadSource);
+  const [hasExplicitThreadId, setHasExplicitThreadId] = useState(initialConfig.hasExplicitThreadId);
+  const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(initialConfig.desktopSidebarOpen);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [sidebarView, setSidebarView] = useState<SidebarView>("conversations");
-  const [mainView, setMainView] = useState<MainView>("chat");
+  const [sidebarView, setSidebarView] = useState<SidebarView>(initialConfig.sidebarView);
+  const [mainView, setMainView] = useState<MainView>(initialConfig.mainView);
   const threadsState = useConversationThreads({ agentId: env.assistantId });
+  const { setThreadTitle, touchThread } = threadsState;
 
-  const chatKey = activeThreadId ?? "new";
   const chatLabels = useMemo(
     () => ({
       chatInputPlaceholder: "Ask me anything...",
@@ -34,9 +59,45 @@ export function AppShell({ env }: AppShellProps) {
     [],
   );
 
+  useEffect(() => {
+    writePersistedAppConfig(env.assistantId, {
+      activeThreadId,
+      activeThreadSource,
+      desktopSidebarOpen,
+      hasExplicitThreadId,
+      mainView,
+      sidebarView,
+    });
+  }, [activeThreadId, activeThreadSource, desktopSidebarOpen, env.assistantId, hasExplicitThreadId, mainView, sidebarView]);
+
+  useEffect(() => {
+    touchThread(activeThreadId);
+  }, [activeThreadId, touchThread]);
+
+  useEffect(() => {
+    function handleStorage(event: StorageEvent) {
+      if (event.key !== appConfigStorageKey(env.assistantId)) {
+        return;
+      }
+
+      const nextConfig = normalizeInitialConfig(readPersistedAppConfig(env.assistantId));
+      setActiveThreadId(nextConfig.activeThreadId);
+      setActiveThreadSource(nextConfig.activeThreadSource);
+      setHasExplicitThreadId(nextConfig.hasExplicitThreadId);
+      setDesktopSidebarOpen(nextConfig.desktopSidebarOpen);
+      setSidebarView(nextConfig.sidebarView);
+      setMainView(nextConfig.mainView);
+    }
+
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, [env.assistantId]);
+
   function startNewThread() {
-    const thread = threadsState.createThread();
+    const thread = threadsState.startNewThread();
     setActiveThreadId(thread.id);
+    setActiveThreadSource(threadsState.source);
+    setHasExplicitThreadId(false);
     setSidebarView("conversations");
     setMobileSidebarOpen(false);
   }
@@ -44,6 +105,8 @@ export function AppShell({ env }: AppShellProps) {
   function selectThread(threadId: string) {
     threadsState.touchThread(threadId);
     setActiveThreadId(threadId);
+    setActiveThreadSource(threadsState.source);
+    setHasExplicitThreadId(true);
     setSidebarView("conversations");
     setMobileSidebarOpen(false);
   }
@@ -51,7 +114,10 @@ export function AppShell({ env }: AppShellProps) {
   async function deleteThread(threadId: string) {
     await threadsState.deleteThread(threadId);
     if (activeThreadId === threadId) {
-      setActiveThreadId(undefined);
+      const thread = threadsState.startNewThread();
+      setActiveThreadId(thread.id);
+      setActiveThreadSource(threadsState.source);
+      setHasExplicitThreadId(false);
     }
   }
 
@@ -61,7 +127,12 @@ export function AppShell({ env }: AppShellProps) {
   }
 
   return (
-    <CopilotChatConfigurationProvider agentId={env.assistantId} labels={chatLabels} threadId={activeThreadId}>
+    <CopilotChatConfigurationProvider
+      agentId={env.assistantId}
+      hasExplicitThreadId={activeThreadSource === "copilot" && hasExplicitThreadId}
+      labels={chatLabels}
+      threadId={activeThreadId}
+    >
       <main className="flex h-dvh min-h-screen bg-[var(--surface-page)]">
         <ThreadSidebar
           activeThreadId={activeThreadId}
@@ -95,7 +166,7 @@ export function AppShell({ env }: AppShellProps) {
             <div className="min-w-0 pl-10 md:pl-0">
               <p className="truncate text-sm font-semibold text-[var(--text-primary)]">Support Desk</p>
               <p className="truncate font-mono text-[11px] text-[var(--text-secondary)]">
-                {activeThreadId ?? "new conversation"}
+                {hasExplicitThreadId ? activeThreadId : "new conversation"}
               </p>
             </div>
             <div className={viewSwitcherFrameClass}>
@@ -104,7 +175,13 @@ export function AppShell({ env }: AppShellProps) {
           </header>
 
           <div className="min-h-0 flex-1">
-            {mainView === "chat" ? <CopilotChat className="h-full" key={chatKey} /> : null}
+            {mainView === "chat" ? <CopilotChat className="h-full" messageView={chatMessageView} /> : null}
+            <LocalThreadMessagePersistence
+              agentId={env.assistantId}
+              enabled={activeThreadSource === "local"}
+              onTitleCandidate={setThreadTitle}
+              threadId={activeThreadId}
+            />
             {/* Keep the App view mounted so its agent-state subscription stays live
                 even while the Chat tab is shown; hide it instead of unmounting. */}
             <div className={mainView === "app" ? "h-full" : "hidden"}>
@@ -115,6 +192,37 @@ export function AppShell({ env }: AppShellProps) {
       </main>
     </CopilotChatConfigurationProvider>
   );
+}
+
+function normalizeInitialConfig(config: PersistedAppConfig): PersistedAppConfig & { activeThreadId: string } {
+  const activeThreadId = config.activeThreadId ?? createConversationThreadId();
+  return {
+    ...config,
+    activeThreadId,
+    activeThreadSource: config.activeThreadSource,
+    hasExplicitThreadId: Boolean(config.activeThreadId && config.hasExplicitThreadId),
+  };
+}
+
+function AssistantMessageWithTerminalToolbar(props: CopilotChatAssistantMessageProps) {
+  const toolbarVisible = !props.isRunning && isTerminalVisibleAssistantMessage(props);
+  return <CopilotChatAssistantMessage {...props} toolbarVisible={toolbarVisible} />;
+}
+
+function isTerminalVisibleAssistantMessage({ message, messages }: CopilotChatAssistantMessageProps): boolean {
+  if (!messages || messages.length === 0) {
+    return true;
+  }
+
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const candidate = messages[index];
+    if (candidate.role === "tool") {
+      continue;
+    }
+    return candidate.role === "assistant" && candidate.id === message.id;
+  }
+
+  return false;
 }
 
 function ViewSwitcher({ onChange, value }: { onChange: (view: MainView) => void; value: MainView }) {

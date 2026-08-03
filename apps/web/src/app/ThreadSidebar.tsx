@@ -105,7 +105,7 @@ export function ThreadSidebar({
             threadsState={threadsState}
           />
         ) : (
-          <SettingsPanel env={env} onBack={() => onViewChange("conversations")} />
+          <SettingsPanel conversationStore={threadsState.source} env={env} onBack={() => onViewChange("conversations")} />
         )}
       </aside>
     </>
@@ -301,7 +301,7 @@ function SettingsDock({ onOpenSettings }: { onOpenSettings: () => void }) {
   );
 }
 
-function SettingsPanel({ env, onBack }: { env: BrowserEnv; onBack: () => void }) {
+function SettingsPanel({ conversationStore, env, onBack }: { conversationStore: "copilot" | "local"; env: BrowserEnv; onBack: () => void }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-center gap-2 px-4 pb-4">
@@ -322,7 +322,7 @@ function SettingsPanel({ env, onBack }: { env: BrowserEnv; onBack: () => void })
           <SectionHeader icon={<Wrench aria-hidden="true" className="size-4" />} title="Runtime" />
           <SettingRow label="Assistant" value={env.assistantId} />
           <SettingRow label="Runtime URL" value={env.copilotRuntimeUrl} />
-          <SettingRow label="Conversation Store" value="Local browser storage" />
+          <SettingRow label="Conversation Store" value={conversationStore === "copilot" ? "CopilotKit threads" : "Local browser storage"} />
         </section>
 
         <section className="mb-5">
