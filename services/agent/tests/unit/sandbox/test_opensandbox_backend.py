@@ -53,6 +53,11 @@ def test_create_sandbox_runtime_builds_opensandbox_backend(monkeypatch) -> None:
             connection_config_cls=FakeConnectionConfig,
         ),
     )
+    monkeypatch.setattr(
+        opensandbox_backend,
+        "_dynatrace_sandbox_env",
+        lambda: {"DT_FRANKFURT_TOKEN": "token", "DT_FRANKFURT_URL": "https://example.test"},
+    )
     settings = load_settings(
         {
             "OPEN_SANDBOX_DOMAIN": "opensandbox.example.test",
@@ -72,6 +77,10 @@ def test_create_sandbox_runtime_builds_opensandbox_backend(monkeypatch) -> None:
     assert FakeSandbox.created_kwargs["resource_requests"] == {
         "cpu": "100m",
         "memory": "128Mi",
+    }
+    assert FakeSandbox.created_kwargs["env"] == {
+        "DT_FRANKFURT_TOKEN": "token",
+        "DT_FRANKFURT_URL": "https://example.test",
     }
     assert FakeSandbox.created_kwargs["timeout"].total_seconds() == 600
     assert FakeSandbox.created_kwargs["ready_timeout"].total_seconds() == 240

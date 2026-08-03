@@ -32,7 +32,8 @@ def sync_skill_paths_to_backend(
     for index, source in enumerate(paths):
         plans = _build_sync_plans(Path(source), index, remote_root)
         for plan in plans:
-            remote_sources.append(plan.remote_source)
+            if plan.remote_source not in remote_sources:
+                remote_sources.append(plan.remote_source)
             uploads.extend(_collect_uploads(plan.local_root, plan.remote_root))
 
     if uploads:
@@ -64,10 +65,22 @@ def _build_sync_plans(source: Path, index: int, remote_root: str) -> list[_SyncP
     if (resolved / "SKILL.md").exists():
         return [_build_single_skill_plan(resolved, index, remote_root)]
 
-    source_dirs = sorted({skill_md.parent.parent for skill_md in resolved.rglob("SKILL.md")})
-    return [
-        _build_source_dir_plan(source_dir, index, remote_root, sub_index, len(source_dirs))
+    skill_dirs = sorted(
+        (skill_md.parent for skill_md in resolved.rglob("SKILL.md")),
+        key=lambda path: (*_path_depth_key(path.parent), str(path)),
+    )
+    source_dirs = sorted({skill_dir.parent for skill_dir in skill_dirs}, key=_path_depth_key)
+    source_roots = {
+        source_dir: _source_root_for(source_dir, index, remote_root, sub_index, len(source_dirs))
         for sub_index, source_dir in enumerate(source_dirs)
+    }
+    return [
+        _SyncPlan(
+            local_root=skill_dir,
+            remote_source=source_roots[skill_dir.parent],
+            remote_root=_remote_path(source_roots[skill_dir.parent], skill_dir.name),
+        )
+        for skill_dir in skill_dirs
     ]
 
 
@@ -80,12 +93,15 @@ def _build_single_skill_plan(skill_dir: Path, index: int, remote_root: str) -> _
     )
 
 
-def _build_source_dir_plan(
+def _source_root_for(
     source_dir: Path, index: int, remote_root: str, sub_index: int, total: int
-) -> _SyncPlan:
+) -> str:
     prefix = f"{index:02d}" if total == 1 else f"{index:02d}-{sub_index:02d}"
-    source_root = _remote_path(remote_root, f"{prefix}-{_safe_name(source_dir.name)}")
-    return _SyncPlan(local_root=source_dir, remote_source=source_root, remote_root=source_root)
+    return _remote_path(remote_root, f"{prefix}-{_safe_name(source_dir.name)}")
+
+
+def _path_depth_key(path: Path) -> tuple[int, str]:
+    return (len(path.parts), str(path))
 
 
 def _collect_uploads(local_root: Path, remote_root: str) -> list[tuple[str, bytes]]:

@@ -71,6 +71,26 @@ def test_sync_nested_skills_container_expands_to_discoverable_sources(tmp_path) 
     ]
 
 
+def test_sync_mixed_real_and_example_skills_uploads_only_skill_dirs(tmp_path) -> None:
+    real_skill = tmp_path / "skills" / "mongo-atlas-dynatrace"
+    real_skill.mkdir(parents=True)
+    (real_skill / "SKILL.md").write_text("---\nname: mongo\n---\n", encoding="utf-8")
+    example_skill = tmp_path / "skills" / "examples" / "ops-basic"
+    example_skill.mkdir(parents=True)
+    (example_skill / "SKILL.md").write_text("---\nname: ops-basic\n---\n", encoding="utf-8")
+    (tmp_path / "skills" / "README.md").write_text("not a skill\n", encoding="utf-8")
+    backend = FakeBackend()
+
+    result = sync_skill_paths_to_backend([tmp_path / "skills"], backend, remote_root="/remote")
+
+    assert result.remote_paths == ("/remote/00-00-skills", "/remote/00-01-examples")
+    uploaded_paths = {path for path, _ in backend.uploads}
+    assert uploaded_paths == {
+        "/remote/00-00-skills/mongo-atlas-dynatrace/SKILL.md",
+        "/remote/00-01-examples/ops-basic/SKILL.md",
+    }
+
+
 def test_sync_single_skill_directory_as_discoverable_source(tmp_path) -> None:
     skill_dir = tmp_path / "ops-basic"
     skill_dir.mkdir()
