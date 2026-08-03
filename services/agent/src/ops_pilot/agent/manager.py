@@ -85,8 +85,13 @@ class AgentRuntimeManager:
     async def reload(self) -> RuntimeReloadResult:
         return await self._reload(dict(self._dynamic_mcp_servers))
 
+    async def shutdown(self) -> None:
+        async with self._lock:
+            _close_runtime(self._runtime)
+
     async def _reload(self, dynamic_servers: dict[str, MCPServerConfig]) -> RuntimeReloadResult:
         async with self._lock:
+            previous_runtime = self._runtime
             dynamic_config = MCPConfig(servers=tuple(dynamic_servers.values()))
             next_runtime = await build_agent_runtime(
                 self.settings,
@@ -94,6 +99,7 @@ class AgentRuntimeManager:
                 use_memory_checkpointer=self._use_memory_checkpointer,
             )
             self._runtime = next_runtime
+            _close_runtime(previous_runtime)
             self._dynamic_mcp_servers = dynamic_servers
             self._generation += 1
             self._reloaded_at = _now_iso()
@@ -139,3 +145,9 @@ class CurrentGraphProxy:
 
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _close_runtime(runtime: Any) -> None:
+    close = getattr(runtime, "close", None)
+    if close is not None:
+        close()

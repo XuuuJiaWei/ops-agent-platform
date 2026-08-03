@@ -24,3 +24,31 @@ def test_load_settings_reads_optional_max_tokens():
     settings = load_settings({"SAP_AI_CORE_MAX_TOKENS": "4096"})
 
     assert settings.sap_max_tokens == 4096
+
+
+def test_load_settings_auto_enables_open_sandbox_when_credentials_exist():
+    settings = load_settings(
+        {
+            "OPEN_SANDBOX_DOMAIN": "opensandbox.example.test",
+            "OPEN_SANDBOX_API_KEY": "secret",
+        }
+    )
+
+    assert settings.open_sandbox_enabled is True
+    assert settings.open_sandbox_domain == "opensandbox.example.test"
+    assert settings.open_sandbox_api_key == "secret"
+    assert settings.open_sandbox_protocol == "https"
+    assert settings.open_sandbox_use_server_proxy is True
+    assert settings.open_sandbox_disable_metrics is True
+
+
+def test_load_settings_can_force_open_sandbox_disabled():
+    settings = load_settings(
+        {
+            "OPEN_SANDBOX_ENABLED": "false",
+            "OPEN_SANDBOX_DOMAIN": "opensandbox.example.test",
+            "OPEN_SANDBOX_API_KEY": "secret",
+        }
+    )
+
+    assert settings.open_sandbox_enabled is False

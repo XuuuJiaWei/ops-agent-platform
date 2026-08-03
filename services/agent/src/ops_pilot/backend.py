@@ -42,9 +42,14 @@ async def create_backend_app(
     async def _lifespan(app: FastAPI):
         yield
         # Read the manager from state at shutdown so a test-swapped fake is honored.
+        runtime_manager = getattr(app.state, "agent_runtime_manager", None)
+        runtime_shutdown = getattr(runtime_manager, "shutdown", None)
+        if runtime_shutdown is not None:
+            await runtime_shutdown()
         manager = getattr(app.state, "local_bridge_manager", None)
-        if manager is not None:
-            await manager.shutdown()
+        bridge_shutdown = getattr(manager, "shutdown", None)
+        if bridge_shutdown is not None:
+            await bridge_shutdown()
 
     app = FastAPI(title="ops_pilot Backend", version="0.1.0", lifespan=_lifespan)
     app.state.agent_runtime_manager = runtime_manager

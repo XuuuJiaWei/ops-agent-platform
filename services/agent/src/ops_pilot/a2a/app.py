@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI
@@ -25,6 +26,14 @@ async def create_a2a_app(settings: Settings | None = None, runtime: Any | None =
 
     resolved_settings = settings or get_settings()
     resolved_runtime = runtime or await create_agent_runtime_async(resolved_settings)
+
+    @asynccontextmanager
+    async def _lifespan(_: FastAPI):
+        yield
+        close = getattr(resolved_runtime, "close", None)
+        if close is not None:
+            close()
+
     agent_card = build_agent_card(resolved_settings)
     request_handler = DefaultRequestHandler(
         agent_executor=create_executor(resolved_runtime, resolved_settings),
@@ -33,7 +42,7 @@ async def create_a2a_app(settings: Settings | None = None, runtime: Any | None =
     )
 
     base_path = resolved_settings.a2a_base_path.rstrip("/") or "/a2a"
-    app = FastAPI(title="ops_pilot A2A", version="0.1.0")
+    app = FastAPI(title="ops_pilot A2A", version="0.1.0", lifespan=_lifespan)
     app.include_router(health_router)
     add_a2a_routes_to_fastapi(
         app,

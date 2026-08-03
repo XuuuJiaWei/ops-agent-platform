@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI
@@ -21,7 +22,15 @@ async def create_agui_app(settings: Settings | None = None, runtime: Any | None 
 
     resolved_settings = settings or get_settings()
     resolved_runtime = runtime or await create_agent_runtime_async(resolved_settings)
-    app = FastAPI(title="ops_pilot AG-UI", version="0.1.0")
+
+    @asynccontextmanager
+    async def _lifespan(_: FastAPI):
+        yield
+        close = getattr(resolved_runtime, "close", None)
+        if close is not None:
+            close()
+
+    app = FastAPI(title="ops_pilot AG-UI", version="0.1.0", lifespan=_lifespan)
     app.include_router(health_router)
     app.include_router(tunnel_router)
 

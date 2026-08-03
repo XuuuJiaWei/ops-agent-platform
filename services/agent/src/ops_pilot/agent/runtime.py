@@ -13,7 +13,9 @@ from ops_pilot.mcp.status import MCPLoadStatus
 from ops_pilot.models.sap_genai import create_chat_model
 from ops_pilot.observability.langfuse import TracingSetup, create_callback_handler
 from ops_pilot.observability.metadata import build_runnable_config
+from ops_pilot.sandbox import SandboxRuntime, create_sandbox_runtime
 from ops_pilot.skills.resolver import resolve_skill_paths
+from ops_pilot.skills.sync import sync_skill_paths_to_backend
 from ops_pilot.tools.smoke_tools import get_smoke_tools
 
 
@@ -25,6 +27,11 @@ class AgentRuntime:
     skills: tuple[str, ...] = field(default_factory=tuple)
     mcp: MCPRegistry = field(default_factory=MCPRegistry)
     tracing: TracingSetup = field(default_factory=lambda: TracingSetup(enabled=False))
+    sandbox: SandboxRuntime | None = None
+
+    def close(self) -> None:
+        if self.sandbox is not None:
+            self.sandbox.close()
 
     def runnable_config(
         self,
@@ -96,21 +103,29 @@ async def build_agent_runtime(
     if dynamic_mcp_config is not None and dynamic_mcp_config.servers:
         dynamic_registry = await MCPRegistry.from_config(dynamic_mcp_config, config_path="dynamic")
         mcp_registry = _combine_mcp_registries(mcp_registry, dynamic_registry)
-    skills = tuple(resolve_skill_paths(resolved_settings))
+    local_skills = tuple(resolve_skill_paths(resolved_settings))
     tracing = create_callback_handler(resolved_settings)
 
     tools = list(mcp_registry.tools)
     if resolved_settings.enable_smoke_tools:
         tools.extend(get_smoke_tools())
 
-    graph = _create_deep_agent(
-        model=model,
-        tools=tools,
-        skills=list(skills),
-        system_prompt=resolved_settings.configured_system_prompt(),
-        tracing=tracing,
-        use_memory_checkpointer=use_memory_checkpointer,
-    )
+    sandbox = create_sandbox_runtime(resolved_settings)
+    try:
+        skills = _resolve_backend_skill_paths(local_skills, sandbox)
+        graph = _create_deep_agent(
+            model=model,
+            tools=tools,
+            skills=list(skills),
+            system_prompt=resolved_settings.configured_system_prompt(),
+            tracing=tracing,
+            use_memory_checkpointer=use_memory_checkpointer,
+            backend=sandbox.backend if sandbox is not None else None,
+        )
+    except Exception:
+        if sandbox is not None:
+            sandbox.close()
+        raise
     return AgentRuntime(
         graph=graph,
         settings=resolved_settings,
@@ -118,7 +133,17 @@ async def build_agent_runtime(
         skills=skills,
         mcp=mcp_registry,
         tracing=tracing,
+        sandbox=sandbox,
     )
+
+
+def _resolve_backend_skill_paths(
+    local_skills: tuple[str, ...], sandbox: SandboxRuntime | None
+) -> tuple[str, ...]:
+    if sandbox is None or not local_skills:
+        return local_skills
+    sync_result = sync_skill_paths_to_backend(local_skills, sandbox.backend)
+    return sync_result.remote_paths
 
 
 def _combine_mcp_registries(*registries: MCPRegistry) -> MCPRegistry:
@@ -147,6 +172,7 @@ def _create_deep_agent(
     system_prompt: str | None,
     tracing: TracingSetup,
     use_memory_checkpointer: bool,
+    backend: Any | None,
 ) -> Any:
     try:
         from deepagents import create_deep_agent
@@ -163,6 +189,8 @@ def _create_deep_agent(
         kwargs["system_prompt"] = system_prompt
     if skills:
         kwargs["skills"] = skills
+    if backend is not None:
+        kwargs["backend"] = backend
 
     copilotkit_middleware = _create_copilotkit_middleware()
     middleware = [NormalizeSystemMessagesMiddleware()]

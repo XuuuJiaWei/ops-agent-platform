@@ -25,6 +25,18 @@ def _optional_int(env: Mapping[str, str], key: str) -> int | None:
     return int(value) if value is not None else None
 
 
+def _optional_bool(env: Mapping[str, str], key: str) -> bool | None:
+    value = _optional_text(env, key)
+    if value is None:
+        return None
+    normalized = value.lower()
+    if normalized in {"1", "true", "t", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "f", "no", "n", "off"}:
+        return False
+    raise ValueError(f"{key} must be a boolean value")
+
+
 def _split_paths(value: str) -> list[str]:
     if not value.strip():
         return []
@@ -53,6 +65,19 @@ class Settings:
     chat_host: str = "127.0.0.1"
     chat_port: int = 8123
     a2a_base_path: str = "/a2a"
+    open_sandbox_enabled: bool = False
+    open_sandbox_domain: str | None = None
+    open_sandbox_api_key: str | None = None
+    open_sandbox_protocol: str = "https"
+    open_sandbox_use_server_proxy: bool = True
+    open_sandbox_disable_metrics: bool = True
+    open_sandbox_image: str = "python:3.11"
+    open_sandbox_timeout_seconds: int = 600
+    open_sandbox_ready_timeout_seconds: int = 240
+    open_sandbox_cpu_limit: str = "250m"
+    open_sandbox_memory_limit: str = "256Mi"
+    open_sandbox_cpu_request: str = "100m"
+    open_sandbox_memory_request: str = "128Mi"
 
     @property
     def langfuse_enabled(self) -> bool:
@@ -85,6 +110,13 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     source = os.environ if env is None else env
     mcp_config = _optional_text(source, "MCP_CONFIG_PATH")
     skill_paths = tuple(resolve_path(path) for path in _split_paths(source.get("SKILLS_PATHS", "")))
+    open_sandbox_domain = _optional_text(source, "OPEN_SANDBOX_DOMAIN")
+    open_sandbox_api_key = _optional_text(source, "OPEN_SANDBOX_API_KEY")
+    open_sandbox_enabled = _optional_bool(source, "OPEN_SANDBOX_ENABLED")
+    open_sandbox_use_server_proxy = _optional_bool(source, "OPEN_SANDBOX_USE_SERVER_PROXY")
+    open_sandbox_disable_metrics = _optional_bool(source, "OPEN_SANDBOX_DISABLE_METRICS")
+    if open_sandbox_enabled is None:
+        open_sandbox_enabled = bool(open_sandbox_domain and open_sandbox_api_key)
 
     return Settings(
         app_env=_env_text(source, "APP_ENV", "local") or "local",
@@ -100,6 +132,30 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         langfuse_base_url=_optional_text(source, "LANGFUSE_BASE_URL"),
         chat_host=_env_text(source, "CHAT_HOST", "127.0.0.1") or "127.0.0.1",
         chat_port=int(_env_text(source, "CHAT_PORT", "8123") or "8123"),
+        open_sandbox_enabled=open_sandbox_enabled,
+        open_sandbox_domain=open_sandbox_domain,
+        open_sandbox_api_key=open_sandbox_api_key,
+        open_sandbox_protocol=_env_text(source, "OPEN_SANDBOX_PROTOCOL", "https") or "https",
+        open_sandbox_use_server_proxy=open_sandbox_use_server_proxy
+        if open_sandbox_use_server_proxy is not None
+        else True,
+        open_sandbox_disable_metrics=open_sandbox_disable_metrics
+        if open_sandbox_disable_metrics is not None
+        else True,
+        open_sandbox_image=_env_text(source, "OPEN_SANDBOX_IMAGE", "python:3.11")
+        or "python:3.11",
+        open_sandbox_timeout_seconds=_optional_int(source, "OPEN_SANDBOX_TIMEOUT_SECONDS") or 600,
+        open_sandbox_ready_timeout_seconds=_optional_int(
+            source, "OPEN_SANDBOX_READY_TIMEOUT_SECONDS"
+        )
+        or 240,
+        open_sandbox_cpu_limit=_env_text(source, "OPEN_SANDBOX_CPU_LIMIT", "250m") or "250m",
+        open_sandbox_memory_limit=_env_text(source, "OPEN_SANDBOX_MEMORY_LIMIT", "256Mi")
+        or "256Mi",
+        open_sandbox_cpu_request=_env_text(source, "OPEN_SANDBOX_CPU_REQUEST", "100m")
+        or "100m",
+        open_sandbox_memory_request=_env_text(source, "OPEN_SANDBOX_MEMORY_REQUEST", "128Mi")
+        or "128Mi",
     )
 
 
