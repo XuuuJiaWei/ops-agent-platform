@@ -45,6 +45,7 @@ def test_build_dashboard_snapshot_normalizes_metrics_and_problems():
     assert len(problems) == 1
     assert problems[0]["id"] == "P-1"
     assert problems[0]["severity"] == "AVAILABILITY"
+    assert problems[0]["tone"] == "danger"  # critical severity marker
 
 
 def test_build_dashboard_snapshot_drops_malformed_and_defaults_tone():
@@ -74,6 +75,7 @@ def test_build_dashboard_snapshot_drops_malformed_and_defaults_tone():
     assert len(problems) == 1
     assert problems[0]["id"] == "P-2"
     assert problems[0]["severity"] == "UNKNOWN"  # default when absent
+    assert problems[0]["tone"] == "warning"  # non-critical severity
 
 
 def test_build_dashboard_snapshot_handles_empty_inputs():

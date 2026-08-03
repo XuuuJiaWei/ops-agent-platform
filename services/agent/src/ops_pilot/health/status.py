@@ -21,7 +21,6 @@ def build_runtime_status(runtime: AgentRuntime) -> dict[str, Any]:
         "protocols": {
             "chat_base_path": runtime.settings.chat_base_path,
             "a2a_base_path": runtime.settings.a2a_base_path,
-            "a2a_task_store": runtime.settings.a2a_task_store,
         },
         "mcp": runtime.mcp.status.as_dict(),
         "skills": list(runtime.skills),

@@ -23,7 +23,7 @@ export function AppShell({ env }: AppShellProps) {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [sidebarView, setSidebarView] = useState<SidebarView>("conversations");
   const [mainView, setMainView] = useState<MainView>("chat");
-  const threadsState = useConversationThreads({ agentId: env.assistantId, store: env.conversationStore });
+  const threadsState = useConversationThreads({ agentId: env.assistantId });
 
   const chatKey = activeThreadId ?? "new";
   const chatLabels = useMemo(

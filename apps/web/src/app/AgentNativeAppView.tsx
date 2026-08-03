@@ -12,6 +12,7 @@ import {
   type DynatraceDashboard,
   type DynatraceMetric,
   type DynatraceProblem,
+  type MetricTone,
   readDynatraceDashboard,
 } from "./dynatrace";
 
@@ -185,7 +186,7 @@ function ProblemRow({ problem }: { problem: DynatraceProblem }) {
   return (
     <tr>
       <td className="px-3 py-3">
-        <SeverityBadge severity={problem.severity} />
+        <SeverityBadge severity={problem.severity} tone={problem.tone} />
       </td>
       <td className="px-3 py-3 text-[var(--text-primary)]">{problem.title}</td>
       <td className="px-3 py-3 text-[var(--text-secondary)]">{problem.entity ?? "—"}</td>
@@ -219,12 +220,8 @@ function StatusBadge({ status }: { status: NonNullable<DynatraceDashboard["statu
   );
 }
 
-function SeverityBadge({ severity }: { severity: string }) {
-  const normalized = severity.toUpperCase();
-  const isCritical = ["AVAILABILITY", "ERROR", "CRITICAL", "RESOURCE_CONTENTION"].some((key) =>
-    normalized.includes(key),
-  );
-  const className = isCritical
+function SeverityBadge({ severity, tone }: { severity: string; tone?: MetricTone }) {
+  const className = tone === "danger"
     ? "bg-[#fef2f2] text-[var(--danger)]"
     : "bg-[#fff7ed] text-[var(--warning)]";
   return (

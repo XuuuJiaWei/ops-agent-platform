@@ -11,10 +11,6 @@ class SAPModelInitializationError(RuntimeError):
     """Raised when the configured SAP AI Core chat model cannot be created."""
 
 
-# Compatibility alias for earlier callers.
-ModelInitializationError = SAPModelInitializationError
-
-
 def create_chat_model(settings: Settings) -> Any:
     """Create a LangChain-compatible SAP chat model for DeepAgents."""
 

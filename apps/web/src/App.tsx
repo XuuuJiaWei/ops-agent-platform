@@ -3,15 +3,15 @@ import { AppShell } from "@/app/AppShell";
 import { ChatRenderers } from "@/copilot/ChatRenderers";
 import { browserEnv } from "@/lib/env";
 
-const enableCopilotInspector = import.meta.env.DEV;
+const isDev = import.meta.env.DEV;
 
 export function App() {
   return (
     <CopilotKit
       runtimeUrl={browserEnv.copilotRuntimeUrl}
       agent={browserEnv.assistantId}
-      showDevConsole={browserEnv.showDevConsole}
-      enableInspector={enableCopilotInspector}
+      showDevConsole={isDev}
+      enableInspector={isDev}
     >
       <ChatRenderers />
       <AppShell env={browserEnv} />

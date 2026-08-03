@@ -74,6 +74,16 @@ def _normalize_metric(raw: Any) -> DynatraceMetric | None:
     return metric
 
 
+_CRITICAL_SEVERITY_MARKERS = ("AVAILABILITY", "ERROR", "CRITICAL", "RESOURCE_CONTENTION")
+
+
+def _severity_tone(severity: str) -> MetricTone:
+    normalized = severity.upper()
+    if any(marker in normalized for marker in _CRITICAL_SEVERITY_MARKERS):
+        return "danger"
+    return "warning"
+
+
 def _normalize_problem(raw: Any) -> DynatraceProblem | None:
     if not isinstance(raw, dict):
         return None
@@ -81,10 +91,12 @@ def _normalize_problem(raw: Any) -> DynatraceProblem | None:
     title = raw.get("title") or raw.get("name") or raw.get("summary")
     if problem_id is None or title is None:
         return None
+    severity = str(raw.get("severity") or raw.get("severityLevel") or "UNKNOWN")
     problem: DynatraceProblem = {
         "id": str(problem_id),
         "title": str(title),
-        "severity": str(raw.get("severity") or raw.get("severityLevel") or "UNKNOWN"),
+        "severity": severity,
+        "tone": _severity_tone(severity),
     }
     entity = raw.get("entity") or raw.get("entityName") or raw.get("impactedEntity")
     if entity is not None:

@@ -8,7 +8,7 @@ CopilotKit shared state.
 
 from __future__ import annotations
 
-from typing import Any, Literal, NotRequired, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 from deepagents.graph import DeepAgentState
 
@@ -18,10 +18,6 @@ DYNATRACE_DASHBOARD_STATE_KEY = "dynatrace_dashboard"
 
 MetricTone = Literal["normal", "warning", "danger", "success"]
 DashboardStatus = Literal["loading", "ready", "error"]
-
-
-class MessageInput(TypedDict, total=False):
-    messages: list[Any]
 
 
 class DynatraceMetric(TypedDict, total=False):
@@ -41,6 +37,7 @@ class DynatraceProblem(TypedDict, total=False):
     id: str
     title: str
     severity: str
+    tone: MetricTone
     entity: NotRequired[str]
     started_at: NotRequired[str]
 

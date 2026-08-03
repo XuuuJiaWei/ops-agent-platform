@@ -322,7 +322,7 @@ function SettingsPanel({ env, onBack }: { env: BrowserEnv; onBack: () => void })
           <SectionHeader icon={<Wrench aria-hidden="true" className="size-4" />} title="Runtime" />
           <SettingRow label="Assistant" value={env.assistantId} />
           <SettingRow label="Runtime URL" value={env.copilotRuntimeUrl} />
-          <SettingRow label="Conversation Store" value={formatConversationStore(env)} />
+          <SettingRow label="Conversation Store" value="Local browser storage" />
         </section>
 
         <section className="mb-5">
@@ -383,14 +383,6 @@ function PilotBridgeInstallAction({ installUrl }: { installUrl?: string }) {
       )}
     </div>
   );
-}
-
-function formatConversationStore(env: BrowserEnv): string {
-  if (env.conversationStore.mode === "company") {
-    return env.conversationStore.apiUrl ? `Company (${env.conversationStore.apiUrl})` : "Company (not configured)";
-  }
-
-  return "Local browser storage";
 }
 
 function StatusRow({ label, status, tone }: { label: string; status: string; tone: "success" | "warning" }) {

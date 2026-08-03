@@ -16,7 +16,7 @@ def build_agent_card(settings: Settings):
         AgentSkill,
     )
 
-    base_url = f"http://{settings.a2a_host}:{settings.a2a_port}{settings.a2a_base_path}"
+    base_url = f"http://{settings.chat_host}:{settings.chat_port}{settings.a2a_base_path}"
 
     return AgentCard(
         name="ops_pilot",

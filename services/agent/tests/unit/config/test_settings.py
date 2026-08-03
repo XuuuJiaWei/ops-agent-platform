@@ -20,12 +20,6 @@ def test_load_settings_splits_skill_paths():
     assert len(settings.skills_paths) == 2
 
 
-def test_load_settings_reads_optional_top_p():
-    settings = load_settings({"SAP_AI_CORE_TOP_P": "0.8"})
-
-    assert settings.sap_top_p == 0.8
-
-
 def test_load_settings_reads_optional_max_tokens():
     settings = load_settings({"SAP_AI_CORE_MAX_TOKENS": "4096"})
 

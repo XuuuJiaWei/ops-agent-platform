@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { BrowserEnv } from "@/lib/env";
 
 export type ConversationThread = {
   id: string;
@@ -27,7 +26,6 @@ export type ConversationThreadsState = {
 
 type UseConversationThreadsInput = {
   agentId: string;
-  store: BrowserEnv["conversationStore"];
 };
 
 const STORAGE_VERSION = 1;
@@ -37,7 +35,7 @@ type StoredThreadPayload = {
   threads: ConversationThread[];
 };
 
-export function useConversationThreads({ agentId, store }: UseConversationThreadsInput): ConversationThreadsState {
+export function useConversationThreads({ agentId }: UseConversationThreadsInput): ConversationThreadsState {
   const storageKey = useMemo(() => `ops-agent-platform:threads:${agentId}`, [agentId]);
   const [threads, setThreads] = useState<ConversationThread[]>(() => readLocalThreads(storageKey));
 
@@ -113,7 +111,7 @@ export function useConversationThreads({ agentId, store }: UseConversationThread
     archiveThread,
     createThread,
     deleteThread,
-    error: store.mode === "company" ? new Error("Company conversation store is not configured yet") : null,
+    error: null,
     fetchMoreThreads: () => undefined,
     hasMoreThreads: false,
     isFetchingMoreThreads: false,

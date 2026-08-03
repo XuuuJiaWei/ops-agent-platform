@@ -24,18 +24,15 @@ class RequiredMCPServerError(MCPLoadError):
     """Raised when a required MCP server fails to load."""
 
 
-async def load_mcp_tools(
-    settings: Settings | MCPConfig,
-) -> MCPLoadResult | tuple[list[Any], MCPLoadStatus]:
+async def load_mcp_tools(settings: Settings | MCPConfig) -> MCPLoadResult:
     """Load configured MCP tools and collect per-server status.
 
-    Passing ``Settings`` is the production path. Passing ``MCPConfig`` is kept as
-    a compatibility path for earlier unit tests and returns ``(tools, status)``.
+    Accepts ``Settings`` (production path, reads ``mcp_config_path``) or an
+    ``MCPConfig`` directly (dynamic developer-mode servers).
     """
 
     if isinstance(settings, MCPConfig):
-        result = await _load_from_config(settings, config_path=None)
-        return result.tools, result.status
+        return await _load_from_config(settings, config_path=None)
 
     if settings.mcp_config_path is None:
         return MCPLoadResult(tools=[], status=MCPLoadStatus(config_path=None, servers=()))

@@ -8,7 +8,6 @@ JSONValue = dict[str, Any] | list[Any] | str | int | float | bool | None
 JSONRPCMessage = dict[str, Any]
 
 MCP_SESSION_ID_HEADER = "mcp-session-id"
-MCP_PROTOCOL_VERSION_HEADER = "mcp-protocol-version"
 
 TUNNEL_AUTH_ENV = "OPS_PILOT_TUNNEL_TOKEN"
 

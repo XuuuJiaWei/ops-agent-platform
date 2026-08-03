@@ -63,8 +63,3 @@ class MCPLoadStatus:
 class MCPLoadResult:
     tools: list[Any]
     status: MCPLoadStatus
-
-
-# Compatibility aliases for earlier internal tests/callers.
-MCPServerStatus = MCPServerLoadStatus
-MCPStatus = MCPLoadStatus

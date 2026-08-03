@@ -8,18 +8,9 @@ from ops_pilot.agent.runtime import AgentRuntime, build_agent_runtime
 from ops_pilot.config.mcp_schema import MCPConfig
 from ops_pilot.config.settings import Settings
 
-
-async def create_agent_runtime_async(
-    settings: Settings | None = None,
-    *,
-    dynamic_mcp_config: MCPConfig | None = None,
-    use_memory_checkpointer: bool = True,
-) -> AgentRuntime:
-    return await build_agent_runtime(
-        settings,
-        dynamic_mcp_config=dynamic_mcp_config,
-        use_memory_checkpointer=use_memory_checkpointer,
-    )
+# The async factory is the runtime builder itself; the name is kept as the
+# package's stable public entrypoint.
+create_agent_runtime_async = build_agent_runtime
 
 
 def create_agent_runtime(
@@ -34,7 +25,7 @@ def create_agent_runtime(
         asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(
-            create_agent_runtime_async(
+            build_agent_runtime(
                 settings,
                 dynamic_mcp_config=dynamic_mcp_config,
                 use_memory_checkpointer=use_memory_checkpointer,

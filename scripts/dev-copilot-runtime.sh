@@ -9,7 +9,7 @@ if [ ! -f "$ROOT_DIR/apps/copilot-runtime/package.json" ]; then
 fi
 
 cd "$ROOT_DIR"
-if [ -z "${AGUI_AGENT_URL:-}" ] && [ -z "${AGENT_API_URL:-}" ]; then
+if [ -z "${AGUI_AGENT_URL:-}" ]; then
   export AGUI_AGENT_URL=http://127.0.0.1:8123/chat
 fi
 exec pnpm --filter "./apps/copilot-runtime" dev

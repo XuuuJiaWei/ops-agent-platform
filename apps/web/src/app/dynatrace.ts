@@ -1,7 +1,10 @@
 // Frontend contract for the agent-native Dynatrace dashboard.
-// Mirrors ops_pilot.agent.state.DynatraceDashboard (services/agent). The agent
-// writes this into shared state via `render_dynatrace_dashboard`; the App view
-// reads it through useAgent and renders a live projection of it.
+//
+// SINGLE SOURCE OF TRUTH: services/agent/src/ops_pilot/agent/state.py
+// (DynatraceDashboard). Keep these types and the state key in sync with it.
+// The backend `render_dynatrace_dashboard` tool normalizes raw findings —
+// including the per-problem `tone` — so the frontend stays a pure projection
+// and does not re-derive severity semantics.
 
 export const DYNATRACE_DASHBOARD_STATE_KEY = "dynatrace_dashboard";
 
@@ -21,6 +24,7 @@ export type DynatraceProblem = {
   id: string;
   title: string;
   severity: string;
+  tone?: MetricTone;
   entity?: string;
   started_at?: string;
 };
