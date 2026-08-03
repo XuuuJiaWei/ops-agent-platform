@@ -47,9 +47,3 @@ async def create_agui_app(settings: Settings | None = None, runtime: Any | None 
         path=resolved_settings.chat_base_path.rstrip("/") or "/",
     )
     return app
-
-
-def create_app() -> FastAPI:
-    import asyncio
-
-    return asyncio.run(create_agui_app())

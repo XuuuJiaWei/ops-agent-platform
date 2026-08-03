@@ -48,9 +48,3 @@ async def create_a2a_app(settings: Settings | None = None, runtime: Any | None =
         ),
     )
     return app
-
-
-def create_app() -> FastAPI:
-    import asyncio
-
-    return asyncio.run(create_a2a_app())

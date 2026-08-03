@@ -59,7 +59,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(health_snapshot(load_settings()), indent=2, sort_keys=True))
         return 0
     if args.command == "serve":
-        return _run_server(_serve_backend(args.host, args.port))
+        return _serve_backend(args.host, args.port)
     if args.command == "tunnel" and args.tunnel_command == "run":
         return _run_server(
             _run_tunnel(
@@ -111,7 +111,7 @@ async def _print_status() -> int:
     return 0
 
 
-async def _serve_backend(host: str | None, port: int | None) -> int:
+def _serve_backend(host: str | None, port: int | None) -> int:
     from ops_pilot.backend import create_backend_app
 
     settings = load_settings()
@@ -120,13 +120,19 @@ async def _serve_backend(host: str | None, port: int | None) -> int:
         chat_host=host or settings.chat_host,
         chat_port=port or settings.chat_port,
     )
-    app = await create_backend_app(settings)
+    # Build the app on a throwaway loop, then hand the loop and signal handling
+    # to uvicorn via the synchronous Server.run(). Uvicorn owns SIGINT through its
+    # capture_signals() contextmanager, runs a graceful shutdown, then re-raises
+    # the captured signal by design — so KeyboardInterrupt surfaces from run() and
+    # we swallow it at this CLI boundary for a clean exit (the same thing uvicorn's
+    # own CLI does). Building the app on a separate, short-lived loop is safe: MCP
+    # tools open a fresh session per call and the runtime holds no loop-bound state.
+    app = asyncio.run(create_backend_app(settings))
     config = uvicorn.Config(app, host=settings.chat_host, port=settings.chat_port, log_level="info")
-    server = uvicorn.Server(config)
     try:
-        await server.serve()
+        uvicorn.Server(config).run()
     except KeyboardInterrupt:
-        return 0
+        pass
     return 0
 
 

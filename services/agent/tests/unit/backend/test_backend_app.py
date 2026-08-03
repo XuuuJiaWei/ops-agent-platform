@@ -63,9 +63,17 @@ class FakeLocalBridgeManager:
     async def stop(self, tunnel_id: str) -> None:
         self.stopped_tunnel_id = tunnel_id
 
+    async def shutdown(self) -> None:
+        # Invoked by the FastAPI lifespan shutdown when this fake is installed.
+        pass
 
-@pytest.mark.asyncio
-async def test_unified_backend_mounts_chat_a2a_and_tunnel_routes(monkeypatch) -> None:
+
+def _patch_agui(monkeypatch) -> None:
+    """Replace the heavy AG-UI / CopilotKit wiring with fakes.
+
+    Must run before create_backend_app so the mounted /chat endpoint is a stub.
+    """
+
     import ag_ui_langgraph
     import copilotkit
     import copilotkit.langgraph
@@ -82,51 +90,42 @@ async def test_unified_backend_mounts_chat_a2a_and_tunnel_routes(monkeypatch) ->
     )
     monkeypatch.setattr(copilotkit, "LangGraphAGUIAgent", DummyAGUIAgent)
     monkeypatch.setattr(copilotkit.langgraph, "copilotkit_customize_config", lambda **_: {})
+
+
+@pytest.mark.asyncio
+async def test_unified_backend_mounts_chat_a2a_and_tunnel_routes(monkeypatch) -> None:
+    _patch_agui(monkeypatch)
 
     settings = load_settings({"APP_ENV": "test", "ASSISTANT_ID": "agent"})
     app = await create_backend_app(settings, runtime=DummyRuntime())
     paths = {path for route in app.routes if (path := getattr(route, "path", None))}
-    client = TestClient(app)
 
     assert "/chat" in paths
     assert "/a2a/jsonrpc" in paths
     assert "/a2a/.well-known/agent-card.json" in paths
-    assert client.get("/health").status_code == 200
-    assert client.get("/dev/mcp-tunnels").status_code == 200
+
+    with TestClient(app) as client:
+        assert client.get("/health").status_code == 200
+        assert client.get("/dev/mcp-tunnels").status_code == 200
 
 
 @pytest.mark.asyncio
 async def test_tunnel_agent_config_applies_to_runtime_manager(monkeypatch) -> None:
-    import ag_ui_langgraph
-    import copilotkit
-    import copilotkit.langgraph
-
     import ops_pilot.tunnel.app as tunnel_app
 
-    def add_fake_langgraph_endpoint(*, app, path: str, **_: object) -> None:
-        @app.post(path)
-        async def fake_chat() -> dict[str, str]:
-            return {"ok": "chat"}
-
-    monkeypatch.setattr(
-        ag_ui_langgraph,
-        "add_langgraph_fastapi_endpoint",
-        add_fake_langgraph_endpoint,
-    )
-    monkeypatch.setattr(copilotkit, "LangGraphAGUIAgent", DummyAGUIAgent)
-    monkeypatch.setattr(copilotkit.langgraph, "copilotkit_customize_config", lambda **_: {})
+    _patch_agui(monkeypatch)
     monkeypatch.setattr(tunnel_app.manager, "get", lambda tunnel_id: object())
 
     settings = load_settings({"APP_ENV": "test", "ASSISTANT_ID": "agent"})
     app = await create_backend_app(settings, runtime=DummyRuntime())
     fake_manager = FakeRuntimeManager()
     app.state.agent_runtime_manager = fake_manager
-    client = TestClient(app)
 
-    response = client.put(
-        "/dev/mcp-tunnels/local-dev/agent-config",
-        json={"token": "secret"},
-    )
+    with TestClient(app) as client:
+        response = client.put(
+            "/dev/mcp-tunnels/local-dev/agent-config",
+            json={"token": "secret"},
+        )
 
     assert response.status_code == 200
     assert fake_manager.applied_server.name == "local-dev"
@@ -137,22 +136,7 @@ async def test_tunnel_agent_config_applies_to_runtime_manager(monkeypatch) -> No
 
 @pytest.mark.asyncio
 async def test_tunnel_agent_config_starts_local_bridge_for_profile(monkeypatch) -> None:
-    import ag_ui_langgraph
-    import copilotkit
-    import copilotkit.langgraph
-
-    def add_fake_langgraph_endpoint(*, app, path: str, **_: object) -> None:
-        @app.post(path)
-        async def fake_chat() -> dict[str, str]:
-            return {"ok": "chat"}
-
-    monkeypatch.setattr(
-        ag_ui_langgraph,
-        "add_langgraph_fastapi_endpoint",
-        add_fake_langgraph_endpoint,
-    )
-    monkeypatch.setattr(copilotkit, "LangGraphAGUIAgent", DummyAGUIAgent)
-    monkeypatch.setattr(copilotkit.langgraph, "copilotkit_customize_config", lambda **_: {})
+    _patch_agui(monkeypatch)
 
     settings = load_settings({"APP_ENV": "test", "ASSISTANT_ID": "agent"})
     app = await create_backend_app(settings, runtime=DummyRuntime())
@@ -160,16 +144,16 @@ async def test_tunnel_agent_config_starts_local_bridge_for_profile(monkeypatch) 
     fake_bridge_manager = FakeLocalBridgeManager()
     app.state.agent_runtime_manager = fake_runtime_manager
     app.state.local_bridge_manager = fake_bridge_manager
-    client = TestClient(app)
 
-    response = client.put(
-        "/dev/mcp-tunnels/kibana/agent-config",
-        json={
-            "mcp_config": "/Users/me/.mcp.json",
-            "mcp_server": "kibana",
-            "server_url": "http://127.0.0.1:8123",
-        },
-    )
+    with TestClient(app) as client:
+        response = client.put(
+            "/dev/mcp-tunnels/kibana/agent-config",
+            json={
+                "mcp_config": "/Users/me/.mcp.json",
+                "mcp_server": "kibana",
+                "server_url": "http://127.0.0.1:8123",
+            },
+        )
 
     assert response.status_code == 200
     assert fake_bridge_manager.started_config.tunnel_id == "kibana"
@@ -181,29 +165,14 @@ async def test_tunnel_agent_config_starts_local_bridge_for_profile(monkeypatch) 
 
 @pytest.mark.asyncio
 async def test_tunnel_agent_config_requires_connected_tunnel(monkeypatch) -> None:
-    import ag_ui_langgraph
-    import copilotkit
-    import copilotkit.langgraph
-
-    def add_fake_langgraph_endpoint(*, app, path: str, **_: object) -> None:
-        @app.post(path)
-        async def fake_chat() -> dict[str, str]:
-            return {"ok": "chat"}
-
-    monkeypatch.setattr(
-        ag_ui_langgraph,
-        "add_langgraph_fastapi_endpoint",
-        add_fake_langgraph_endpoint,
-    )
-    monkeypatch.setattr(copilotkit, "LangGraphAGUIAgent", DummyAGUIAgent)
-    monkeypatch.setattr(copilotkit.langgraph, "copilotkit_customize_config", lambda **_: {})
+    _patch_agui(monkeypatch)
 
     settings = load_settings({"APP_ENV": "test", "ASSISTANT_ID": "agent"})
     app = await create_backend_app(settings, runtime=DummyRuntime())
     app.state.agent_runtime_manager = FakeRuntimeManager()
-    client = TestClient(app)
 
-    response = client.put("/dev/mcp-tunnels/not-connected/agent-config", json={})
+    with TestClient(app) as client:
+        response = client.put("/dev/mcp-tunnels/not-connected/agent-config", json={})
 
     assert response.status_code == 503
     assert "not-connected" in response.json()["detail"]

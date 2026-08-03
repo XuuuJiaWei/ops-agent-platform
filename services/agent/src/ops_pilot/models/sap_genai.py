@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from typing import Any
 
 from ops_pilot.config.settings import Settings
@@ -81,12 +82,21 @@ def _create_bedrock_chat_model(settings: Settings, proxy_client: Any) -> Any:
         ) from exc
 
     deployment = proxy_client.select_deployment(model_name=settings.sap_model_name)
-    return ChatBedrock(
-        model_name=deployment.model_name,
-        deployment_id=deployment.deployment_id,
-        proxy_client=proxy_client,
-        model_kwargs=_generation_kwargs(settings),
-    )
+    # The SAP SDK's ChatBedrock intentionally moves `client_params` into
+    # `model_kwargs` and emits a UserWarning about it on every construction.
+    # It is expected here, so suppress that one warning to keep startup clean.
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="WARNING! client_params is not default parameter.*",
+            category=UserWarning,
+        )
+        return ChatBedrock(
+            model_name=deployment.model_name,
+            deployment_id=deployment.deployment_id,
+            proxy_client=proxy_client,
+            model_kwargs=_generation_kwargs(settings),
+        )
 
 
 def _generation_kwargs(settings: Settings) -> dict[str, float | int]:

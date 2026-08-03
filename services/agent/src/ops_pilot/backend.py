@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI
@@ -37,10 +37,18 @@ async def create_backend_app(
     resolved_runtime = runtime or await create_agent_runtime_async(resolved_settings)
     runtime_manager = AgentRuntimeManager(settings=resolved_settings, runtime=resolved_runtime)
     local_bridge_manager = LocalBridgeManager(tunnel_manager)
-    app = FastAPI(title="ops_pilot Backend", version="0.1.0")
+
+    @asynccontextmanager
+    async def _lifespan(app: FastAPI):
+        yield
+        # Read the manager from state at shutdown so a test-swapped fake is honored.
+        manager = getattr(app.state, "local_bridge_manager", None)
+        if manager is not None:
+            await manager.shutdown()
+
+    app = FastAPI(title="ops_pilot Backend", version="0.1.0", lifespan=_lifespan)
     app.state.agent_runtime_manager = runtime_manager
     app.state.local_bridge_manager = local_bridge_manager
-    app.router.add_event_handler("shutdown", local_bridge_manager.shutdown)
 
     agui_config = copilotkit_customize_config(
         emit_tool_calls=True,
@@ -85,7 +93,3 @@ async def create_backend_app(
     app.include_router(health_router)
     app.include_router(tunnel_router)
     return app
-
-
-def create_app() -> FastAPI:
-    return asyncio.run(create_backend_app())
