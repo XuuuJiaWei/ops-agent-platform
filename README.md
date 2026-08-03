@@ -91,9 +91,8 @@ Example configuration lives in `config/`:
 Useful development overrides:
 
 ```bash
-BACKEND_SERVER_CMD="uv run ops_pilot serve" pnpm run dev:backend
+CHAT_PORT=8130 pnpm run dev:backend
 WEB_WAIT_TIMEOUT=180 pnpm dev
-SMOKE_LOCAL_CMD="pnpm run smoke:a2a" pnpm run smoke:local
 ```
 
 `pnpm run dev:langgraph` is available for optional LangGraph API / Studio debugging. It is not part of the default product path. The wrapper runs `langgraph-cli[inmem]` on demand through `uv run --with` and starts `langgraph dev` on `http://127.0.0.1:2024`.
