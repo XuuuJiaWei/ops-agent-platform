@@ -1,10 +1,10 @@
 // Frontend contract for the agent-native Dynatrace dashboard.
 //
-// SINGLE SOURCE OF TRUTH: services/agent/src/ops_pilot/agent/state.py
-// (DynatraceDashboard). Keep these types and the state key in sync with it.
-// The backend `render_dynatrace_dashboard` tool normalizes raw findings —
-// including the per-problem `tone` — so the frontend stays a pure projection
-// and does not re-derive severity semantics.
+// NOTE: The backend A2UI tool that populated this state was removed as a
+// product decision — this view is retained for future exploration but has no
+// live data source right now, so AgentNativeAppView renders its empty state.
+// If/when a backend emitter is reintroduced, it must write the
+// `dynatrace_dashboard` state key in the shape defined below.
 
 export const DYNATRACE_DASHBOARD_STATE_KEY = "dynatrace_dashboard";
 

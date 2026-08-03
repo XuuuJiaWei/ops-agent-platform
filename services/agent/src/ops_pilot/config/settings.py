@@ -46,7 +46,6 @@ class Settings:
     mcp_config_path: Path | None = None
     skills_paths: tuple[Path, ...] = field(default_factory=tuple)
     enable_smoke_tools: bool = True
-    enable_dynatrace_dashboard: bool = True
     langfuse_public_key: str | None = None
     langfuse_secret_key: str | None = None
     langfuse_base_url: str | None = "https://cloud.langfuse.com"
