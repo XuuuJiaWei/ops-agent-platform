@@ -1,6 +1,7 @@
 import pytest
 
 from ops_pilot.config.mcp_schema import MCPConfig, MCPConfigError
+from ops_pilot.config.paths import REPO_ROOT
 
 
 def test_mcp_config_accepts_stdio_and_http_servers():
@@ -68,3 +69,11 @@ def test_mcp_config_rejects_non_string_permission_entries():
         MCPConfig.from_mapping(
             {"mcpServers": {"dyna": {"transport": "stdio", "command": "npx", "allow_tools": [1, 2]}}}
         )
+
+
+def test_mcp_config_passes_cwd_to_stdio_connection():
+    config = MCPConfig.from_mapping(
+        {"mcpServers": {"dyna": {"transport": "stdio", "command": "npx", "cwd": "config"}}}
+    )
+
+    assert config.servers[0].to_client_connection()["cwd"] == str((REPO_ROOT / "config").resolve())

@@ -344,8 +344,9 @@ Root `.env.example` should document the full stack:
       "transport": "stdio",
       "command": "npx",
       "args": ["-y", "@dynatrace-oss/dynatrace-managed-mcp-server@1.0.0"],
+      "cwd": ".",
       "env": {
-        "DT_CONFIG_FILE": "./dt-config.yaml",
+        "DT_CONFIG_FILE": "./config/dt-config.yaml",
         "DT_PROD_TOKEN": "${DT_PROD_TOKEN}",
         "DT_STAGING_TOKEN": "${DT_STAGING_TOKEN}",
         "LOG_LEVEL": "info"

@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ops_pilot.config.paths import resolve_repo_path
+from ops_pilot.config.paths import REPO_ROOT, resolve_repo_path
 
 SUPPORTED_TRANSPORTS = {"stdio", "http", "streamable_http", "sse"}
 
@@ -24,6 +24,7 @@ class MCPServerConfig:
     required: bool = False
     command: str | None = None
     args: tuple[str, ...] = field(default_factory=tuple)
+    cwd: str | None = None
     url: str | None = None
     headers: Mapping[str, str] = field(default_factory=dict)
     env: Mapping[str, str] = field(default_factory=dict)
@@ -54,6 +55,7 @@ class MCPServerConfig:
             required=bool(data.get("required", False)),
             command=_optional_string(data.get("command")),
             args=tuple(args),
+            cwd=_optional_string(data.get("cwd")),
             url=_optional_string(data.get("url")),
             headers=_string_mapping(name, "headers", data.get("headers", {})),
             env=_string_mapping(name, "env", data.get("env", {})),
@@ -76,6 +78,8 @@ class MCPServerConfig:
             connection["command"] = self.command
         if self.args:
             connection["args"] = list(self.args)
+        if self.cwd:
+            connection["cwd"] = str(_resolve_cwd(self.cwd))
         if self.url:
             connection["url"] = self.url
         if self.headers:
@@ -145,6 +149,13 @@ def _optional_string(value: Any) -> str | None:
     if not isinstance(value, str):
         raise MCPConfigError("Expected a string value.")
     return value
+
+
+def _resolve_cwd(value: str) -> Path:
+    raw = Path(value).expanduser()
+    if raw.is_absolute():
+        return raw.resolve()
+    return (REPO_ROOT / raw).resolve()
 
 
 def _string_mapping(name: str, field_name: str, value: Any) -> Mapping[str, str]:

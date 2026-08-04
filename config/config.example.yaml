@@ -51,10 +51,11 @@ mcpServers:
     transport: stdio
     command: npx
     args: ["-y", "@dynatrace-oss/dynatrace-managed-mcp-server@1.0.0"]
+    cwd: .
     allow_tools: []
     hitl_tools: []
     env:
-      DT_CONFIG_FILE: ./dt-config.yaml
+      DT_CONFIG_FILE: ./config/dt-config.yaml
       DT_PROD_TOKEN: ${DT_PROD_TOKEN}
       DT_STAGING_TOKEN: ${DT_STAGING_TOKEN}
       DT_MCP_DISABLE_TELEMETRY: "true"

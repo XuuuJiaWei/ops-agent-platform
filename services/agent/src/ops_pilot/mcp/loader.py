@@ -26,6 +26,10 @@ class RequiredMCPServerError(MCPLoadError):
     """Raised when a required MCP server fails to load."""
 
 
+class MissingMCPEnvironmentError(MCPLoadError):
+    """Raised when an MCP config references an unset environment variable."""
+
+
 async def load_mcp_tools(settings: Settings | MCPConfig) -> MCPLoadResult:
     """Load configured MCP tools and collect per-server status.
 
@@ -48,8 +52,8 @@ async def _load_from_config(config: MCPConfig, *, config_path: str | None) -> MC
     hitl_tools: list[str] = []
 
     for server in config.servers:
-        expanded = _expand_server_env(server)
         try:
+            expanded = _expand_server_env(server)
             server_tools = await _load_single_server(expanded)
         except Exception as exc:  # noqa: BLE001 - convert adapter errors to startup status.
             status = MCPServerLoadStatus(
@@ -143,10 +147,21 @@ def _expand_mapping(values: Mapping[str, str]) -> dict[str, str]:
 
 
 def _expand_env_value(value: str) -> str:
-    def replace_match(match: re.Match[str]) -> str:
-        return os.environ.get(match.group(1), "")
+    missing: set[str] = set()
 
-    return ENV_PATTERN.sub(replace_match, value)
+    def replace_match(match: re.Match[str]) -> str:
+        name = match.group(1)
+        resolved = os.environ.get(name)
+        if resolved in (None, ""):
+            missing.add(name)
+            return match.group(0)
+        return resolved
+
+    expanded = ENV_PATTERN.sub(replace_match, value)
+    if missing:
+        variables = ", ".join(sorted(missing))
+        raise MissingMCPEnvironmentError(f"Missing environment variable(s) referenced by MCP config: {variables}")
+    return expanded
 
 
 def _safe_error(exc: BaseException) -> str:

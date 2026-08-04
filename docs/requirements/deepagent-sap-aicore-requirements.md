@@ -371,7 +371,7 @@ SKILLS_PATHS=./skills/examples/
 # Leave empty until Dynatrace tokens are configured locally.
 # Set to ./config/mcp.example.json to enable the Dynatrace Managed MCP server.
 MCP_CONFIG_PATH=
-DT_CONFIG_FILE=./dt-config.yaml
+DT_CONFIG_FILE=./config/dt-config.yaml
 DT_PROD_TOKEN=
 DT_STAGING_TOKEN=
 

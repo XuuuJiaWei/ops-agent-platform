@@ -62,6 +62,8 @@ Create local configuration:
 ```bash
 cp .env.example .env
 cp config/config.example.yaml config/config.yaml
+# Only needed when enabling the Dynatrace Managed MCP server:
+cp config/dt-config.example.yaml config/dt-config.yaml
 ```
 
 Secrets live in `.env`; regular configuration (including MCP servers) lives in `config/config.yaml`. Fill SAP AI Core / Generative AI Hub values in `.env` as needed. If the SAP SDK is already configured through local SDK configuration or `VCAP_SERVICES`, the `AICORE_*` values can stay empty. Add Dynatrace credentials (referenced from `config/config.yaml` via `${VAR}`) only when enabling the Dynatrace MCP server.
