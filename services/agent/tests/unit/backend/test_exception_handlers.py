@@ -38,8 +38,7 @@ def test_sandbox_not_found_errors_are_classified_as_recoverable_runtime_errors()
     assert payload == {
         "code": "sandbox_unavailable",
         "message": (
-            "The sandbox expired or became unavailable. Please retry; "
-            "a fresh sandbox will be created automatically."
+            "The sandbox expired or became unavailable. Please retry; a fresh sandbox will be created automatically."
         ),
     }
 

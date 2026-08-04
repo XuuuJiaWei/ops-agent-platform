@@ -130,4 +130,3 @@ def _remote_path(root: str, *parts: str) -> str:
     for part in parts:
         current /= part
     return str(current)
-
