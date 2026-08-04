@@ -1,0 +1,240 @@
+"""Dataset case schema and Langfuse sync helpers."""
+
+from __future__ import annotations
+
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from ops_pilot.config.paths import SERVICE_ROOT, resolve_path
+from ops_pilot.config.settings import Settings
+
+DEFAULT_CASES_DIR = SERVICE_ROOT / "eval" / "cases"
+
+
+class EvalDatasetError(ValueError):
+    """Raised when an eval dataset case file is malformed."""
+
+
+@dataclass(frozen=True)
+class EvalCase:
+    id: str
+    prompt: str
+    category: str
+    expected_output: str | None = None
+    expected_tools: tuple[str, ...] = field(default_factory=tuple)
+    forbidden_tools: tuple[str, ...] = field(default_factory=tuple)
+    rubric: str | None = None
+    tags: tuple[str, ...] = field(default_factory=tuple)
+    timeout_s: float = 60.0
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any], *, source: str = "<eval-case>") -> EvalCase:
+        case_id = _required_string(data, "id", source)
+        prompt = _required_string(data, "prompt", source)
+        category = _required_string(data, "category", source)
+        expected_output = _optional_string(data.get("expected_output"), "expected_output", source)
+        rubric = _optional_string(data.get("rubric"), "rubric", source)
+        timeout_s = _float_value(data.get("timeout_s", 60.0), "timeout_s", source)
+        if timeout_s <= 0:
+            raise EvalDatasetError(f"{source}: timeout_s must be greater than 0.")
+
+        return cls(
+            id=case_id,
+            prompt=prompt,
+            category=category,
+            expected_output=expected_output,
+            expected_tools=_string_tuple(data.get("expected_tools", ()), "expected_tools", source),
+            forbidden_tools=_string_tuple(data.get("forbidden_tools", ()), "forbidden_tools", source),
+            rubric=rubric,
+            tags=_string_tuple(data.get("tags", ()), "tags", source),
+            timeout_s=timeout_s,
+        )
+
+    def metadata(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "category": self.category,
+            "expected_tools": list(self.expected_tools),
+            "forbidden_tools": list(self.forbidden_tools),
+            "rubric": self.rubric,
+            "tags": list(self.tags),
+            "timeout_s": self.timeout_s,
+        }
+
+    def to_experiment_item(self) -> dict[str, Any]:
+        return {
+            "input": self.prompt,
+            "expected_output": self.expected_output,
+            "metadata": self.metadata(),
+        }
+
+
+def load_cases_from_yaml(path: str | Path = DEFAULT_CASES_DIR) -> tuple[EvalCase, ...]:
+    """Load eval cases from one YAML file or every YAML file in a directory.
+
+    Each file holds either a top-level list of case mappings or a mapping with a
+    ``cases:`` list. Case ids must be unique across all loaded files.
+    """
+
+    import yaml
+
+    resolved = resolve_path(path, must_exist=True)
+    files = tuple(sorted(_iter_yaml_files(resolved))) if resolved.is_dir() else (resolved,)
+    cases: list[EvalCase] = []
+    seen_ids: set[str] = set()
+    for file_path in files:
+        if file_path.suffix not in (".yaml", ".yml"):
+            raise EvalDatasetError(f"Eval case file must be .yaml or .yml: {file_path}")
+        try:
+            document = yaml.safe_load(file_path.read_text(encoding="utf-8"))
+        except yaml.YAMLError as exc:
+            raise EvalDatasetError(f"{file_path}: invalid YAML: {exc}") from exc
+        for index, payload in enumerate(_document_cases(document, file_path), start=1):
+            source = f"{file_path}#{index}"
+            if not isinstance(payload, Mapping):
+                raise EvalDatasetError(f"{source}: each eval case must be a mapping.")
+            case = EvalCase.from_mapping(payload, source=source)
+            if case.id in seen_ids:
+                raise EvalDatasetError(f"{source}: duplicate eval case id: {case.id}")
+            seen_ids.add(case.id)
+            cases.append(case)
+    if not cases:
+        raise EvalDatasetError(f"No eval cases found in {resolved}")
+    return tuple(cases)
+
+
+def _iter_yaml_files(directory: Path) -> list[Path]:
+    return [*directory.glob("*.yaml"), *directory.glob("*.yml")]
+
+
+def _document_cases(document: Any, file_path: Path) -> list[Any]:
+    if document is None:
+        return []
+    if isinstance(document, Mapping):
+        cases = document.get("cases")
+        if cases is None:
+            raise EvalDatasetError(f"{file_path}: mapping documents must define a 'cases' list.")
+        document = cases
+    if not isinstance(document, list):
+        raise EvalDatasetError(f"{file_path}: expected a list of cases or a 'cases' list.")
+    return document
+
+
+def sync_cases_to_langfuse(
+    cases: Iterable[EvalCase],
+    dataset_name: str,
+    settings: Settings | None = None,
+    *,
+    langfuse: Any | None = None,
+) -> int:
+    """Upsert local cases into a Langfuse dataset and return the item count."""
+
+    client = langfuse or create_langfuse_client(settings)
+    _ensure_langfuse_dataset(client, dataset_name)
+    count = 0
+    for case in cases:
+        client.create_dataset_item(
+            dataset_name=dataset_name,
+            id=case.id,
+            input=case.prompt,
+            expected_output=case.expected_output,
+            metadata=case.metadata(),
+        )
+        count += 1
+    flush = getattr(client, "flush", None)
+    if callable(flush):
+        flush()
+    return count
+
+
+def create_langfuse_client(settings: Settings | None = None) -> Any:
+    try:
+        from langfuse import Langfuse, get_client
+    except ImportError as exc:
+        raise EvalDatasetError("Langfuse package is not installed; run `uv sync` in services/agent.") from exc
+    if settings is None:
+        return get_client()
+    return Langfuse(
+        public_key=settings.langfuse_public_key,
+        secret_key=settings.langfuse_secret_key,
+        base_url=settings.langfuse_base_url,
+        environment=settings.app_env,
+    )
+
+
+def langfuse_client_is_reachable(langfuse: Any) -> bool:
+    """Verify connectivity to a (self-hosted) Langfuse instance before running an experiment."""
+
+    auth_check = getattr(langfuse, "auth_check", None)
+    if not callable(auth_check):
+        return True
+    try:
+        return bool(auth_check())
+    except Exception:  # noqa: BLE001 - unreachable host / bad creds must degrade, not crash.
+        return False
+
+
+def close_langfuse_client(langfuse: Any) -> None:
+    """Flush and shut down a Langfuse client so short-lived runs upload before exit."""
+
+    for method_name in ("flush", "shutdown"):
+        method = getattr(langfuse, method_name, None)
+        if callable(method):
+            try:
+                method()
+            except Exception:  # noqa: BLE001 - best-effort teardown at process boundary.
+                pass
+
+
+def _ensure_langfuse_dataset(langfuse: Any, dataset_name: str) -> None:
+    try:
+        langfuse.create_dataset(
+            name=dataset_name,
+            description="ops_pilot agent evaluation dataset",
+            metadata={"source": "ops_pilot local YAML eval cases"},
+        )
+    except Exception as exc:  # noqa: BLE001 - SDK raises generated API exception classes.
+        message = str(exc).lower()
+        if "already" not in message and "exists" not in message and "409" not in message:
+            raise
+
+
+def _required_string(data: Mapping[str, Any], key: str, source: str) -> str:
+    value = data.get(key)
+    parsed = _optional_string(value, key, source)
+    if parsed is None:
+        raise EvalDatasetError(f"{source}: field '{key}' is required.")
+    return parsed
+
+
+def _optional_string(value: Any, key: str, source: str) -> str | None:
+    if value in (None, ""):
+        return None
+    if not isinstance(value, str):
+        raise EvalDatasetError(f"{source}: field '{key}' must be a string.")
+    parsed = value.strip()
+    if not parsed:
+        return None
+    return parsed
+
+
+def _string_tuple(value: Any, key: str, source: str) -> tuple[str, ...]:
+    if value in (None, ""):
+        return ()
+    if not isinstance(value, Sequence) or isinstance(value, str):
+        raise EvalDatasetError(f"{source}: field '{key}' must be a list of strings.")
+    parsed: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise EvalDatasetError(f"{source}: field '{key}' must contain only non-empty strings.")
+        parsed.append(item.strip())
+    return tuple(parsed)
+
+
+def _float_value(value: Any, key: str, source: str) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        raise EvalDatasetError(f"{source}: field '{key}' must be a number.") from exc

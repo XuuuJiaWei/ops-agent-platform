@@ -13,6 +13,7 @@ import uvicorn
 
 from ops_pilot.agent.factory import create_agent_runtime_async
 from ops_pilot.config.settings import load_settings
+from ops_pilot.eval.cli import add_eval_subcommands, run_eval_command
 from ops_pilot.health.status import build_runtime_status, health_snapshot
 from ops_pilot.models.smoke import smoke_bind_tools, smoke_invoke, smoke_model_invocation
 from ops_pilot.tunnel.profile import resolve_tunnel_mcp_spec
@@ -50,6 +51,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     smoke_subcommands.add_parser("agent", help="Build the DeepAgent and invoke a simple prompt.")
     smoke_subcommands.add_parser("a2a", help="Build the A2A agent card and app route table.")
 
+    add_eval_subcommands(subcommands)
+
     args = parser.parse_args(argv)
     if args.command == "settings":
         return _print_settings()
@@ -74,6 +77,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     if args.command == "smoke":
         return _smoke(args.smoke_command)
+    if args.command == "eval":
+        return _run_server(run_eval_command(args))
     return 2
 
 

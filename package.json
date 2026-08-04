@@ -15,7 +15,8 @@
     "smoke:local": "sh ./scripts/smoke-local.sh",
     "smoke:model": "cd services/agent && uv run ops_pilot smoke model",
     "smoke:agent": "cd services/agent && uv run ops_pilot smoke agent",
-    "smoke:a2a": "cd services/agent && uv run ops_pilot smoke a2a"
+    "smoke:a2a": "cd services/agent && uv run ops_pilot smoke a2a",
+    "eval": "cd services/agent && uv run ops_pilot eval run --dataset-name ops-pilot/smoke --run-name local --sync"
   },
   "devDependencies": {
     "concurrently": "^10.0.4"

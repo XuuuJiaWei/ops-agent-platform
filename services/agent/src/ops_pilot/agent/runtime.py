@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ops_pilot.agent.middleware import NormalizeSystemMessagesMiddleware
 from ops_pilot.config.mcp_schema import MCPConfig
@@ -17,6 +18,9 @@ from ops_pilot.sandbox import SandboxRuntime, create_sandbox_runtime
 from ops_pilot.skills.resolver import resolve_skill_paths
 from ops_pilot.skills.sync import sync_skill_paths_to_backend
 from ops_pilot.tools.smoke_tools import get_smoke_tools
+
+if TYPE_CHECKING:
+    from ops_pilot.eval.trace import AgentTrace
 
 
 @dataclass(frozen=True)
@@ -84,6 +88,37 @@ class AgentRuntime:
             ),
         )
         return _extract_result_text(result)
+
+    async def ainvoke_trace(
+        self,
+        text: str,
+        *,
+        protocol: str,
+        thread_id: str | None = None,
+        run_id: str | None = None,
+        a2a_task_id: str | None = None,
+        a2a_context_id: str | None = None,
+        configurable: dict[str, Any] | None = None,
+        extra_metadata: dict[str, Any] | None = None,
+    ) -> AgentTrace:
+        """Invoke the shared DeepAgent and return structured eval trace signals."""
+
+        from ops_pilot.eval.trace import build_agent_trace
+
+        started = time.perf_counter()
+        result = await self.graph.ainvoke(
+            {"messages": [{"role": "user", "content": text}]},
+            config=self.runnable_config(
+                protocol=protocol,
+                thread_id=thread_id,
+                run_id=run_id,
+                a2a_task_id=a2a_task_id,
+                a2a_context_id=a2a_context_id,
+                configurable=configurable,
+                extra_metadata=extra_metadata,
+            ),
+        )
+        return build_agent_trace(result, latency_s=time.perf_counter() - started)
 
 
 async def build_agent_runtime(
