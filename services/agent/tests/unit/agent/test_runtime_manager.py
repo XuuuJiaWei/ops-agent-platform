@@ -46,7 +46,7 @@ class DummyTool:
 
 @pytest.mark.asyncio
 async def test_runtime_manager_applies_dynamic_mcp_server(monkeypatch) -> None:
-    settings = load_settings({"APP_ENV": "test"})
+    settings = load_settings(env={}, config={"app_env": "test"})
     initial_runtime = DummyRuntime()
 
     async def fake_build_agent_runtime(
@@ -97,7 +97,7 @@ async def test_runtime_manager_applies_dynamic_mcp_server(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_runtime_manager_keeps_current_runtime_when_reload_fails(monkeypatch) -> None:
-    settings = load_settings({"APP_ENV": "test"})
+    settings = load_settings(env={}, config={"app_env": "test"})
     initial_runtime = DummyRuntime()
 
     async def fake_build_agent_runtime(*_: object, **__: object):
@@ -122,7 +122,7 @@ async def test_runtime_manager_keeps_current_runtime_when_reload_fails(monkeypat
 
 @pytest.mark.asyncio
 async def test_runtime_manager_rebuilds_when_sandbox_ttl_expired(monkeypatch) -> None:
-    settings = load_settings({"APP_ENV": "test"})
+    settings = load_settings(env={}, config={"app_env": "test"})
     initial_runtime = DummyRuntime(sandbox=DummySandbox(expired=True))
     rebuilt_runtime = DummyRuntime()
 
@@ -142,7 +142,7 @@ async def test_runtime_manager_rebuilds_when_sandbox_ttl_expired(monkeypatch) ->
 
 @pytest.mark.asyncio
 async def test_runtime_manager_rebuilds_when_sandbox_renew_reports_missing(monkeypatch) -> None:
-    settings = load_settings({"APP_ENV": "test"})
+    settings = load_settings(env={}, config={"app_env": "test"})
     sandbox = DummySandbox(should_renew_value=True, renew_result=False)
     initial_runtime = DummyRuntime(sandbox=sandbox)
     rebuilt_runtime = DummyRuntime()

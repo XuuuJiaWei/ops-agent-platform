@@ -27,4 +27,4 @@ Use short, imperative commit messages, preferably Conventional Commit style, for
 
 ## Security & Configuration Tips
 
-Do not commit secrets. Copy `.env.example` to `.env` for local values. Keep Copilot Cloud or Enterprise Intelligence Platform features disabled for company data unless explicitly approved. Langfuse is optional; missing credentials should leave tracing disabled.
+Do not commit secrets. Secrets live in `.env` (copy from `.env.example`); regular configuration, including MCP servers, lives in `config/config.yaml` (copy from `config/config.example.yaml`). Keep Copilot Cloud or Enterprise Intelligence Platform features disabled for company data unless explicitly approved. Langfuse is optional; missing credentials should leave tracing disabled.

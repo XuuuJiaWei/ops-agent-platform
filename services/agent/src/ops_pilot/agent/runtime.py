@@ -149,6 +149,7 @@ async def build_agent_runtime(
     sandbox = create_sandbox_runtime(resolved_settings)
     try:
         skills = _resolve_backend_skill_paths(local_skills, sandbox)
+        interrupt_on = {name: True for name in mcp_registry.hitl_tools}
         graph = _create_deep_agent(
             model=model,
             tools=tools,
@@ -157,6 +158,7 @@ async def build_agent_runtime(
             tracing=tracing,
             use_memory_checkpointer=use_memory_checkpointer,
             backend=sandbox.backend if sandbox is not None else None,
+            interrupt_on=interrupt_on,
         )
     except Exception:
         if sandbox is not None:
@@ -184,9 +186,11 @@ def _combine_mcp_registries(*registries: MCPRegistry) -> MCPRegistry:
     tools: list[Any] = []
     server_statuses = []
     config_paths: list[str] = []
+    hitl_tools: list[str] = []
     for registry in registries:
         tools.extend(registry.tools)
         server_statuses.extend(registry.status.servers)
+        hitl_tools.extend(registry.hitl_tools)
         if registry.status.config_path:
             config_paths.append(registry.status.config_path)
     return MCPRegistry(
@@ -195,6 +199,7 @@ def _combine_mcp_registries(*registries: MCPRegistry) -> MCPRegistry:
             config_path=", ".join(config_paths) if config_paths else None,
             servers=tuple(server_statuses),
         ),
+        hitl_tools=tuple(dict.fromkeys(hitl_tools)),
     )
 
 
@@ -207,6 +212,7 @@ def _create_deep_agent(
     tracing: TracingSetup,
     use_memory_checkpointer: bool,
     backend: Any | None,
+    interrupt_on: dict[str, Any] | None = None,
 ) -> Any:
     try:
         from deepagents import create_deep_agent
@@ -225,6 +231,8 @@ def _create_deep_agent(
         kwargs["skills"] = skills
     if backend is not None:
         kwargs["backend"] = backend
+    if interrupt_on:
+        kwargs["interrupt_on"] = interrupt_on
 
     copilotkit_middleware = _create_copilotkit_middleware()
     middleware = [NormalizeSystemMessagesMiddleware()]

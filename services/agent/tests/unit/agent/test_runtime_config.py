@@ -14,7 +14,7 @@ class DummyGraph:
 def test_runnable_config_forwards_deepagents_recursion_limit_as_top_level_key() -> None:
     runtime = AgentRuntime(
         graph=DummyGraph(config={"recursion_limit": 1234}),
-        settings=load_settings({"APP_ENV": "test"}),
+        settings=load_settings(env={}, config={"app_env": "test"}),
     )
 
     config = runtime.runnable_config(
@@ -28,7 +28,7 @@ def test_runnable_config_forwards_deepagents_recursion_limit_as_top_level_key() 
 
 
 def test_runnable_config_does_not_invent_recursion_limit_when_graph_has_no_bound_config() -> None:
-    runtime = AgentRuntime(graph=object(), settings=load_settings({"APP_ENV": "test"}))
+    runtime = AgentRuntime(graph=object(), settings=load_settings(env={}, config={"app_env": "test"}))
 
     config = runtime.runnable_config(protocol="smoke")
 

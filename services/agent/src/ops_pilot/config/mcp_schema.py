@@ -28,6 +28,8 @@ class MCPServerConfig:
     headers: Mapping[str, str] = field(default_factory=dict)
     env: Mapping[str, str] = field(default_factory=dict)
     timeout: float | None = None
+    allow_tools: tuple[str, ...] = field(default_factory=tuple)
+    hitl_tools: tuple[str, ...] = field(default_factory=tuple)
 
     @classmethod
     def from_mapping(cls, name: str, data: Mapping[str, Any]) -> MCPServerConfig:
@@ -56,6 +58,8 @@ class MCPServerConfig:
             headers=_string_mapping(name, "headers", data.get("headers", {})),
             env=_string_mapping(name, "env", data.get("env", {})),
             timeout=parsed_timeout,
+            allow_tools=_string_list(name, "allow_tools", data.get("allow_tools", ())),
+            hitl_tools=_string_list(name, "hitl_tools", data.get("hitl_tools", ())),
         )
         config.validate()
         return config
@@ -123,6 +127,14 @@ class MCPConfig:
     def required_names(self) -> set[str]:
         return {server.name for server in self.servers if server.required}
 
+    def hitl_tool_names(self) -> set[str]:
+        """Union of tool names that require human-in-the-loop approval."""
+
+        names: set[str] = set()
+        for server in self.servers:
+            names.update(server.hitl_tools)
+        return names
+
     def to_langchain_config(self) -> dict[str, dict[str, Any]]:
         return {server.name: server.to_client_connection() for server in self.servers}
 
@@ -146,3 +158,11 @@ def _string_mapping(name: str, field_name: str, value: Any) -> Mapping[str, str]
             raise MCPConfigError(f"MCP server '{name}' field '{field_name}' must contain only string keys/values.")
         parsed[key] = item
     return parsed
+
+
+def _string_list(name: str, field_name: str, value: Any) -> tuple[str, ...]:
+    if value in (None, ""):
+        return ()
+    if not isinstance(value, list | tuple) or not all(isinstance(item, str) for item in value):
+        raise MCPConfigError(f"MCP server '{name}' field '{field_name}' must be a list of strings.")
+    return tuple(value)

@@ -59,3 +59,96 @@ button:disabled {
   background: #b7edf2;
   color: var(--text-primary);
 }
+
+.approval-dialog {
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface-panel);
+  padding: 16px;
+  margin: 8px 0;
+  max-width: 520px;
+}
+
+.approval-dialog__header {
+  font-weight: 600;
+  color: var(--warning);
+  margin-bottom: 4px;
+}
+
+.approval-dialog__hint {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  margin: 0 0 12px;
+}
+
+.approval-dialog__actions {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.approval-dialog__action {
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.approval-dialog__tool {
+  font-family: var(--font-ops-mono);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.approval-dialog__desc {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.approval-dialog__args {
+  font-family: var(--font-ops-mono);
+  font-size: 0.8rem;
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin: 0;
+  overflow-x: auto;
+}
+
+.approval-dialog__buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.approval-dialog__approve,
+.approval-dialog__reject,
+.approval-dialog__cancel {
+  border-radius: 8px;
+  border: 1px solid transparent;
+  padding: 6px 14px;
+  font-weight: 600;
+}
+
+.approval-dialog__approve {
+  background: var(--success);
+  color: var(--text-inverse);
+}
+
+.approval-dialog__reject {
+  background: var(--danger);
+  color: var(--text-inverse);
+}
+
+.approval-dialog__cancel {
+  background: transparent;
+  border-color: var(--border-strong);
+  color: var(--text-secondary);
+}
+

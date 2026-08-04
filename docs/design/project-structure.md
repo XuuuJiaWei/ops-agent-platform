@@ -144,7 +144,7 @@ ops-agent-platform/
           skills/
 
   config/
-    mcp.example.json
+    config.example.yaml
     subagents.example.json
 
   skills/

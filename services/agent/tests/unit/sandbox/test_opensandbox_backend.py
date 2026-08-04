@@ -41,7 +41,7 @@ class FakeBackend:
 
 
 def test_create_sandbox_runtime_returns_none_when_disabled() -> None:
-    settings = load_settings({})
+    settings = load_settings(env={}, config={})
 
     assert create_sandbox_runtime(settings) is None
 
@@ -62,10 +62,8 @@ def test_create_sandbox_runtime_builds_opensandbox_backend(monkeypatch) -> None:
         lambda: {"DT_FRANKFURT_TOKEN": "token", "DT_FRANKFURT_URL": "https://example.test"},
     )
     settings = load_settings(
-        {
-            "OPEN_SANDBOX_DOMAIN": "opensandbox.example.test",
-            "OPEN_SANDBOX_API_KEY": "secret",
-        }
+        env={"OPEN_SANDBOX_API_KEY": "secret"},
+        config={"open_sandbox": {"domain": "opensandbox.example.test"}},
     )
 
     runtime = create_sandbox_runtime(settings)
@@ -113,10 +111,8 @@ def test_sandbox_runtime_status_does_not_include_api_key(monkeypatch) -> None:
         ),
     )
     settings = load_settings(
-        {
-            "OPEN_SANDBOX_DOMAIN": "opensandbox.example.test",
-            "OPEN_SANDBOX_API_KEY": "secret",
-        }
+        env={"OPEN_SANDBOX_API_KEY": "secret"},
+        config={"open_sandbox": {"domain": "opensandbox.example.test"}},
     )
 
     runtime = create_sandbox_runtime(settings)

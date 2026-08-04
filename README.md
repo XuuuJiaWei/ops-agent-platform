@@ -61,9 +61,10 @@ Create local configuration:
 
 ```bash
 cp .env.example .env
+cp config/config.example.yaml config/config.yaml
 ```
 
-Fill SAP AI Core / Generative AI Hub values as needed. If the SAP SDK is already configured through local SDK configuration or `VCAP_SERVICES`, the `AICORE_*` values can stay empty. Add Dynatrace credentials only when enabling the Dynatrace MCP server.
+Secrets live in `.env`; regular configuration (including MCP servers) lives in `config/config.yaml`. Fill SAP AI Core / Generative AI Hub values in `.env` as needed. If the SAP SDK is already configured through local SDK configuration or `VCAP_SERVICES`, the `AICORE_*` values can stay empty. Add Dynatrace credentials (referenced from `config/config.yaml` via `${VAR}`) only when enabling the Dynatrace MCP server.
 
 Start the full development stack:
 
@@ -83,9 +84,9 @@ The Vite development server proxies `/api/copilotkit/*` to the Copilot runtime a
 
 ## Configuration
 
-Example configuration lives in `config/`:
+Regular (non-secret) configuration lives in `config/config.yaml` (copy from `config/config.example.yaml`); secrets live in `.env`. `OPS_PILOT_CONFIG` can point the backend at a different config file.
 
-- `config/mcp.example.json` defines deployment-level MCP server configuration.
+- `config/config.yaml` holds app, SAP model, server, sandbox, and inline MCP server configuration. Each MCP server may declare `allow_tools` (allowlist; empty = allow all) and `hitl_tools` (tools that require human-in-the-loop approval before running).
 - `config/subagents.example.json` reserves future custom subagent configuration. The current version can keep `subagents` empty and use DeepAgents defaults.
 
 Useful development overrides:
@@ -101,7 +102,7 @@ WEB_WAIT_TIMEOUT=180 pnpm dev
 
 The default development stack uses a self-hosted CopilotKit Runtime and a local AG-UI/FastAPI backend. CopilotKit anonymous telemetry is disabled in the runtime. Do not enable Copilot Cloud / Enterprise Intelligence Platform features for company data unless that path is explicitly approved.
 
-Langfuse tracing is optional. If `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, or `LANGFUSE_BASE_URL` is missing, the backend starts with tracing disabled.
+Langfuse tracing is optional. If `LANGFUSE_PUBLIC_KEY` or `LANGFUSE_SECRET_KEY` (in `.env`) or the `langfuse.base_url` (in `config/config.yaml`) is missing, the backend starts with tracing disabled.
 
 ## Validation
 

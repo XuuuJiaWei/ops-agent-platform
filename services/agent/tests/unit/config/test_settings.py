@@ -1,8 +1,10 @@
-from ops_pilot.config.settings import load_settings
+import pytest
+
+from ops_pilot.config.settings import SettingsError, load_settings
 
 
-def test_load_settings_defaults_without_secrets():
-    settings = load_settings({})
+def test_load_settings_defaults_with_empty_config():
+    settings = load_settings(env={}, config={})
 
     assert settings.app_env == "local"
     assert settings.assistant_id == "agent"
@@ -12,50 +14,88 @@ def test_load_settings_defaults_without_secrets():
     assert settings.sap_max_tokens == 8192
     assert settings.langfuse_enabled is False
     assert settings.enable_smoke_tools is True
+    assert settings.mcp.servers == ()
 
 
-def test_load_settings_splits_skill_paths():
-    settings = load_settings({"SKILLS_PATHS": "./skills/examples/,./skills/other"})
-
-    assert len(settings.skills_paths) == 2
-
-
-def test_load_settings_reads_optional_max_tokens():
-    settings = load_settings({"SAP_AI_CORE_MAX_TOKENS": "4096"})
-
-    assert settings.sap_max_tokens == 4096
-
-
-def test_load_settings_auto_enables_open_sandbox_when_credentials_exist():
+def test_load_settings_reads_nested_regular_config():
     settings = load_settings(
-        {
-            "OPEN_SANDBOX_DOMAIN": "opensandbox.example.test",
-            "OPEN_SANDBOX_API_KEY": "secret",
-        }
+        env={},
+        config={
+            "app_env": "test",
+            "sap": {"model_name": "custom-model", "max_tokens": 4096, "top_p": 0.9},
+            "skills_paths": ["./skills/examples", "./skills/other"],
+            "server": {"chat_port": 8130},
+        },
+    )
+
+    assert settings.app_env == "test"
+    assert settings.sap_model_name == "custom-model"
+    assert settings.sap_max_tokens == 4096
+    assert settings.sap_top_p == 0.9
+    assert len(settings.skills_paths) == 2
+    assert settings.chat_port == 8130
+
+
+def test_load_settings_overlays_secrets_from_env():
+    settings = load_settings(
+        env={"LANGFUSE_PUBLIC_KEY": "pk", "LANGFUSE_SECRET_KEY": "sk"},
+        config={"langfuse": {"base_url": "https://lf.internal"}},
+    )
+
+    assert settings.langfuse_public_key == "pk"
+    assert settings.langfuse_secret_key == "sk"
+    assert settings.langfuse_base_url == "https://lf.internal"
+    assert settings.langfuse_enabled is True
+
+
+def test_load_settings_parses_mcp_servers_with_permissions():
+    settings = load_settings(
+        env={},
+        config={
+            "mcpServers": {
+                "dyna": {
+                    "transport": "stdio",
+                    "command": "npx",
+                    "allow_tools": ["get_problems"],
+                    "hitl_tools": ["restart_service"],
+                }
+            }
+        },
+    )
+
+    assert [s.name for s in settings.mcp.servers] == ["dyna"]
+    assert settings.mcp.servers[0].allow_tools == ("get_problems",)
+    assert settings.mcp.hitl_tool_names() == {"restart_service"}
+
+
+def test_load_settings_auto_enables_open_sandbox_when_domain_and_key_present():
+    settings = load_settings(
+        env={"OPEN_SANDBOX_API_KEY": "secret"},
+        config={"open_sandbox": {"domain": "opensandbox.example.test"}},
     )
 
     assert settings.open_sandbox_enabled is True
     assert settings.open_sandbox_domain == "opensandbox.example.test"
     assert settings.open_sandbox_api_key == "secret"
-    assert settings.open_sandbox_protocol == "https"
-    assert settings.open_sandbox_use_server_proxy is True
-    assert settings.open_sandbox_disable_metrics is True
-    assert settings.open_sandbox_timeout_seconds == 600
 
 
-def test_load_settings_reads_optional_open_sandbox_timeout():
-    settings = load_settings({"OPEN_SANDBOX_TIMEOUT_SECONDS": "3600"})
+def test_load_settings_does_not_enable_open_sandbox_without_key():
+    settings = load_settings(env={}, config={"open_sandbox": {"domain": "opensandbox.example.test"}})
 
-    assert settings.open_sandbox_timeout_seconds == 3600
+    assert settings.open_sandbox_enabled is False
 
 
 def test_load_settings_can_force_open_sandbox_disabled():
     settings = load_settings(
-        {
-            "OPEN_SANDBOX_ENABLED": "false",
-            "OPEN_SANDBOX_DOMAIN": "opensandbox.example.test",
-            "OPEN_SANDBOX_API_KEY": "secret",
-        }
+        env={"OPEN_SANDBOX_API_KEY": "secret"},
+        config={"open_sandbox": {"enabled": False, "domain": "opensandbox.example.test"}},
     )
 
     assert settings.open_sandbox_enabled is False
+
+
+def test_load_settings_raises_when_config_file_missing(tmp_path):
+    missing = tmp_path / "nope.yaml"
+
+    with pytest.raises(SettingsError, match="Config file not found"):
+        load_settings(env={"OPS_PILOT_CONFIG": str(missing)})

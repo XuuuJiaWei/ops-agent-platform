@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
 
-from ops_pilot.config.mcp_schema import MCPConfig, MCPConfigError, MCPServerConfig
-from ops_pilot.config.paths import display_path
+from ops_pilot.config.mcp_schema import MCPConfig, MCPServerConfig
 from ops_pilot.config.settings import Settings
 from ops_pilot.mcp.status import MCPLoadResult, MCPLoadStatus, MCPServerLoadStatus
 
 ENV_PATTERN = re.compile(r"\$\{([A-Z0-9_]+)\}")
+
+logger = logging.getLogger(__name__)
 
 
 class MCPLoadError(RuntimeError):
@@ -27,26 +29,23 @@ class RequiredMCPServerError(MCPLoadError):
 async def load_mcp_tools(settings: Settings | MCPConfig) -> MCPLoadResult:
     """Load configured MCP tools and collect per-server status.
 
-    Accepts ``Settings`` (production path, reads ``mcp_config_path``) or an
-    ``MCPConfig`` directly (dynamic developer-mode servers).
+    Accepts ``Settings`` (production path, reads the inline ``settings.mcp``
+    config) or an ``MCPConfig`` directly (dynamic developer-mode servers).
     """
 
     if isinstance(settings, MCPConfig):
         return await _load_from_config(settings, config_path=None)
 
-    if settings.mcp_config_path is None:
+    if not settings.mcp.servers:
         return MCPLoadResult(tools=[], status=MCPLoadStatus(config_path=None, servers=()))
 
-    try:
-        config = MCPConfig.load(settings.mcp_config_path)
-    except MCPConfigError as exc:
-        raise MCPLoadError(str(exc)) from exc
-    return await _load_from_config(config, config_path=display_path(settings.mcp_config_path))
+    return await _load_from_config(settings.mcp, config_path="config.yaml")
 
 
 async def _load_from_config(config: MCPConfig, *, config_path: str | None) -> MCPLoadResult:
     tools: list[Any] = []
     statuses: list[MCPServerLoadStatus] = []
+    hitl_tools: list[str] = []
 
     for server in config.servers:
         expanded = _expand_server_env(server)
@@ -67,21 +66,62 @@ async def _load_from_config(config: MCPConfig, *, config_path: str | None) -> MC
                 ) from exc
             continue
 
-        tools.extend(server_tools)
+        kept_tools = _apply_allowlist(server, server_tools)
+        tools.extend(kept_tools)
+        hitl_tools.extend(_collect_hitl_tools(server, kept_tools))
         statuses.append(
             MCPServerLoadStatus(
                 name=server.name,
                 required=server.required,
                 transport=server.transport,
                 ok=True,
-                tool_count=len(server_tools),
+                tool_count=len(kept_tools),
             )
         )
 
     return MCPLoadResult(
         tools=tools,
         status=MCPLoadStatus(config_path=config_path, servers=tuple(statuses)),
+        hitl_tools=tuple(dict.fromkeys(hitl_tools)),
     )
+
+
+def _tool_name(tool: Any) -> str:
+    return str(getattr(tool, "name", ""))
+
+
+def _apply_allowlist(server: MCPServerConfig, tools: list[Any]) -> list[Any]:
+    """Keep only allowlisted tools. Empty/omitted ``allow_tools`` allows all."""
+
+    if not server.allow_tools:
+        return tools
+    allowed = set(server.allow_tools)
+    kept = [tool for tool in tools if _tool_name(tool) in allowed]
+    unmatched = allowed - {_tool_name(tool) for tool in tools}
+    if unmatched:
+        logger.warning(
+            "MCP server '%s' allow_tools entries matched no loaded tool: %s",
+            server.name,
+            ", ".join(sorted(unmatched)),
+        )
+    return kept
+
+
+def _collect_hitl_tools(server: MCPServerConfig, kept_tools: list[Any]) -> list[str]:
+    """Return hitl tool names that survived the allowlist; warn on non-matches."""
+
+    if not server.hitl_tools:
+        return []
+    kept_names = {_tool_name(tool) for tool in kept_tools}
+    hitl = [name for name in server.hitl_tools if name in kept_names]
+    unmatched = set(server.hitl_tools) - kept_names
+    if unmatched:
+        logger.warning(
+            "MCP server '%s' hitl_tools entries matched no loaded/allowed tool: %s",
+            server.name,
+            ", ".join(sorted(unmatched)),
+        )
+    return hitl
 
 
 async def _load_single_server(server: MCPServerConfig) -> list[Any]:

@@ -96,7 +96,7 @@ def _patch_agui(monkeypatch) -> None:
 async def test_unified_backend_mounts_chat_a2a_and_tunnel_routes(monkeypatch) -> None:
     _patch_agui(monkeypatch)
 
-    settings = load_settings({"APP_ENV": "test", "ASSISTANT_ID": "agent"})
+    settings = load_settings(env={}, config={"app_env": "test", "assistant_id": "agent"})
     app = await create_backend_app(settings, runtime=DummyRuntime())
     paths = {path for route in app.routes if (path := getattr(route, "path", None))}
 
@@ -116,7 +116,7 @@ async def test_tunnel_agent_config_applies_to_runtime_manager(monkeypatch) -> No
     _patch_agui(monkeypatch)
     monkeypatch.setattr(tunnel_app.manager, "get", lambda tunnel_id: object())
 
-    settings = load_settings({"APP_ENV": "test", "ASSISTANT_ID": "agent"})
+    settings = load_settings(env={}, config={"app_env": "test", "assistant_id": "agent"})
     app = await create_backend_app(settings, runtime=DummyRuntime())
     fake_manager = FakeRuntimeManager()
     app.state.agent_runtime_manager = fake_manager
@@ -138,7 +138,7 @@ async def test_tunnel_agent_config_applies_to_runtime_manager(monkeypatch) -> No
 async def test_tunnel_agent_config_starts_local_bridge_for_profile(monkeypatch) -> None:
     _patch_agui(monkeypatch)
 
-    settings = load_settings({"APP_ENV": "test", "ASSISTANT_ID": "agent"})
+    settings = load_settings(env={}, config={"app_env": "test", "assistant_id": "agent"})
     app = await create_backend_app(settings, runtime=DummyRuntime())
     fake_runtime_manager = FakeRuntimeManager()
     fake_bridge_manager = FakeLocalBridgeManager()
@@ -167,7 +167,7 @@ async def test_tunnel_agent_config_starts_local_bridge_for_profile(monkeypatch) 
 async def test_tunnel_agent_config_requires_connected_tunnel(monkeypatch) -> None:
     _patch_agui(monkeypatch)
 
-    settings = load_settings({"APP_ENV": "test", "ASSISTANT_ID": "agent"})
+    settings = load_settings(env={}, config={"app_env": "test", "assistant_id": "agent"})
     app = await create_backend_app(settings, runtime=DummyRuntime())
     app.state.agent_runtime_manager = FakeRuntimeManager()
 

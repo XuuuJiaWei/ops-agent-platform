@@ -1,0 +1,62 @@
+# ops_pilot regular (non-secret) configuration.
+#
+# Copy to config/config.yaml and adjust as needed. Secrets stay in .env and are
+# referenced from this file with ${VAR} only inside MCP server env blocks.
+
+app_env: local
+assistant_id: agent
+
+sap:
+  model_name: anthropic--claude-4.6-sonnet
+  temperature: 0.0
+  top_p: null
+  max_tokens: 8192
+
+system_prompt: null
+skills_paths: [./skills]
+enable_smoke_tools: true
+
+langfuse:
+  # Public/secret keys stay in .env; only the base URL is regular config.
+  base_url: https://cloud.langfuse.com
+
+server:
+  chat_base_path: /chat
+  chat_host: 127.0.0.1
+  chat_port: 8123
+  a2a_base_path: /a2a
+
+open_sandbox:
+  # null = auto-enable only when domain (here) and api_key (.env) are both set.
+  enabled: null
+  domain: opensandbox.example.com
+  protocol: https
+  use_server_proxy: true
+  disable_metrics: true
+  image: python:3.11
+  timeout_seconds: 600
+  ready_timeout_seconds: 240
+  cpu_limit: 250m
+  memory_limit: 256Mi
+  cpu_request: 100m
+  memory_request: 128Mi
+
+# MCP servers (same shape as the retired config/mcp.example.json) plus two
+# permission lists per server:
+#   allow_tools: allowlist of tool names; empty/omitted = allow all.
+#   hitl_tools:  tools that require human-in-the-loop approval before running.
+mcpServers:
+  dynatrace-managed:
+    required: true
+    transport: stdio
+    command: npx
+    args: ["-y", "@dynatrace-oss/dynatrace-managed-mcp-server@1.0.0"]
+    allow_tools: []
+    hitl_tools: []
+    env:
+      DT_CONFIG_FILE: ./dt-config.yaml
+      DT_PROD_TOKEN: ${DT_PROD_TOKEN}
+      DT_STAGING_TOKEN: ${DT_STAGING_TOKEN}
+      DT_MCP_DISABLE_TELEMETRY: "true"
+      LOG_FILE: /tmp/ops-agent-dynatrace-managed-mcp.log
+      LOG_LEVEL: info

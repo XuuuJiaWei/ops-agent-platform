@@ -39,7 +39,7 @@ async def test_build_agent_runtime_passes_sandbox_backend(monkeypatch) -> None:
 
     monkeypatch.setattr(runtime_module, "_create_deep_agent", fake_create_deep_agent)
 
-    runtime = await runtime_module.build_agent_runtime(load_settings({"APP_ENV": "test"}))
+    runtime = await runtime_module.build_agent_runtime(load_settings(env={}, config={"app_env": "test"}))
 
     assert runtime.sandbox is sandbox
     assert captured["backend"] is backend
@@ -71,7 +71,7 @@ async def test_build_agent_runtime_syncs_skills_into_sandbox(monkeypatch) -> Non
     monkeypatch.setattr(runtime_module, "sync_skill_paths_to_backend", fake_sync_skill_paths)
     monkeypatch.setattr(runtime_module, "_create_deep_agent", fake_create_deep_agent)
 
-    runtime = await runtime_module.build_agent_runtime(load_settings({"APP_ENV": "test"}))
+    runtime = await runtime_module.build_agent_runtime(load_settings(env={}, config={"app_env": "test"}))
 
     assert synced == {"paths": ("/local/skills",), "backend": backend}
     assert runtime.skills == ("/workspace/skills/00-skills",)
@@ -95,10 +95,36 @@ async def test_build_agent_runtime_closes_sandbox_when_graph_creation_fails(monk
     monkeypatch.setattr(runtime_module, "_create_deep_agent", fake_create_deep_agent)
 
     with pytest.raises(RuntimeError, match="boom"):
-        await runtime_module.build_agent_runtime(load_settings({"APP_ENV": "test"}))
+        await runtime_module.build_agent_runtime(load_settings(env={}, config={"app_env": "test"}))
 
     assert sandbox.closed is True
 
 
 async def _empty_registry() -> MCPRegistry:
     return MCPRegistry()
+
+
+async def _hitl_registry() -> MCPRegistry:
+    return MCPRegistry(hitl_tools=("restart_service", "delete_entity"))
+
+
+@pytest.mark.asyncio
+async def test_build_agent_runtime_builds_interrupt_on_from_hitl_tools(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(runtime_module, "create_chat_model", lambda _: object())
+    monkeypatch.setattr(runtime_module, "create_mcp_registry", lambda _: _hitl_registry())
+    monkeypatch.setattr(runtime_module, "resolve_skill_paths", lambda _: [])
+    monkeypatch.setattr(runtime_module, "create_callback_handler", lambda _: TracingSetup(False))
+    monkeypatch.setattr(runtime_module, "get_smoke_tools", lambda: [])
+    monkeypatch.setattr(runtime_module, "create_sandbox_runtime", lambda _: None)
+
+    def fake_create_deep_agent(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(runtime_module, "_create_deep_agent", fake_create_deep_agent)
+
+    await runtime_module.build_agent_runtime(load_settings(env={}, config={"app_env": "test"}))
+
+    assert captured["interrupt_on"] == {"restart_service": True, "delete_entity": True}

@@ -24,7 +24,7 @@ need_cmd uv
 
 need_file package.json
 need_file pnpm-workspace.yaml
-need_file config/mcp.example.json
+need_file config/config.example.yaml
 need_file config/subagents.example.json
 need_file apps/web/package.json
 need_file apps/copilot-runtime/package.json

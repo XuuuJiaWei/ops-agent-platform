@@ -63,3 +63,4 @@ class MCPLoadStatus:
 class MCPLoadResult:
     tools: list[Any]
     status: MCPLoadStatus
+    hitl_tools: tuple[str, ...] = ()

@@ -4,6 +4,7 @@
 !.env.example
 dt-config.yaml
 config/dt-config.yaml
+config/config.yaml
 config/mcp.local.json
 *token*
 *secret*
