@@ -48,6 +48,7 @@ class AgentRuntime:
             self.settings,
             callbacks=self.tracing.callbacks,
             protocol=protocol,
+            recursion_limit=_graph_recursion_limit(self.graph),
             thread_id=thread_id,
             run_id=run_id,
             a2a_task_id=a2a_task_id,
@@ -221,6 +222,15 @@ def _create_memory_checkpointer() -> Any | None:
     except ImportError:
         return None
     return MemorySaver()
+
+
+def _graph_recursion_limit(graph: Any) -> int | None:
+    config = getattr(graph, "config", None)
+    if isinstance(config, dict):
+        value = config.get("recursion_limit")
+        if isinstance(value, int):
+            return value
+    return None
 
 
 def _extract_result_text(result: Any) -> str:

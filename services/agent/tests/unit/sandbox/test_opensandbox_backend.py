@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from ops_pilot.config.settings import load_settings
 from ops_pilot.sandbox import opensandbox_backend
-from ops_pilot.sandbox.opensandbox_backend import create_sandbox_runtime
+from ops_pilot.sandbox.opensandbox_backend import SandboxRuntime, create_sandbox_runtime
 
 
 class FakeConnectionConfig:
@@ -18,6 +18,7 @@ class FakeSandbox:
         self.id = "sandbox-123"
         self.destroyed = False
         self.closed = False
+        self.destroy_error: Exception | None = None
 
     @classmethod
     def create(cls, image: str, **kwargs: object) -> FakeSandbox:
@@ -26,6 +27,8 @@ class FakeSandbox:
         return cls()
 
     def destroy(self) -> None:
+        if self.destroy_error is not None:
+            raise self.destroy_error
         self.destroyed = True
 
     def close(self) -> None:
@@ -120,3 +123,13 @@ def test_sandbox_runtime_status_does_not_include_api_key(monkeypatch) -> None:
 
     assert runtime is not None
     assert "secret" not in str(runtime.as_dict())
+
+
+def test_sandbox_runtime_close_treats_missing_remote_sandbox_as_already_closed() -> None:
+    sandbox = FakeSandbox()
+    sandbox.destroy_error = RuntimeError("Sandbox 'sandbox-123' not found")
+    runtime = SandboxRuntime(backend=FakeBackend(sandbox=sandbox), sandbox=sandbox)
+
+    runtime.close()
+
+    assert sandbox.closed is True

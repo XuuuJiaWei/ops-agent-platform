@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, FastAPI
 
 from ops_pilot.agent.runtime import AgentRuntime
+from ops_pilot.api.errors import register_exception_handlers
 from ops_pilot.config.settings import get_settings
 from ops_pilot.health.status import build_runtime_status, health_snapshot
 
@@ -18,6 +19,7 @@ async def health() -> dict[str, object]:
 
 def create_health_app(runtime: AgentRuntime | None = None) -> FastAPI:
     app = FastAPI(title="ops_pilot Health", version="0.1.0")
+    register_exception_handlers(app)
     app.include_router(router)
 
     if runtime is not None:

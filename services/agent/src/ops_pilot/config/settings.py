@@ -72,7 +72,7 @@ class Settings:
     open_sandbox_use_server_proxy: bool = True
     open_sandbox_disable_metrics: bool = True
     open_sandbox_image: str = "python:3.11"
-    open_sandbox_timeout_seconds: int = 600
+    open_sandbox_timeout_seconds: int | None = 600
     open_sandbox_ready_timeout_seconds: int = 240
     open_sandbox_cpu_limit: str = "250m"
     open_sandbox_memory_limit: str = "256Mi"

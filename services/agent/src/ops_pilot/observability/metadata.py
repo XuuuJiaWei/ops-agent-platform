@@ -41,6 +41,7 @@ def build_runnable_config(
     *,
     callbacks: tuple[Any, ...] = (),
     protocol: str,
+    recursion_limit: int | None = None,
     thread_id: str | None = None,
     run_id: str | None = None,
     a2a_task_id: str | None = None,
@@ -61,6 +62,8 @@ def build_runnable_config(
     }
     if callbacks:
         config["callbacks"] = list(callbacks)
+    if recursion_limit is not None:
+        config["recursion_limit"] = recursion_limit
     effective_configurable = dict(configurable or {})
     if thread_id:
         effective_configurable.setdefault("thread_id", thread_id)

@@ -8,6 +8,8 @@ from typing import Any
 from fastapi import FastAPI
 
 from ops_pilot.agent.factory import create_agent_runtime_async
+from ops_pilot.agui.resilient import create_resilient_agui_agent
+from ops_pilot.api.errors import register_exception_handlers
 from ops_pilot.config.settings import Settings, get_settings
 from ops_pilot.health.app import router as health_router
 from ops_pilot.tunnel.app import router as tunnel_router
@@ -31,6 +33,7 @@ async def create_agui_app(settings: Settings | None = None, runtime: Any | None 
             close()
 
     app = FastAPI(title="ops_pilot AG-UI", version="0.1.0", lifespan=_lifespan)
+    register_exception_handlers(app)
     app.include_router(health_router)
     app.include_router(tunnel_router)
 
@@ -47,7 +50,8 @@ async def create_agui_app(settings: Settings | None = None, runtime: Any | None 
 
     add_langgraph_fastapi_endpoint(
         app=app,
-        agent=LangGraphAGUIAgent(
+        agent=create_resilient_agui_agent(
+            LangGraphAGUIAgent,
             name=resolved_settings.assistant_id,
             description="ops_pilot DeepAgent exposed through AG-UI for CopilotKit.",
             graph=resolved_runtime.graph,

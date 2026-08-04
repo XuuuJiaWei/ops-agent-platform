@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import FastAPI
 
 from ops_pilot.agent.factory import create_agent_runtime_async
+from ops_pilot.api.errors import register_exception_handlers
 from ops_pilot.config.settings import Settings, get_settings
 from ops_pilot.health.app import router as health_router
 
@@ -43,6 +44,7 @@ async def create_a2a_app(settings: Settings | None = None, runtime: Any | None =
 
     base_path = resolved_settings.a2a_base_path.rstrip("/") or "/a2a"
     app = FastAPI(title="ops_pilot A2A", version="0.1.0", lifespan=_lifespan)
+    register_exception_handlers(app)
     app.include_router(health_router)
     add_a2a_routes_to_fastapi(
         app,

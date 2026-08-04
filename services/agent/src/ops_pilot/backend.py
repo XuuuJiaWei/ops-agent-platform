@@ -11,6 +11,8 @@ from ops_pilot.a2a.agent_card import build_agent_card
 from ops_pilot.a2a.executor import create_executor
 from ops_pilot.agent.factory import create_agent_runtime_async
 from ops_pilot.agent.manager import AgentRuntimeManager
+from ops_pilot.agui.resilient import create_resilient_agui_agent
+from ops_pilot.api.errors import register_exception_handlers
 from ops_pilot.config.settings import Settings, get_settings
 from ops_pilot.health.app import router as health_router
 from ops_pilot.tunnel.app import router as tunnel_router
@@ -52,6 +54,7 @@ async def create_backend_app(
             await bridge_shutdown()
 
     app = FastAPI(title="ops_pilot Backend", version="0.1.0", lifespan=_lifespan)
+    register_exception_handlers(app)
     app.state.agent_runtime_manager = runtime_manager
     app.state.local_bridge_manager = local_bridge_manager
 
@@ -67,7 +70,8 @@ async def create_backend_app(
     )
     add_langgraph_fastapi_endpoint(
         app=app,
-        agent=LangGraphAGUIAgent(
+        agent=create_resilient_agui_agent(
+            LangGraphAGUIAgent,
             name=resolved_settings.assistant_id,
             description="ops_pilot DeepAgent exposed through AG-UI for CopilotKit.",
             graph=runtime_manager.graph_proxy(),

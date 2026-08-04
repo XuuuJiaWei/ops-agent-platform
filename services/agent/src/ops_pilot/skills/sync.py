@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 import shlex
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -29,8 +28,8 @@ def sync_skill_paths_to_backend(
 
     uploads: list[tuple[str, bytes]] = []
     remote_sources: list[str] = []
-    for index, source in enumerate(paths):
-        plans = _build_sync_plans(Path(source), index, remote_root)
+    for source in paths:
+        plans = _build_sync_plans(Path(source), remote_root)
         for plan in plans:
             if plan.remote_source not in remote_sources:
                 remote_sources.append(plan.remote_source)
@@ -54,24 +53,21 @@ class _SyncPlan:
     remote_root: str
 
 
-def _build_sync_plans(source: Path, index: int, remote_root: str) -> list[_SyncPlan]:
+def _build_sync_plans(source: Path, remote_root: str) -> list[_SyncPlan]:
     resolved = source.expanduser().resolve()
 
     if resolved.is_file():
-        return [_build_single_skill_plan(resolved.parent, index, remote_root)]
+        return [_build_single_skill_plan(resolved.parent, remote_root)]
 
     if (resolved / "SKILL.md").exists():
-        return [_build_single_skill_plan(resolved, index, remote_root)]
+        return [_build_single_skill_plan(resolved, remote_root)]
 
     skill_dirs = sorted(
         (skill_md.parent for skill_md in resolved.rglob("SKILL.md")),
         key=lambda path: (*_path_depth_key(path.parent), str(path)),
     )
     source_dirs = sorted({skill_dir.parent for skill_dir in skill_dirs}, key=_path_depth_key)
-    source_roots = {
-        source_dir: _source_root_for(source_dir, index, remote_root, sub_index, len(source_dirs))
-        for sub_index, source_dir in enumerate(source_dirs)
-    }
+    source_roots = {source_dir: _source_root_for(resolved, source_dir, remote_root) for source_dir in source_dirs}
     return [
         _SyncPlan(
             local_root=skill_dir,
@@ -82,8 +78,8 @@ def _build_sync_plans(source: Path, index: int, remote_root: str) -> list[_SyncP
     ]
 
 
-def _build_single_skill_plan(skill_dir: Path, index: int, remote_root: str) -> _SyncPlan:
-    source_root = _remote_path(remote_root, f"{index:02d}-{_safe_name(skill_dir.name)}")
+def _build_single_skill_plan(skill_dir: Path, remote_root: str) -> _SyncPlan:
+    source_root = remote_root
     return _SyncPlan(
         local_root=skill_dir,
         remote_source=source_root,
@@ -91,9 +87,10 @@ def _build_single_skill_plan(skill_dir: Path, index: int, remote_root: str) -> _
     )
 
 
-def _source_root_for(source_dir: Path, index: int, remote_root: str, sub_index: int, total: int) -> str:
-    prefix = f"{index:02d}" if total == 1 else f"{index:02d}-{sub_index:02d}"
-    return _remote_path(remote_root, f"{prefix}-{_safe_name(source_dir.name)}")
+def _source_root_for(container_root: Path, source_dir: Path, remote_root: str) -> str:
+    if source_dir == container_root:
+        return remote_root
+    return _remote_path(remote_root, *source_dir.relative_to(container_root).parts)
 
 
 def _path_depth_key(path: Path) -> tuple[int, str]:
@@ -134,7 +131,3 @@ def _remote_path(root: str, *parts: str) -> str:
         current /= part
     return str(current)
 
-
-def _safe_name(value: str) -> str:
-    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("._-")
-    return safe or "skills"

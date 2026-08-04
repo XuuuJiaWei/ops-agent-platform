@@ -25,3 +25,5 @@ OPEN_SANDBOX_API_KEY=...
 ```
 
 When both values are present, the backend automatically passes an `OpensandboxBackend` to `create_deep_agent(...)`. Configured local skills are uploaded into `/workspace/skills/...` before the graph is created so DeepAgents can discover `SKILL.md` files through the sandbox backend. Set `OPEN_SANDBOX_ENABLED=false` to force the default in-memory state backend.
+
+`OPEN_SANDBOX_TIMEOUT_SECONDS` controls the OpenSandbox lease lifetime. The backend renews an active sandbox before use, and rebuilds the runtime with a fresh sandbox when a user returns after the previous sandbox has expired.

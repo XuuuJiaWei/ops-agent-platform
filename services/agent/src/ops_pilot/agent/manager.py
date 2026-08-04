@@ -85,25 +85,57 @@ class AgentRuntimeManager:
     async def reload(self) -> RuntimeReloadResult:
         return await self._reload(dict(self._dynamic_mcp_servers))
 
+    async def ensure_runtime_ready(self) -> RuntimeReloadResult | None:
+        """Refresh the runtime when its OpenSandbox lease expired or vanished."""
+
+        sandbox = getattr(self._runtime, "sandbox", None)
+        if sandbox is None:
+            return None
+        if getattr(sandbox, "is_expired", lambda: False)():
+            return await self._reload(dict(self._dynamic_mcp_servers))
+        should_renew = getattr(sandbox, "should_renew", lambda: False)
+        if not should_renew():
+            return None
+
+        async with self._lock:
+            sandbox = getattr(self._runtime, "sandbox", None)
+            if sandbox is None:
+                return None
+            if getattr(sandbox, "is_expired", lambda: False)():
+                return await self._reload_unlocked(dict(self._dynamic_mcp_servers))
+            should_renew = getattr(sandbox, "should_renew", lambda: False)
+            if not should_renew():
+                return None
+            renew = getattr(sandbox, "renew", None)
+            if renew is None:
+                return None
+            renewed = await asyncio.to_thread(renew)
+            if renewed is False:
+                return await self._reload_unlocked(dict(self._dynamic_mcp_servers))
+            return None
+
     async def shutdown(self) -> None:
         async with self._lock:
             _close_runtime(self._runtime)
 
     async def _reload(self, dynamic_servers: dict[str, MCPServerConfig]) -> RuntimeReloadResult:
         async with self._lock:
-            previous_runtime = self._runtime
-            dynamic_config = MCPConfig(servers=tuple(dynamic_servers.values()))
-            next_runtime = await build_agent_runtime(
-                self.settings,
-                dynamic_mcp_config=dynamic_config,
-                use_memory_checkpointer=self._use_memory_checkpointer,
-            )
-            self._runtime = next_runtime
-            _close_runtime(previous_runtime)
-            self._dynamic_mcp_servers = dynamic_servers
-            self._generation += 1
-            self._reloaded_at = _now_iso()
-            return self.status()
+            return await self._reload_unlocked(dynamic_servers)
+
+    async def _reload_unlocked(self, dynamic_servers: dict[str, MCPServerConfig]) -> RuntimeReloadResult:
+        previous_runtime = self._runtime
+        dynamic_config = MCPConfig(servers=tuple(dynamic_servers.values()))
+        next_runtime = await build_agent_runtime(
+            self.settings,
+            dynamic_mcp_config=dynamic_config,
+            use_memory_checkpointer=self._use_memory_checkpointer,
+        )
+        self._runtime = next_runtime
+        _close_runtime(previous_runtime)
+        self._dynamic_mcp_servers = dynamic_servers
+        self._generation += 1
+        self._reloaded_at = _now_iso()
+        return self.status()
 
     def _dynamic_mcp_status(self, runtime: AgentRuntime) -> MCPLoadStatus:
         names = set(self._dynamic_mcp_servers)
@@ -123,6 +155,7 @@ class CurrentRuntimeProxy:
         return getattr(self._manager.current, name)
 
     async def ainvoke_text(self, text: str, **kwargs: Any) -> str:
+        await self._manager.ensure_runtime_ready()
         return await self._manager.current.ainvoke_text(text, **kwargs)
 
     def runnable_config(self, **kwargs: Any) -> dict[str, Any]:
@@ -138,6 +171,26 @@ class CurrentGraphProxy:
     @property
     def nodes(self) -> Any:
         return self._manager.current.graph.nodes
+
+    async def aget_state(self, *args: Any, **kwargs: Any) -> Any:
+        await self._manager.ensure_runtime_ready()
+        return await self._manager.current.graph.aget_state(*args, **kwargs)
+
+    async def aupdate_state(self, *args: Any, **kwargs: Any) -> Any:
+        await self._manager.ensure_runtime_ready()
+        return await self._manager.current.graph.aupdate_state(*args, **kwargs)
+
+    async def ainvoke(self, *args: Any, **kwargs: Any) -> Any:
+        await self._manager.ensure_runtime_ready()
+        return await self._manager.current.graph.ainvoke(*args, **kwargs)
+
+    def astream_events(self, *args: Any, **kwargs: Any) -> Any:
+        async def _stream():
+            await self._manager.ensure_runtime_ready()
+            async for event in self._manager.current.graph.astream_events(*args, **kwargs):
+                yield event
+
+        return _stream()
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._manager.current.graph, name)

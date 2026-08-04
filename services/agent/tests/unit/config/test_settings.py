@@ -40,6 +40,13 @@ def test_load_settings_auto_enables_open_sandbox_when_credentials_exist():
     assert settings.open_sandbox_protocol == "https"
     assert settings.open_sandbox_use_server_proxy is True
     assert settings.open_sandbox_disable_metrics is True
+    assert settings.open_sandbox_timeout_seconds == 600
+
+
+def test_load_settings_reads_optional_open_sandbox_timeout():
+    settings = load_settings({"OPEN_SANDBOX_TIMEOUT_SECONDS": "3600"})
+
+    assert settings.open_sandbox_timeout_seconds == 3600
 
 
 def test_load_settings_can_force_open_sandbox_disabled():
