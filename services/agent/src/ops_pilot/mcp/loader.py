@@ -6,7 +6,8 @@ import logging
 import os
 import re
 from collections.abc import Mapping
-from dataclasses import replace
+from contextlib import AsyncExitStack
+from dataclasses import dataclass, replace
 from typing import Any
 
 from ops_pilot.config.mcp_schema import MCPConfig, MCPServerConfig
@@ -30,6 +31,20 @@ class MissingMCPEnvironmentError(MCPLoadError):
     """Raised when an MCP config references an unset environment variable."""
 
 
+@dataclass
+class PersistentMCPSessions:
+    """Owns long-lived MCP sessions backing runtime-scoped LangChain tools."""
+
+    _stack: AsyncExitStack
+    _closed: bool = False
+
+    async def aclose(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        await self._stack.aclose()
+
+
 async def load_mcp_tools(settings: Settings | MCPConfig) -> MCPLoadResult:
     """Load configured MCP tools and collect per-server status.
 
@@ -50,11 +65,13 @@ async def _load_from_config(config: MCPConfig, *, config_path: str | None) -> MC
     tools: list[Any] = []
     statuses: list[MCPServerLoadStatus] = []
     hitl_tools: list[str] = []
+    session_managers: list[PersistentMCPSessions] = []
 
     for server in config.servers:
         try:
             expanded = _expand_server_env(server)
-            server_tools = await _load_single_server(expanded)
+            loaded = await _load_single_server(expanded)
+            server_tools, session_manager = _unpack_server_load_result(loaded)
         except Exception as exc:  # noqa: BLE001 - convert adapter errors to startup status.
             status = MCPServerLoadStatus(
                 name=server.name,
@@ -65,6 +82,7 @@ async def _load_from_config(config: MCPConfig, *, config_path: str | None) -> MC
             )
             statuses.append(status)
             if server.required:
+                await _close_session_managers(session_managers)
                 raise RequiredMCPServerError(
                     f"Required MCP server '{server.name}' failed to load: {status.error}"
                 ) from exc
@@ -73,6 +91,11 @@ async def _load_from_config(config: MCPConfig, *, config_path: str | None) -> MC
         kept_tools = _apply_allowlist(server, server_tools)
         tools.extend(kept_tools)
         hitl_tools.extend(_collect_hitl_tools(server, kept_tools))
+        if session_manager is not None:
+            if kept_tools:
+                session_managers.append(session_manager)
+            else:
+                await session_manager.aclose()
         statuses.append(
             MCPServerLoadStatus(
                 name=server.name,
@@ -87,6 +110,7 @@ async def _load_from_config(config: MCPConfig, *, config_path: str | None) -> MC
         tools=tools,
         status=MCPLoadStatus(config_path=config_path, servers=tuple(statuses)),
         hitl_tools=tuple(dict.fromkeys(hitl_tools)),
+        session_managers=tuple(session_managers),
     )
 
 
@@ -128,14 +152,36 @@ def _collect_hitl_tools(server: MCPServerConfig, kept_tools: list[Any]) -> list[
     return hitl
 
 
-async def _load_single_server(server: MCPServerConfig) -> list[Any]:
+async def _load_single_server(server: MCPServerConfig) -> tuple[list[Any], PersistentMCPSessions]:
     try:
         from langchain_mcp_adapters.client import MultiServerMCPClient
+        from langchain_mcp_adapters.tools import load_mcp_tools as load_session_tools
     except ImportError as exc:
         raise MCPLoadError("langchain-mcp-adapters is not installed. Run 'uv sync' in services/agent.") from exc
 
     client = MultiServerMCPClient({server.name: server.to_client_connection()})
-    return list(await client.get_tools(server_name=server.name))
+    stack = AsyncExitStack()
+    try:
+        session = await stack.enter_async_context(client.session(server.name))
+        tools = list(await load_session_tools(session, server_name=server.name))
+    except Exception:
+        await stack.aclose()
+        raise
+    return tools, PersistentMCPSessions(stack)
+
+
+def _unpack_server_load_result(loaded: Any) -> tuple[list[Any], PersistentMCPSessions | None]:
+    """Accept old test doubles while production returns tools plus session owner."""
+
+    if isinstance(loaded, tuple) and len(loaded) == 2:
+        tools, session_manager = loaded
+        return list(tools), session_manager
+    return list(loaded), None
+
+
+async def _close_session_managers(session_managers: list[PersistentMCPSessions]) -> None:
+    for manager in reversed(session_managers):
+        await manager.aclose()
 
 
 def _expand_server_env(server: MCPServerConfig) -> MCPServerConfig:

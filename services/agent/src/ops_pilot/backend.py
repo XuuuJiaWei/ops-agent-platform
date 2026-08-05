@@ -36,69 +36,76 @@ async def create_backend_app(
     from copilotkit.langgraph import copilotkit_customize_config
 
     resolved_settings = settings or get_settings()
-    resolved_runtime = runtime or await create_agent_runtime_async(resolved_settings)
-    runtime_manager = AgentRuntimeManager(settings=resolved_settings, runtime=resolved_runtime)
+    runtime_manager = AgentRuntimeManager(settings=resolved_settings, runtime=runtime)
     local_bridge_manager = LocalBridgeManager(tunnel_manager)
+
+    def _mount_protocol_routes(app: FastAPI, resolved_runtime: Any) -> None:
+        agui_config = copilotkit_customize_config(
+            emit_tool_calls=True,
+            emit_messages=True,
+        )
+        agui_config.update(
+            resolved_runtime.runnable_config(
+                protocol="copilotkit-agui",
+                extra_metadata={"entrypoint": "backend"},
+            )
+        )
+        add_langgraph_fastapi_endpoint(
+            app=app,
+            agent=create_resilient_agui_agent(
+                LangGraphAGUIAgent,
+                name=resolved_settings.assistant_id,
+                description="ops_pilot DeepAgent exposed through AG-UI for CopilotKit.",
+                graph=runtime_manager.graph_proxy(),
+                config=agui_config,
+            ),
+            path=resolved_settings.chat_base_path.rstrip("/") or "/",
+        )
+
+        agent_card = build_agent_card(resolved_settings)
+        request_handler = DefaultRequestHandler(
+            agent_executor=create_executor(runtime_manager.runtime_proxy(), resolved_settings),
+            task_store=A2ATaskStore(),
+            agent_card=agent_card,
+        )
+        base_path = resolved_settings.a2a_base_path.rstrip("/") or "/a2a"
+        add_a2a_routes_to_fastapi(
+            app,
+            agent_card_routes=create_agent_card_routes(
+                agent_card=agent_card,
+                card_url=f"{base_path}/.well-known/agent-card.json",
+            ),
+            jsonrpc_routes=create_jsonrpc_routes(
+                request_handler=request_handler,
+                rpc_url=f"{base_path}/jsonrpc",
+                enable_v0_3_compat=True,
+            ),
+        )
 
     @asynccontextmanager
     async def _lifespan(app: FastAPI):
-        yield
-        # Read the manager from state at shutdown so a test-swapped fake is honored.
-        runtime_manager = getattr(app.state, "agent_runtime_manager", None)
-        runtime_shutdown = getattr(runtime_manager, "shutdown", None)
-        if runtime_shutdown is not None:
-            await runtime_shutdown()
-        manager = getattr(app.state, "local_bridge_manager", None)
-        bridge_shutdown = getattr(manager, "shutdown", None)
-        if bridge_shutdown is not None:
-            await bridge_shutdown()
+        try:
+            if runtime is None:
+                runtime_manager.attach_runtime(await create_agent_runtime_async(resolved_settings))
+            if not getattr(app.state, "protocol_routes_mounted", False):
+                _mount_protocol_routes(app, runtime_manager.current)
+                app.state.protocol_routes_mounted = True
+            yield
+        finally:
+            # Read managers from state at shutdown so test-swapped fakes are honored.
+            manager = getattr(app.state, "local_bridge_manager", None)
+            bridge_shutdown = getattr(manager, "shutdown", None)
+            if bridge_shutdown is not None:
+                await bridge_shutdown()
+            runtime_owner = getattr(app.state, "agent_runtime_manager", None)
+            runtime_shutdown = getattr(runtime_owner, "shutdown", None)
+            if runtime_shutdown is not None:
+                await runtime_shutdown()
 
     app = FastAPI(title="ops_pilot Backend", version="0.1.0", lifespan=_lifespan)
     register_exception_handlers(app)
     app.state.agent_runtime_manager = runtime_manager
     app.state.local_bridge_manager = local_bridge_manager
-
-    agui_config = copilotkit_customize_config(
-        emit_tool_calls=True,
-        emit_messages=True,
-    )
-    agui_config.update(
-        resolved_runtime.runnable_config(
-            protocol="copilotkit-agui",
-            extra_metadata={"entrypoint": "backend"},
-        )
-    )
-    add_langgraph_fastapi_endpoint(
-        app=app,
-        agent=create_resilient_agui_agent(
-            LangGraphAGUIAgent,
-            name=resolved_settings.assistant_id,
-            description="ops_pilot DeepAgent exposed through AG-UI for CopilotKit.",
-            graph=runtime_manager.graph_proxy(),
-            config=agui_config,
-        ),
-        path=resolved_settings.chat_base_path.rstrip("/") or "/",
-    )
-
-    agent_card = build_agent_card(resolved_settings)
-    request_handler = DefaultRequestHandler(
-        agent_executor=create_executor(runtime_manager.runtime_proxy(), resolved_settings),
-        task_store=A2ATaskStore(),
-        agent_card=agent_card,
-    )
-    base_path = resolved_settings.a2a_base_path.rstrip("/") or "/a2a"
-    add_a2a_routes_to_fastapi(
-        app,
-        agent_card_routes=create_agent_card_routes(
-            agent_card=agent_card,
-            card_url=f"{base_path}/.well-known/agent-card.json",
-        ),
-        jsonrpc_routes=create_jsonrpc_routes(
-            request_handler=request_handler,
-            rpc_url=f"{base_path}/jsonrpc",
-            enable_v0_3_compat=True,
-        ),
-    )
     app.include_router(health_router)
     app.include_router(tunnel_router)
     return app

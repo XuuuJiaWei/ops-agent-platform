@@ -29,3 +29,21 @@ def test_trace_metadata_contains_protocol_ids():
     assert metadata["protocol"] == "a2a"
     assert metadata["thread_id"] == "thread-1"
     assert metadata["a2a_task_id"] == "task-1"
+    assert metadata["langfuse_session_id"] == "thread-1"
+    assert metadata["langfuse_trace_name"] == "handle-a2a-task"
+    assert metadata["langfuse_tags"] == ["ops_pilot", "a2a", "test"]
+
+
+def test_trace_metadata_maps_user_id_to_langfuse_user_id():
+    settings = load_settings(env={}, config={"app_env": "test", "assistant_id": "agent-test"})
+
+    metadata = build_trace_metadata(
+        settings,
+        protocol="copilotkit-agui",
+        thread_id="thread-1",
+        extra={"user_id": "user-1"},
+    )
+
+    assert metadata["langfuse_session_id"] == "thread-1"
+    assert metadata["langfuse_user_id"] == "user-1"
+    assert metadata["langfuse_trace_name"] == "handle-copilotkit-run"

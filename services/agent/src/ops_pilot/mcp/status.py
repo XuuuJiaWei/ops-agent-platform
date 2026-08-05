@@ -64,3 +64,4 @@ class MCPLoadResult:
     tools: list[Any]
     status: MCPLoadStatus
     hitl_tools: tuple[str, ...] = ()
+    session_managers: tuple[Any, ...] = ()

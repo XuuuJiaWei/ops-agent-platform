@@ -43,7 +43,7 @@ class AgentRuntimeManager:
         self,
         *,
         settings: Settings,
-        runtime: AgentRuntime,
+        runtime: AgentRuntime | None,
         use_memory_checkpointer: bool = True,
     ) -> None:
         self.settings = settings
@@ -56,7 +56,14 @@ class AgentRuntimeManager:
 
     @property
     def current(self) -> AgentRuntime:
+        if self._runtime is None:
+            raise RuntimeError("Agent runtime is not initialized yet.")
         return self._runtime
+
+    def attach_runtime(self, runtime: AgentRuntime) -> None:
+        if self._runtime is not None:
+            raise RuntimeError("Agent runtime is already initialized.")
+        self._runtime = runtime
 
     def runtime_proxy(self) -> CurrentRuntimeProxy:
         return CurrentRuntimeProxy(self)
@@ -68,8 +75,8 @@ class AgentRuntimeManager:
         return RuntimeReloadResult(
             generation=self._generation,
             reloaded_at=self._reloaded_at,
-            runtime=self._runtime,
-            dynamic_mcp=self._dynamic_mcp_status(self._runtime),
+            runtime=self.current,
+            dynamic_mcp=self._dynamic_mcp_status(self.current),
         )
 
     async def apply_mcp_server(self, server: MCPServerConfig) -> RuntimeReloadResult:
@@ -116,7 +123,9 @@ class AgentRuntimeManager:
 
     async def shutdown(self) -> None:
         async with self._lock:
-            _close_runtime(self._runtime)
+            if self._runtime is not None:
+                await _close_runtime(self._runtime)
+                self._runtime = None
 
     async def _reload(self, dynamic_servers: dict[str, MCPServerConfig]) -> RuntimeReloadResult:
         async with self._lock:
@@ -131,7 +140,8 @@ class AgentRuntimeManager:
             use_memory_checkpointer=self._use_memory_checkpointer,
         )
         self._runtime = next_runtime
-        _close_runtime(previous_runtime)
+        if previous_runtime is not None:
+            await _close_runtime(previous_runtime)
         self._dynamic_mcp_servers = dynamic_servers
         self._generation += 1
         self._reloaded_at = _now_iso()
@@ -200,7 +210,11 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _close_runtime(runtime: Any) -> None:
+async def _close_runtime(runtime: Any) -> None:
+    aclose = getattr(runtime, "aclose", None)
+    if aclose is not None:
+        await aclose()
+        return
     close = getattr(runtime, "close", None)
     if close is not None:
         close()

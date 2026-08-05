@@ -1,8 +1,10 @@
+from contextlib import asynccontextmanager
+
 import pytest
 
 from ops_pilot.config.mcp_schema import MCPConfig
 from ops_pilot.mcp import loader
-from ops_pilot.mcp.loader import load_mcp_tools
+from ops_pilot.mcp.loader import _load_single_server, load_mcp_tools
 
 
 class _DummyTool:
@@ -64,3 +66,66 @@ async def test_hitl_collected_for_allowed_tool(stub_tools):
     result = await load_mcp_tools(_config(hitl_tools=["restart_service"]))
 
     assert result.hitl_tools == ("restart_service",)
+
+
+@pytest.mark.asyncio
+async def test_single_server_tools_reuse_persistent_session(monkeypatch):
+    events: list[tuple[str, str, int]] = []
+    sessions: list[_FakeSession] = []
+
+    class FakeClient:
+        def __init__(self, connections):
+            self.connections = connections
+
+        @asynccontextmanager
+        async def session(self, server_name):
+            session = _FakeSession()
+            sessions.append(session)
+            events.append(("enter", server_name, id(session)))
+            try:
+                yield session
+            finally:
+                session.closed = True
+                events.append(("exit", server_name, id(session)))
+
+    async def fake_load_session_tools(session, *, server_name):
+        return [_SessionBackedTool("query", session, server_name)]
+
+    monkeypatch.setattr("langchain_mcp_adapters.client.MultiServerMCPClient", FakeClient)
+    monkeypatch.setattr("langchain_mcp_adapters.tools.load_mcp_tools", fake_load_session_tools)
+
+    tools, session_manager = await _load_single_server(_config().servers[0])
+
+    assert [tool.name for tool in tools] == ["query"]
+    assert len(sessions) == 1
+    assert events == [("enter", "dyna", id(sessions[0]))]
+
+    assert await tools[0].ainvoke({"q": "first"}) == "dyna:query:1"
+    assert await tools[0].ainvoke({"q": "second"}) == "dyna:query:2"
+    assert sessions[0].closed is False
+    assert len(sessions) == 1
+
+    await session_manager.aclose()
+
+    assert sessions[0].closed is True
+    assert events[-1] == ("exit", "dyna", id(sessions[0]))
+
+
+class _FakeSession:
+    def __init__(self) -> None:
+        self.calls = 0
+        self.closed = False
+
+    async def call(self, server_name: str, tool_name: str) -> str:
+        self.calls += 1
+        return f"{server_name}:{tool_name}:{self.calls}"
+
+
+class _SessionBackedTool:
+    def __init__(self, name: str, session: _FakeSession, server_name: str) -> None:
+        self.name = name
+        self._session = session
+        self._server_name = server_name
+
+    async def ainvoke(self, _args):
+        return await self._session.call(self._server_name, self.name)

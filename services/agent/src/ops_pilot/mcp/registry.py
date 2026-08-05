@@ -16,11 +16,17 @@ class MCPRegistry:
     tools: tuple[Any, ...] = field(default_factory=tuple)
     status: MCPLoadStatus = field(default_factory=MCPLoadStatus)
     hitl_tools: tuple[str, ...] = field(default_factory=tuple)
+    session_managers: tuple[Any, ...] = field(default_factory=tuple)
 
     @classmethod
     async def from_settings(cls, settings: Settings) -> MCPRegistry:
         result = await load_mcp_tools(settings)
-        return cls(tools=tuple(result.tools), status=result.status, hitl_tools=tuple(result.hitl_tools))
+        return cls(
+            tools=tuple(result.tools),
+            status=result.status,
+            hitl_tools=tuple(result.hitl_tools),
+            session_managers=tuple(result.session_managers),
+        )
 
     @classmethod
     async def from_config(cls, config: MCPConfig, *, config_path: str | None = None) -> MCPRegistry:
@@ -28,7 +34,18 @@ class MCPRegistry:
         status = result.status
         if config_path is not None:
             status = MCPLoadStatus(config_path=config_path, servers=status.servers)
-        return cls(tools=tuple(result.tools), status=status, hitl_tools=tuple(result.hitl_tools))
+        return cls(
+            tools=tuple(result.tools),
+            status=status,
+            hitl_tools=tuple(result.hitl_tools),
+            session_managers=tuple(result.session_managers),
+        )
+
+    async def aclose(self) -> None:
+        for manager in reversed(self.session_managers):
+            aclose = getattr(manager, "aclose", None)
+            if aclose is not None:
+                await aclose()
 
     @property
     def tool_names(self) -> tuple[str, ...]:

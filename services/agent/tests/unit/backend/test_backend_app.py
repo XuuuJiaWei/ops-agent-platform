@@ -15,6 +15,14 @@ class DummyRuntime:
         return f"ok: {text}"
 
 
+class CloseTrackingRuntime(DummyRuntime):
+    def __init__(self) -> None:
+        self.closed = False
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
 class DummyAGUIAgent:
     def __init__(self, **_: object) -> None:
         pass
@@ -98,15 +106,42 @@ async def test_unified_backend_mounts_chat_a2a_and_tunnel_routes(monkeypatch) ->
 
     settings = load_settings(env={}, config={"app_env": "test", "assistant_id": "agent"})
     app = await create_backend_app(settings, runtime=DummyRuntime())
-    paths = {path for route in app.routes if (path := getattr(route, "path", None))}
-
-    assert "/chat" in paths
-    assert "/a2a/jsonrpc" in paths
-    assert "/a2a/.well-known/agent-card.json" in paths
 
     with TestClient(app) as client:
+        paths = {path for route in app.routes if (path := getattr(route, "path", None))}
+        assert "/chat" in paths
+        assert "/a2a/jsonrpc" in paths
+        assert "/a2a/.well-known/agent-card.json" in paths
         assert client.get("/health").status_code == 200
         assert client.get("/dev/mcp-tunnels").status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_backend_builds_runtime_inside_lifespan(monkeypatch) -> None:
+    import ops_pilot.backend as backend
+
+    _patch_agui(monkeypatch)
+
+    created: list[CloseTrackingRuntime] = []
+
+    async def fake_create_agent_runtime_async(_settings):
+        runtime = CloseTrackingRuntime()
+        created.append(runtime)
+        return runtime
+
+    monkeypatch.setattr(backend, "create_agent_runtime_async", fake_create_agent_runtime_async)
+    settings = load_settings(env={}, config={"app_env": "test", "assistant_id": "agent"})
+
+    app = await create_backend_app(settings)
+
+    assert created == []
+
+    with TestClient(app) as client:
+        assert len(created) == 1
+        assert created[0].closed is False
+        assert client.get("/health").status_code == 200
+
+    assert created[0].closed is True
 
 
 @pytest.mark.asyncio

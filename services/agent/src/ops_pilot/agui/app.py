@@ -28,6 +28,10 @@ async def create_agui_app(settings: Settings | None = None, runtime: Any | None 
     @asynccontextmanager
     async def _lifespan(_: FastAPI):
         yield
+        aclose = getattr(resolved_runtime, "aclose", None)
+        if aclose is not None:
+            await aclose()
+            return
         close = getattr(resolved_runtime, "close", None)
         if close is not None:
             close()

@@ -126,13 +126,13 @@ def _serve_backend(host: str | None, port: int | None) -> int:
         chat_host=host or settings.chat_host,
         chat_port=port or settings.chat_port,
     )
-    # Build the app on a throwaway loop, then hand the loop and signal handling
-    # to uvicorn via the synchronous Server.run(). Uvicorn owns SIGINT through its
-    # capture_signals() contextmanager, runs a graceful shutdown, then re-raises
-    # the captured signal by design — so KeyboardInterrupt surfaces from run() and
-    # we swallow it at this CLI boundary for a clean exit (the same thing uvicorn's
-    # own CLI does). Building the app on a separate, short-lived loop is safe: MCP
-    # tools open a fresh session per call and the runtime holds no loop-bound state.
+    # Build only the FastAPI routing graph on this throwaway loop. Runtime-owned
+    # resources such as MCP stdio sessions and sandboxes are created by the app
+    # lifespan inside uvicorn's event loop and cleaned up from the same loop.
+    # Uvicorn owns SIGINT through its capture_signals() contextmanager, runs a
+    # graceful shutdown, then re-raises the captured signal by design — so
+    # KeyboardInterrupt surfaces from run() and we swallow it at this CLI boundary
+    # for a clean exit (the same thing uvicorn's own CLI does).
     app = asyncio.run(create_backend_app(settings))
     config = uvicorn.Config(app, host=settings.chat_host, port=settings.chat_port, log_level="info")
     try:

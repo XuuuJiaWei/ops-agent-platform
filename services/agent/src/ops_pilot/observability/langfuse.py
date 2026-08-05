@@ -12,6 +12,7 @@ from ops_pilot.config.settings import Settings
 class TracingSetup:
     enabled: bool
     callbacks: tuple[Any, ...] = field(default_factory=tuple)
+    client: Any | None = None
     warning: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
@@ -33,6 +34,7 @@ def create_callback_handler(settings: Settings) -> TracingSetup:
         )
 
     try:
+        from langfuse import Langfuse
         from langfuse.langchain import CallbackHandler
     except ImportError as exc:
         return TracingSetup(
@@ -40,14 +42,29 @@ def create_callback_handler(settings: Settings) -> TracingSetup:
             warning=f"Langfuse tracing disabled; langfuse package import failed: {exc}",
         )
 
-    return TracingSetup(enabled=True, callbacks=(CallbackHandler(),))
+    client = Langfuse(
+        public_key=settings.langfuse_public_key,
+        secret_key=settings.langfuse_secret_key,
+        base_url=settings.langfuse_base_url,
+        environment=settings.app_env,
+    )
+    return TracingSetup(
+        enabled=True,
+        callbacks=(CallbackHandler(public_key=settings.langfuse_public_key),),
+        client=client,
+    )
 
 
 def flush_tracing(tracing: TracingSetup) -> None:
     """Flush tracing callbacks when the underlying handler exposes a flush API."""
 
-    for callback in tracing.callbacks:
-        flush = getattr(callback, "flush", None)
+    targets = (*tracing.callbacks, tracing.client)
+    seen: set[int] = set()
+    for target in targets:
+        if target is None or id(target) in seen:
+            continue
+        seen.add(id(target))
+        flush = getattr(target, "flush", None)
         if callable(flush):
             flush()
 
