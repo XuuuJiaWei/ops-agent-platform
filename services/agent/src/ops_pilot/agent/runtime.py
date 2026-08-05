@@ -37,6 +37,12 @@ class AgentRuntime:
         if self.sandbox is not None:
             self.sandbox.close()
 
+    async def aclose(self) -> None:
+        try:
+            await self.mcp.aclose()
+        finally:
+            self.close()
+
     def runnable_config(
         self,
         *,
@@ -146,8 +152,16 @@ async def build_agent_runtime(
     if resolved_settings.enable_smoke_tools:
         tools.extend(get_smoke_tools())
 
-    sandbox = create_sandbox_runtime(resolved_settings)
+    # Multi-source fault storyline: a deterministic correlation workflow exposed
+    # as one tool. It reads the same MCP tools the agent has (Dynatrace/Kibana)
+    # and uses the same chat model for its single narration step.
+    from ops_pilot.correlation.orchestrator import build_storyline_tool
+
+    tools.append(build_storyline_tool(tuple(mcp_registry.tools), model))
+
+    sandbox: SandboxRuntime | None = None
     try:
+        sandbox = create_sandbox_runtime(resolved_settings)
         skills = _resolve_backend_skill_paths(local_skills, sandbox)
         interrupt_on = {name: True for name in mcp_registry.hitl_tools}
         graph = _create_deep_agent(
@@ -161,6 +175,7 @@ async def build_agent_runtime(
             interrupt_on=interrupt_on,
         )
     except Exception:
+        await mcp_registry.aclose()
         if sandbox is not None:
             sandbox.close()
         raise
@@ -187,10 +202,12 @@ def _combine_mcp_registries(*registries: MCPRegistry) -> MCPRegistry:
     server_statuses = []
     config_paths: list[str] = []
     hitl_tools: list[str] = []
+    session_managers: list[Any] = []
     for registry in registries:
         tools.extend(registry.tools)
         server_statuses.extend(registry.status.servers)
         hitl_tools.extend(registry.hitl_tools)
+        session_managers.extend(registry.session_managers)
         if registry.status.config_path:
             config_paths.append(registry.status.config_path)
     return MCPRegistry(
@@ -200,6 +217,7 @@ def _combine_mcp_registries(*registries: MCPRegistry) -> MCPRegistry:
             servers=tuple(server_statuses),
         ),
         hitl_tools=tuple(dict.fromkeys(hitl_tools)),
+        session_managers=tuple(session_managers),
     )
 
 
@@ -216,14 +234,15 @@ def _create_deep_agent(
 ) -> Any:
     try:
         from deepagents import create_deep_agent
-        from deepagents.graph import DeepAgentState
     except ImportError as exc:
         raise RuntimeError("deepagents is not installed. Run 'uv sync' in services/agent.") from exc
+
+    from ops_pilot.agent.state import StorylineAgentState
 
     kwargs: dict[str, Any] = {
         "model": model,
         "tools": tools,
-        "state_schema": DeepAgentState,
+        "state_schema": StorylineAgentState,
     }
     if system_prompt:
         kwargs["system_prompt"] = system_prompt
