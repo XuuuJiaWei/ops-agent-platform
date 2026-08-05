@@ -2,19 +2,32 @@ import { useAgent } from "@copilotkit/react-core/v2";
 import {
   Activity,
   AlertTriangle,
+  ChevronRight,
+  CircleDot,
   Clock3,
-  Gauge,
-  ShieldAlert,
+  Database,
+  ExternalLink,
+  FileText,
+  GitBranch,
   Sparkles,
+  Target,
+  Waypoints,
 } from "lucide-react";
+import { useState } from "react";
 import type { BrowserEnv } from "@/lib/env";
 import {
-  type DynatraceDashboard,
-  type DynatraceMetric,
-  type DynatraceProblem,
-  type MetricTone,
-  readDynatraceDashboard,
-} from "./dynatrace";
+  type Storyline,
+  type StorylineNode,
+  type StorylineRole,
+  type StorylineSeverity,
+  formatConfidence,
+  formatEpochMs,
+  formatWindow,
+  normalizeRole,
+  normalizeSeverity,
+  readStoryline,
+  sortNodesByTime,
+} from "./storyline";
 
 type AgentNativeAppViewProps = {
   activeThreadId: string | undefined;
@@ -26,32 +39,33 @@ export function AgentNativeAppView({ activeThreadId, env }: AgentNativeAppViewPr
   // unconditionally (with a default) — the component re-renders on every state
   // mutation. See docs: shared-state/rendering-in-app.
   const { agent } = useAgent({ agentId: env.assistantId });
-  const dashboard = readDynatraceDashboard(agent?.state);
+  const storyline = readStoryline(agent?.state);
 
   return (
     <div className="h-full overflow-y-auto bg-[#f7f8fa]">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8">
-        <DashboardBody activeThreadId={activeThreadId} dashboard={dashboard} />
+        <StorylineBody activeThreadId={activeThreadId} storyline={storyline} />
       </div>
     </div>
   );
 }
 
-function DashboardBody({
+function StorylineBody({
   activeThreadId,
-  dashboard,
+  storyline,
 }: {
   activeThreadId: string | undefined;
-  dashboard: DynatraceDashboard | undefined;
+  storyline: Storyline | undefined;
 }) {
-  if (!dashboard) {
+  if (!storyline) {
     return <EmptyState />;
   }
 
-  const status = dashboard.status ?? "ready";
-  const metrics = dashboard.metrics ?? [];
-  const problems = dashboard.problems ?? [];
-  const focus = dashboard.focus_entity ?? "your services";
+  const status = storyline.status ?? "ready";
+  const nodes = sortNodesByTime(storyline.nodes ?? []);
+  const entities = storyline.entities ?? [];
+  const gaps = storyline.gaps ?? [];
+  const rootCause = storyline.root_cause ?? undefined;
 
   return (
     <>
@@ -59,74 +73,78 @@ function DashboardBody({
         <div className="min-w-0 rounded-md border border-[var(--border-subtle)] bg-white p-4 shadow-sm">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-xs font-semibold uppercase text-[var(--text-secondary)]">Dynatrace observability</p>
+              <p className="text-xs font-semibold uppercase text-[var(--text-secondary)]">Multi-source fault storyline</p>
               <h1 className="mt-1 text-2xl font-semibold tracking-normal text-[var(--text-primary)]">
-                {dashboard.focus_entity ?? "Service health"}
+                {rootCause?.entity_name ?? entities[0] ?? "Correlated timeline"}
               </h1>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--text-secondary)]">
-                {dashboard.note ?? `Live snapshot the agent assembled from Dynatrace for ${focus}.`}
-              </p>
+              {status === "loading" && !storyline.narrative ? (
+                <NarrativeSkeleton />
+              ) : (
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--text-secondary)]">
+                  {storyline.narrative ?? "The agent is correlating Dynatrace and Kibana signals in this window."}
+                </p>
+              )}
             </div>
             <StatusBadge status={status} />
           </div>
 
-          {status === "loading" && metrics.length === 0 ? (
-            <MetricSkeletonRow />
-          ) : (
-            <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              {metrics.length > 0 ? (
-                metrics.map((metric) => <MetricTile key={metric.key} metric={metric} />)
-              ) : (
-                <p className="text-sm text-[var(--text-secondary)]">No metrics reported for this view.</p>
-              )}
-            </div>
-          )}
+          {rootCause ? <RootCauseBanner node={rootCause} confidence={storyline.confidence} /> : null}
         </div>
 
         <aside className="rounded-md border border-[var(--border-subtle)] bg-white p-4 shadow-sm">
           <div className="flex items-center gap-2 text-sm font-semibold text-[var(--text-primary)]">
             <Sparkles aria-hidden="true" className="size-4 text-[var(--accent)]" />
-            Agent state
+            Correlation summary
           </div>
           <dl className="mt-4 space-y-3 text-sm">
             <StateRow label="Thread" value={activeThreadId ?? "new conversation"} />
-            <StateRow label="Focus" value={dashboard.focus_entity ?? "—"} />
-            <StateRow label="Window" value={dashboard.time_window ?? "—"} />
-            <StateRow label="Status" value={status} />
-            <StateRow label="Updated" value={formatTimestamp(dashboard.generated_at)} />
+            <StateRow label="Window" value={formatWindow(storyline.window)} />
+            <StateRow label="Entities" value={entities.length > 0 ? String(entities.length) : "—"} />
+            <StateRow label="Signals" value={nodes.length > 0 ? String(nodes.length) : "—"} />
+            <StateRow label="Confidence" value={formatConfidence(storyline.confidence)} />
+            <StateRow label="Updated" value={formatTimestamp(storyline.generated_at)} />
           </dl>
+          {entities.length > 0 ? (
+            <div className="mt-4 border-t border-[#edf1f4] pt-3">
+              <p className="text-xs font-semibold uppercase text-[var(--text-secondary)]">Involved entities</p>
+              <ul className="mt-2 flex flex-wrap gap-1.5">
+                {entities.map((entity) => (
+                  <li
+                    className="inline-flex items-center rounded-md bg-[#f0f4f8] px-2 py-0.5 font-mono text-[11px] text-[var(--text-primary)]"
+                    key={entity}
+                  >
+                    {entity}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </aside>
       </section>
+
+      {gaps.length > 0 ? <GapsBanner gaps={gaps} /> : null}
 
       <section className="rounded-md border border-[var(--border-subtle)] bg-white p-4 shadow-sm">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
-            <h2 className="text-base font-semibold text-[var(--text-primary)]">Open problems</h2>
-            <p className="mt-1 text-xs text-[var(--text-secondary)]">Surfaced by the agent</p>
+            <h2 className="text-base font-semibold text-[var(--text-primary)]">Correlated timeline</h2>
+            <p className="mt-1 text-xs text-[var(--text-secondary)]">Signals aligned across Dynatrace &amp; Kibana</p>
           </div>
           <Clock3 aria-hidden="true" className="size-4 text-[var(--text-secondary)]" />
         </div>
-        {problems.length > 0 ? (
-          <div className="overflow-hidden rounded-md border border-[#e8edf2]">
-            <table className="w-full table-fixed text-left text-sm">
-              <thead className="bg-[#f5f7f9] text-xs uppercase text-[var(--text-secondary)]">
-                <tr>
-                  <th className="w-28 px-3 py-2 font-semibold">Severity</th>
-                  <th className="px-3 py-2 font-semibold">Problem</th>
-                  <th className="w-40 px-3 py-2 font-semibold">Entity</th>
-                  <th className="w-40 px-3 py-2 font-semibold">Started</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#edf1f4]">
-                {problems.map((problem) => (
-                  <ProblemRow key={problem.id} problem={problem} />
-                ))}
-              </tbody>
-            </table>
-          </div>
+        {nodes.length > 0 ? (
+          <ol className="relative ml-2 border-l border-[#e3e9ef]">
+            {nodes.map((node, index) => (
+              <TimelineNode
+                isRootCause={isSameNode(node, rootCause)}
+                key={nodeKey(node, index)}
+                node={node}
+              />
+            ))}
+          </ol>
         ) : (
           <p className="rounded-md border border-dashed border-[#e8edf2] px-3 py-6 text-center text-sm text-[var(--text-secondary)]">
-            {status === "loading" ? "Agent is checking for open problems…" : "No open problems reported."}
+            {status === "loading" ? "Agent is gathering and aligning signals…" : "No correlated signals in this window."}
           </p>
         )}
       </section>
@@ -137,65 +155,162 @@ function DashboardBody({
 function EmptyState() {
   return (
     <section className="rounded-md border border-dashed border-[var(--border-subtle)] bg-white p-10 text-center shadow-sm">
-      <Gauge aria-hidden="true" className="mx-auto size-8 text-[var(--text-secondary)]" />
-      <h1 className="mt-4 text-lg font-semibold text-[var(--text-primary)]">No dashboard yet</h1>
+      <Waypoints aria-hidden="true" className="mx-auto size-8 text-[var(--text-secondary)]" />
+      <h1 className="mt-4 text-lg font-semibold text-[var(--text-primary)]">No storyline yet</h1>
       <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-[var(--text-secondary)]">
-        Ask the agent in chat to pull Dynatrace data — e.g. <em>“show checkout service health for the last 2 hours”</em>.
-        The dashboard populates here from the agent’s findings.
+        Ask the agent to correlate a fault — e.g. <em>“what happened to event-consumer in the last 30 minutes?”</em> or{" "}
+        <em>“explain problem P-26081082”</em>. The agent aligns Dynatrace problems/events with Kibana logs and builds the
+        timeline here.
       </p>
     </section>
   );
 }
 
-function MetricTile({ metric }: { metric: DynatraceMetric }) {
-  const tone = metric.tone ?? "normal";
-  const toneClass = {
-    danger: "text-[var(--danger)]",
-    success: "text-[var(--success)]",
-    warning: "text-[var(--warning)]",
-    normal: "text-[var(--text-secondary)]",
-  }[tone];
-
+function RootCauseBanner({
+  node,
+  confidence,
+}: {
+  node: StorylineNode;
+  confidence: number | null | undefined;
+}) {
   return (
-    <div className="rounded-md border border-[#e8edf2] bg-[#fbfcfd] p-3">
-      <p className="text-xs font-semibold uppercase text-[var(--text-secondary)]">{metric.label}</p>
-      <p className="mt-2 text-2xl font-semibold text-[var(--text-primary)]">
-        {metric.value}
-        {metric.unit ? <span className="ml-1 text-base font-medium text-[var(--text-secondary)]">{metric.unit}</span> : null}
-      </p>
-      <p className={`mt-1 text-xs font-semibold capitalize ${toneClass}`}>{tone}</p>
+    <div className="mt-4 flex items-start gap-3 rounded-md border border-[#fecaca] bg-[#fef2f2] px-3 py-3">
+      <Target aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-[var(--danger)]" />
+      <div className="min-w-0">
+        <p className="text-xs font-semibold uppercase text-[var(--danger)]">
+          Likely root cause · {formatConfidence(confidence)} confidence
+        </p>
+        <p className="mt-1 text-sm font-medium text-[var(--text-primary)]">{node.title}</p>
+        <p className="mt-0.5 font-mono text-[11px] text-[var(--text-secondary)]">
+          {node.kind}
+          {node.entity_name ? ` · ${node.entity_name}` : ""}
+        </p>
+      </div>
     </div>
   );
 }
 
-function MetricSkeletonRow() {
+function GapsBanner({ gaps }: { gaps: string[] }) {
   return (
-    <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      {[0, 1, 2, 3].map((index) => (
-        <div className="rounded-md border border-[#e8edf2] bg-[#fbfcfd] p-3" key={index}>
-          <div className="h-3 w-16 animate-pulse rounded bg-[#e8edf2]" />
-          <div className="mt-3 h-7 w-20 animate-pulse rounded bg-[#e8edf2]" />
-          <div className="mt-2 h-3 w-12 animate-pulse rounded bg-[#e8edf2]" />
+    <section className="rounded-md border border-[#fde68a] bg-[#fffbeb] px-4 py-3 shadow-sm">
+      <div className="flex items-center gap-2 text-sm font-semibold text-[#92400e]">
+        <AlertTriangle aria-hidden="true" className="size-4" />
+        Coverage gaps
+      </div>
+      <ul className="mt-2 space-y-1 text-sm text-[#92400e]">
+        {gaps.map((gap, index) => (
+          <li className="flex items-start gap-2" key={index}>
+            <span aria-hidden="true" className="mt-1.5 size-1 shrink-0 rounded-full bg-[#b45309]" />
+            <span>{gap}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function TimelineNode({ node, isRootCause }: { node: StorylineNode; isRootCause: boolean }) {
+  const [expanded, setExpanded] = useState(false);
+  const severity = normalizeSeverity(node.severity);
+  const role = normalizeRole(node.role);
+  const hasEvidence = node.evidence && Object.keys(node.evidence).length > 0;
+
+  return (
+    <li className="relative ml-4 pb-5 last:pb-0">
+      <span
+        aria-hidden="true"
+        className={`absolute -left-[1.3125rem] top-1 flex size-3 items-center justify-center rounded-full ring-4 ring-white ${dotClass(severity)}`}
+      />
+      <div
+        className={`rounded-md border p-3 ${isRootCause ? "border-[#fecaca] bg-[#fef6f6]" : "border-[#e8edf2] bg-[#fbfcfd]"}`}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <SourceBadge source={node.source} />
+              <RoleBadge role={role} />
+              {isRootCause ? (
+                <span className="inline-flex items-center gap-1 rounded bg-[#fef2f2] px-1.5 py-0.5 text-[10px] font-semibold uppercase text-[var(--danger)]">
+                  <Target aria-hidden="true" className="size-3" />
+                  Root cause
+                </span>
+              ) : null}
+            </div>
+            <p className="mt-1.5 text-sm font-medium text-[var(--text-primary)]">{node.title}</p>
+            <p className="mt-0.5 font-mono text-[11px] text-[var(--text-secondary)]">
+              {node.kind}
+              {node.entity_name ? ` · ${node.entity_name}` : ""}
+            </p>
+          </div>
+          <time className="shrink-0 font-mono text-[11px] text-[var(--text-secondary)]">{formatEpochMs(node.ts)}</time>
         </div>
-      ))}
-    </div>
+
+        {hasEvidence || node.deep_link ? (
+          <div className="mt-2 flex items-center gap-3 border-t border-[#eef2f5] pt-2">
+            {hasEvidence ? (
+              <button
+                aria-expanded={expanded}
+                className="inline-flex items-center gap-1 text-[11px] font-semibold text-[var(--accent-strong)] hover:underline"
+                onClick={() => setExpanded((open) => !open)}
+                type="button"
+              >
+                <ChevronRight
+                  aria-hidden="true"
+                  className={`size-3 transition-transform ${expanded ? "rotate-90" : ""}`}
+                />
+                Evidence
+              </button>
+            ) : null}
+            {node.deep_link ? (
+              <a
+                className="inline-flex items-center gap-1 text-[11px] font-semibold text-[var(--accent-strong)] hover:underline"
+                href={node.deep_link}
+                rel="noreferrer"
+                target="_blank"
+              >
+                <ExternalLink aria-hidden="true" className="size-3" />
+                Open source
+              </a>
+            ) : null}
+          </div>
+        ) : null}
+
+        {expanded && hasEvidence ? (
+          <pre className="mt-2 overflow-x-auto rounded border border-[#e8edf2] bg-white p-2 font-mono text-[11px] leading-5 text-[var(--text-secondary)]">
+            {JSON.stringify(node.evidence, null, 2)}
+          </pre>
+        ) : null}
+      </div>
+    </li>
   );
 }
 
-function ProblemRow({ problem }: { problem: DynatraceProblem }) {
+function SourceBadge({ source }: { source: string }) {
+  const { Icon, label, className } = sourceMeta(source);
   return (
-    <tr>
-      <td className="px-3 py-3">
-        <SeverityBadge severity={problem.severity} tone={problem.tone} />
-      </td>
-      <td className="px-3 py-3 text-[var(--text-primary)]">{problem.title}</td>
-      <td className="px-3 py-3 text-[var(--text-secondary)]">{problem.entity ?? "—"}</td>
-      <td className="px-3 py-3 font-mono text-xs text-[var(--text-secondary)]">{formatTimestamp(problem.started_at)}</td>
-    </tr>
+    <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${className}`}>
+      <Icon aria-hidden="true" className="size-3" />
+      {label}
+    </span>
   );
 }
 
-function StatusBadge({ status }: { status: NonNullable<DynatraceDashboard["status"]> }) {
+function RoleBadge({ role }: { role: StorylineRole }) {
+  const meta: Record<StorylineRole, { label: string; className: string }> = {
+    trigger: { label: "Trigger", className: "bg-[#fef2f2] text-[var(--danger)]" },
+    propagation: { label: "Propagation", className: "bg-[#fff7ed] text-[#9a3412]" },
+    symptom: { label: "Symptom", className: "bg-[#f0f9ff] text-[var(--accent-strong)]" },
+    context: { label: "Context", className: "bg-[#f3f4f6] text-[var(--text-secondary)]" },
+  };
+  const { label, className } = meta[role];
+  return (
+    <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${className}`}>
+      {label}
+    </span>
+  );
+}
+
+function StatusBadge({ status }: { status: NonNullable<Storyline["status"]> }) {
   if (status === "error") {
     return (
       <span className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-[#fecaca] bg-[#fef2f2] px-2.5 py-1 text-xs font-semibold text-[var(--danger)]">
@@ -208,36 +323,70 @@ function StatusBadge({ status }: { status: NonNullable<DynatraceDashboard["statu
     return (
       <span className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-[#bae6fd] bg-[#f0f9ff] px-2.5 py-1 text-xs font-semibold text-[var(--accent-strong)]">
         <Activity aria-hidden="true" className="size-3.5 animate-pulse" />
-        Loading
+        Correlating
       </span>
     );
   }
   return (
-    <span className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-[#fed7aa] bg-[#fff7ed] px-2.5 py-1 text-xs font-semibold text-[#9a3412]">
-      <ShieldAlert aria-hidden="true" className="size-3.5" />
-      Live
-    </span>
-  );
-}
-
-function SeverityBadge({ severity, tone }: { severity: string; tone?: MetricTone }) {
-  const className = tone === "danger"
-    ? "bg-[#fef2f2] text-[var(--danger)]"
-    : "bg-[#fff7ed] text-[var(--warning)]";
-  return (
-    <span className={`inline-flex shrink-0 items-center rounded-md px-2 py-1 text-xs font-semibold ${className}`}>
-      {severity}
+    <span className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-[#bbf7d0] bg-[#f0fdf4] px-2.5 py-1 text-xs font-semibold text-[#166534]">
+      <CircleDot aria-hidden="true" className="size-3.5" />
+      Ready
     </span>
   );
 }
 
 function StateRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="grid grid-cols-[5rem_minmax(0,1fr)] gap-2 border-b border-[#edf1f4] pb-3 last:border-b-0 last:pb-0">
+    <div className="grid grid-cols-[6rem_minmax(0,1fr)] gap-2 border-b border-[#edf1f4] pb-3 last:border-b-0 last:pb-0">
       <dt className="text-xs font-semibold uppercase text-[var(--text-secondary)]">{label}</dt>
       <dd className="truncate text-right font-mono text-xs text-[var(--text-primary)]">{value}</dd>
     </div>
   );
+}
+
+function NarrativeSkeleton() {
+  return (
+    <div className="mt-3 space-y-2">
+      <div className="h-3 w-full animate-pulse rounded bg-[#e8edf2]" />
+      <div className="h-3 w-11/12 animate-pulse rounded bg-[#e8edf2]" />
+      <div className="h-3 w-3/4 animate-pulse rounded bg-[#e8edf2]" />
+    </div>
+  );
+}
+
+function dotClass(severity: StorylineSeverity): string {
+  return {
+    critical: "bg-[var(--danger)]",
+    error: "bg-[#ea580c]",
+    warn: "bg-[var(--warning)]",
+    info: "bg-[#94a3b8]",
+  }[severity];
+}
+
+function sourceMeta(source: string): { Icon: typeof Database; label: string; className: string } {
+  switch (source) {
+    case "dynatrace_problem":
+      return { Icon: AlertTriangle, label: "DT Problem", className: "bg-[#eef2ff] text-[#4338ca]" };
+    case "dynatrace_event":
+      return { Icon: GitBranch, label: "DT Event", className: "bg-[#eef2ff] text-[#4338ca]" };
+    case "dynatrace_metric":
+      return { Icon: Activity, label: "DT Metric", className: "bg-[#eef2ff] text-[#4338ca]" };
+    case "kibana_log":
+      return { Icon: FileText, label: "Kibana Log", className: "bg-[#fdf4ff] text-[#a21caf]" };
+    default:
+      return { Icon: Database, label: source, className: "bg-[#f3f4f6] text-[var(--text-secondary)]" };
+  }
+}
+
+function isSameNode(node: StorylineNode, other: StorylineNode | undefined): boolean {
+  if (!other) {
+    return false;
+  }
+  return node.ts === other.ts && node.kind === other.kind && node.source === other.source;
+}
+
+function nodeKey(node: StorylineNode, index: number): string {
+  return `${node.ts}-${node.source}-${node.kind}-${index}`;
 }
 
 function formatTimestamp(value: string | undefined): string {

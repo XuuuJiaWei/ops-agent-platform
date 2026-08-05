@@ -175,15 +175,20 @@ export function AppShell({ env }: AppShellProps) {
           </header>
 
           <div className="min-h-0 flex-1">
-            {mainView === "chat" ? <CopilotChat className="h-full" messageView={chatMessageView} /> : null}
+            {/* Keep both views mounted and toggle visibility with `hidden` so
+                neither loses state when switching tabs: the Chat keeps its
+                in-progress conversation/input, and the App view keeps its live
+                agent-state subscription. Unmounting either (e.g. conditional
+                render) discards that state. */}
+            <div className={mainView === "chat" ? "h-full" : "hidden"}>
+              <CopilotChat className="h-full" messageView={chatMessageView} />
+            </div>
             <LocalThreadMessagePersistence
               agentId={env.assistantId}
               enabled={activeThreadSource === "local"}
               onTitleCandidate={setThreadTitle}
               threadId={activeThreadId}
             />
-            {/* Keep the App view mounted so its agent-state subscription stays live
-                even while the Chat tab is shown; hide it instead of unmounting. */}
             <div className={mainView === "app" ? "h-full" : "hidden"}>
               <AgentNativeAppView activeThreadId={activeThreadId} env={env} />
             </div>

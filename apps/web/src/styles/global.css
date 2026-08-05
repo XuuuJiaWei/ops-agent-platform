@@ -152,3 +152,8 @@ button:disabled {
   color: var(--text-secondary);
 }
 
+.approval-dialog__approve:disabled,
+.approval-dialog__reject:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
