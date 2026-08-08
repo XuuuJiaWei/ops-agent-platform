@@ -40,11 +40,11 @@ class AgentRuntimeManager:
         *,
         settings: Settings,
         runtime: AgentRuntime | None,
-        use_memory_checkpointer: bool = True,
+        attach_checkpointer: bool = True,
     ) -> None:
         self.settings = settings
         self._runtime = runtime
-        self._use_memory_checkpointer = use_memory_checkpointer
+        self._attach_checkpointer = attach_checkpointer
         self._generation = 0
         self._reloaded_at = _now_iso()
         self._lock = asyncio.Lock()
@@ -116,7 +116,7 @@ class AgentRuntimeManager:
         previous_runtime = self._runtime
         next_runtime = await build_agent_runtime(
             self.settings,
-            use_memory_checkpointer=self._use_memory_checkpointer,
+            attach_checkpointer=self._attach_checkpointer,
         )
         self._runtime = next_runtime
         if previous_runtime is not None:

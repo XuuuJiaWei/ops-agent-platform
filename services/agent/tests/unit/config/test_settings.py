@@ -198,3 +198,58 @@ def test_load_settings_raises_when_config_file_missing(tmp_path):
 
     with pytest.raises(SettingsError, match="Config file not found"):
         load_settings(env={"OPS_PILOT_CONFIG": str(missing)})
+
+
+def test_load_settings_defaults_to_memory_persistence():
+    settings = load_settings(env={}, config={})
+
+    assert settings.persistence_backend == "memory"
+    assert settings.persistence_enabled is False
+    assert settings.persistence_setup_on_start is True
+    assert settings.persistence_database_url is None
+    assert settings.sqlalchemy_database_url() is None
+    assert settings.psycopg_database_url() is None
+
+
+def test_load_settings_reads_postgres_persistence():
+    settings = load_settings(
+        env={"DATABASE_URL": "postgresql://u:p@h:5433/db"},
+        config={"persistence": {"backend": "postgres", "setup_on_start": False}},
+    )
+
+    assert settings.persistence_backend == "postgres"
+    assert settings.persistence_enabled is True
+    assert settings.persistence_setup_on_start is False
+    assert settings.psycopg_database_url() == "postgresql://u:p@h:5433/db"
+    assert settings.sqlalchemy_database_url() == "postgresql+asyncpg://u:p@h:5433/db"
+
+
+def test_sqlalchemy_and_psycopg_urls_normalize_driver_suffix():
+    settings = load_settings(
+        env={"DATABASE_URL": "postgresql+asyncpg://u:p@h/db"},
+        config={"persistence": {"backend": "postgres"}},
+    )
+
+    # SQLAlchemy keeps the explicit async driver; psycopg wants it stripped.
+    assert settings.sqlalchemy_database_url() == "postgresql+asyncpg://u:p@h/db"
+    assert settings.psycopg_database_url() == "postgresql://u:p@h/db"
+
+
+def test_load_settings_normalizes_legacy_postgres_scheme():
+    settings = load_settings(
+        env={"DATABASE_URL": "postgres://u:p@h/db"},
+        config={"persistence": {"backend": "postgres"}},
+    )
+
+    assert settings.psycopg_database_url() == "postgresql://u:p@h/db"
+    assert settings.sqlalchemy_database_url() == "postgresql+asyncpg://u:p@h/db"
+
+
+def test_load_settings_rejects_postgres_backend_without_database_url():
+    with pytest.raises(SettingsError, match="DATABASE_URL is not set"):
+        load_settings(env={}, config={"persistence": {"backend": "postgres"}})
+
+
+def test_load_settings_rejects_unknown_persistence_backend():
+    with pytest.raises(SettingsError, match="persistence.backend"):
+        load_settings(env={}, config={"persistence": {"backend": "sqlite"}})

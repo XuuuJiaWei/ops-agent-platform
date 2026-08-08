@@ -251,7 +251,7 @@ async def run_chaos_eval(
         )
         return 1
 
-    runtime = await create_agent_runtime_async(settings=settings, use_memory_checkpointer=False)
+    runtime = await create_agent_runtime_async(settings=settings, attach_checkpointer=False)
     base_task = _build_task(runtime, run_name=run_name or "chaos")
 
     async def chaos_task(*, item, **_):

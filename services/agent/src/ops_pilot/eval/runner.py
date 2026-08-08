@@ -125,7 +125,7 @@ async def _run_langfuse_eval(
     run_name: str,
     concurrency: int,
 ) -> ExperimentResult:
-    runtime = await create_agent_runtime_async(settings=settings, use_memory_checkpointer=False)
+    runtime = await create_agent_runtime_async(settings=settings, attach_checkpointer=False)
     try:
         dataset = langfuse.get_dataset(dataset_name)
         if not dataset.items:
@@ -158,7 +158,7 @@ async def _run_local_eval(
     run_name: str,
     concurrency: int,
 ) -> ExperimentResult:
-    runtime = await create_agent_runtime_async(settings=settings, use_memory_checkpointer=False)
+    runtime = await create_agent_runtime_async(settings=settings, attach_checkpointer=False)
     try:
         task = _build_task(runtime, run_name=run_name)
         evaluators = build_item_evaluators(settings, include_judge=False)

@@ -14,6 +14,7 @@ from ops_pilot.health.app import router as health_router
 
 from .agent_card import build_agent_card
 from .executor import create_executor
+from .task_store import create_task_store
 
 
 async def create_a2a_app(settings: Settings | None = None, runtime: Any | None = None) -> FastAPI:
@@ -23,26 +24,24 @@ async def create_a2a_app(settings: Settings | None = None, runtime: Any | None =
     from a2a.server.routes.agent_card_routes import create_agent_card_routes
     from a2a.server.routes.fastapi_routes import add_a2a_routes_to_fastapi
     from a2a.server.routes.jsonrpc_routes import create_jsonrpc_routes
-    from a2a.server.tasks import InMemoryTaskStore as A2ATaskStore
 
     resolved_settings = settings or get_settings()
     resolved_runtime = runtime or await create_agent_runtime_async(resolved_settings)
+    task_store, task_store_closer = await create_task_store(resolved_settings)
 
     @asynccontextmanager
     async def _lifespan(_: FastAPI):
-        yield
-        aclose = getattr(resolved_runtime, "aclose", None)
-        if aclose is not None:
-            await aclose()
-            return
-        close = getattr(resolved_runtime, "close", None)
-        if close is not None:
-            close()
+        try:
+            yield
+        finally:
+            if task_store_closer is not None:
+                await task_store_closer()
+            await _close_runtime(resolved_runtime)
 
     agent_card = build_agent_card(resolved_settings)
     request_handler = DefaultRequestHandler(
         agent_executor=create_executor(resolved_runtime, resolved_settings),
-        task_store=A2ATaskStore(),
+        task_store=task_store,
         agent_card=agent_card,
     )
 
@@ -63,3 +62,13 @@ async def create_a2a_app(settings: Settings | None = None, runtime: Any | None =
         ),
     )
     return app
+
+
+async def _close_runtime(runtime: Any) -> None:
+    aclose = getattr(runtime, "aclose", None)
+    if aclose is not None:
+        await aclose()
+        return
+    close = getattr(runtime, "close", None)
+    if close is not None:
+        close()

@@ -16,6 +16,8 @@ DEFAULT_CONFIG_PATH = REPO_ROOT / "config" / "config.yaml"
 
 SUPPORTED_MODEL_PROVIDERS = {"sap", "openai", "deepseek", "anthropic", "google_genai", "ollama"}
 
+SUPPORTED_PERSISTENCE_BACKENDS = {"memory", "postgres"}
+
 
 class SettingsError(RuntimeError):
     """Raised when regular configuration cannot be loaded."""
@@ -52,6 +54,9 @@ class Settings:
     chat_host: str = "127.0.0.1"
     chat_port: int = 8123
     a2a_base_path: str = "/a2a"
+    persistence_backend: str = "memory"
+    persistence_database_url: str | None = None
+    persistence_setup_on_start: bool = True
     open_sandbox_enabled: bool = False
     open_sandbox_domain: str | None = None
     open_sandbox_api_key: str | None = None
@@ -92,6 +97,49 @@ class Settings:
     def uses_sap_ai_core(self) -> bool:
         return self.model_provider == "sap"
 
+    @property
+    def persistence_enabled(self) -> bool:
+        """True when a durable (non-memory) persistence backend is configured."""
+
+        return self.persistence_backend != "memory"
+
+    def sqlalchemy_database_url(self) -> str | None:
+        """Return the persistence URL normalized for SQLAlchemy async engines.
+
+        LangGraph's ``AsyncPostgresSaver`` wants a psycopg (``postgresql://``)
+        DSN, while the A2A ``DatabaseTaskStore`` uses a SQLAlchemy async engine
+        that needs an explicit driver (``postgresql+asyncpg://``). We keep one
+        URL in config and adapt it here for the SQLAlchemy consumer.
+        """
+
+        url = self.persistence_database_url
+        if not url:
+            return None
+        if url.startswith("postgresql+"):
+            return url
+        if url.startswith("postgresql://"):
+            return "postgresql+asyncpg://" + url[len("postgresql://") :]
+        if url.startswith("postgres://"):
+            return "postgresql+asyncpg://" + url[len("postgres://") :]
+        return url
+
+    def psycopg_database_url(self) -> str | None:
+        """Return the persistence URL normalized for psycopg (``AsyncPostgresSaver``).
+
+        psycopg rejects a SQLAlchemy-style ``+driver`` suffix, so strip it and
+        normalize the legacy ``postgres://`` scheme to ``postgresql://``.
+        """
+
+        url = self.persistence_database_url
+        if not url:
+            return None
+        if url.startswith("postgres://"):
+            url = "postgresql://" + url[len("postgres://") :]
+        if url.startswith("postgresql+"):
+            rest = url[len("postgresql") :]
+            url = "postgresql" + rest[rest.index("://") :]
+        return url
+
     def configured_system_prompt(self) -> str | None:
         if self.system_prompt and self.system_prompt.strip():
             return self.system_prompt.strip()
@@ -118,6 +166,20 @@ def load_settings(env: Mapping[str, str] | None = None, *, config: Mapping[str, 
     langfuse = _section(config_data, "langfuse")
     server = _section(config_data, "server")
     sandbox = _section(config_data, "open_sandbox")
+    persistence = _section(config_data, "persistence")
+
+    persistence_backend = _choice(
+        persistence.get("backend"),
+        default="memory",
+        allowed=SUPPORTED_PERSISTENCE_BACKENDS,
+        field_name="persistence.backend",
+    )
+    persistence_database_url = _optional_str(secret_source.get("DATABASE_URL"))
+    if persistence_backend != "memory" and not persistence_database_url:
+        raise SettingsError(
+            f"persistence.backend is '{persistence_backend}' but DATABASE_URL is not set. "
+            "Add DATABASE_URL to .env or set persistence.backend: memory."
+        )
 
     open_sandbox_domain = _optional_str(sandbox.get("domain"))
     open_sandbox_api_key = _optional_str(secret_source.get("OPEN_SANDBOX_API_KEY"))
@@ -159,6 +221,9 @@ def load_settings(env: Mapping[str, str] | None = None, *, config: Mapping[str, 
         chat_host=_str(server.get("chat_host"), "127.0.0.1"),
         chat_port=_int(server.get("chat_port"), 8123),
         a2a_base_path=_str(server.get("a2a_base_path"), "/a2a"),
+        persistence_backend=persistence_backend,
+        persistence_database_url=persistence_database_url,
+        persistence_setup_on_start=_bool(persistence.get("setup_on_start"), True),
         open_sandbox_enabled=open_sandbox_enabled,
         open_sandbox_domain=open_sandbox_domain,
         open_sandbox_api_key=open_sandbox_api_key,

@@ -152,15 +152,18 @@ LangGraph 有两个**正交**的持久化概念，不是「短期存哪、长期
 
 ### 3.6 落地步骤（本仓库）
 
-改动集中在 `services/agent/src/ops_pilot/agent/runtime.py` 的 checkpointer 构建处（当前 `MemorySaver()`）+ `backend.py` 的 A2A task store。
+> **状态：已落地（memory / postgres 两档）。** 下面记录实现方式与验证方法。
 
-1. **加依赖**：`langgraph-checkpoint-postgres`（+ 可选 `langgraph-checkpoint-redis`）。
-2. **配置**：`config/config.yaml` 增 `persistence:` 段（backend: memory|postgres|redis、conn_string 走 `${VAR}`、redis TTL）；`settings.py` 解析；conn 串放 `.env`。
-3. **checkpointer 工厂**：把现有 `_create_checkpointer` 从写死 `MemorySaver` 改为按配置返回 `AsyncPostgresSaver` / `AsyncRedisSaver`，缺省仍 `MemorySaver`（本地零配置可跑）。
-4. **生命周期**：`AsyncPostgresSaver.from_conn_string` 是 async context manager，需在 app lifespan 里管理连接池，不能每次请求新建；启动时 `await checkpointer.setup()` 建表（生产建 migration，别每次 setup）。
-5. **A2A task store**：`InMemoryTaskStore` → 持久实现（A2A SDK 的持久 store 或自研 Postgres 适配，落在 `a2a/task_store.py` 接口后）。
-6. **验证**：起服务 → 发消息 → 杀进程 → 同 `thread_id` 重连，确认对话/任务从 checkpoint 恢复。
-7. **测试**：加 checkpoint 持久化 + resume 的集成测试（可用容器化 Postgres/Redis 或 fake）。
+改动集中在 `services/agent/src/ops_pilot/agent/runtime.py`（checkpointer 工厂）+ `a2a/task_store.py`（A2A task store 工厂）+ `backend.py` / `a2a/app.py`（生命周期接线）。
+
+1. **依赖**：`pyproject.toml` 增 `langgraph-checkpoint-postgres`、`psycopg[binary,pool]`，A2A 加 `postgresql` extra（`a2a-sdk[http-server,postgresql]`，引入 SQLAlchemy asyncpg）。
+2. **配置**：`config.yaml` 增 `persistence:` 段（`backend: memory|postgres`、`setup_on_start`）；DSN 走 `.env` 的 `DATABASE_URL`（唯一密钥）。`settings.py` 解析并在 `backend=postgres` 却缺 `DATABASE_URL` 时 fail-fast；`sqlalchemy_database_url()`/`psycopg_database_url()` 两个归一化方法处理 `+asyncpg` 驱动后缀差异（SQLAlchemy 要、psycopg 不要）。
+3. **checkpointer 工厂**：`_create_checkpointer(settings)` 返回 `(checkpointer, closer)`。memory→`MemorySaver`；postgres→长生命周期 `AsyncConnectionPool`（`autocommit=True`、`prepare_threshold=0`）+ `AsyncPostgresSaver` + 首启 `setup()` 建 `checkpoints`/`writes` 表。`closer` 在 `AgentRuntime.aclose()` 里关连接池。
+4. **A2A task store 工厂**：`create_task_store(settings)` 返回 `(store, closer)`。memory→`InMemoryTaskStore`；postgres→`create_async_engine` + 官方 `DatabaseTaskStore` + `initialize()` 建 `tasks` 表。`closer` 在 app lifespan 关 engine。
+5. **生命周期**：连接池/engine 进程级持有（不每请求新建），启动时建表，关闭时释放——`backend.py` 与 `a2a/app.py` 的 lifespan 各自 await closer。`use_memory_checkpointer` 布尔标志重命名为语义更准的 `attach_checkpointer`（graph.py 平台导出、eval 仍传 `False`，各自不挂 continuity checkpointer）。
+6. **中间件容器化**：`deploy/postgres/`（`pgvector/pgvector:pg16`，host `127.0.0.1:5433`，healthcheck + 数据卷）。用 pgvector 镜像是为后续长期记忆 Store 复用同一实例。`docker compose up -d` 起库，`config.yaml` 切 `backend: postgres` + `.env` 填 `DATABASE_URL` 即启用。
+7. **验证**：起 Postgres → 发消息 → 杀后端 → 同 `thread_id` 重连，对话/任务从 checkpoint 恢复。
+8. **测试**：`tests/unit/config/test_settings.py` 覆盖 persistence 解析/校验/URL 归一化；`tests/unit/agent/test_persistence.py` 覆盖两个工厂的 memory 档，Postgres 档的「写→重开→读恢复」集成测试用 `TEST_DATABASE_URL` 环境变量门禁（默认套件保持零外部依赖）。
 
 ### 3.7 生产注意点（官方 + 实践）
 

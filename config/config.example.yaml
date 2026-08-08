@@ -51,6 +51,15 @@ server:
   chat_port: 8123
   a2a_base_path: /a2a
 
+# Durable execution: LangGraph checkpointer + A2A task store.
+#   memory   = in-process only; conversations and tasks are lost on restart (dev default).
+#   postgres = AsyncPostgresSaver (checkpoints) + A2A DatabaseTaskStore; set DATABASE_URL in .env.
+# Start a local Postgres with `deploy/postgres` (docker compose).
+persistence:
+  backend: memory
+  # Create tables on startup. Fine for local/dev; use a managed migration in production.
+  setup_on_start: true
+
 open_sandbox:
   # null = auto-enable only when domain (here) and api_key (.env) are both set.
   enabled: null

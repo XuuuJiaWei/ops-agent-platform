@@ -1,0 +1,29 @@
+name: ops-pilot-postgres
+
+# Local Postgres for ops_pilot durable execution:
+#   - LangGraph AsyncPostgresSaver checkpoints (checkpoints/writes tables)
+#   - A2A DatabaseTaskStore (tasks table)
+# The pgvector image is used so the same instance can later back the
+# long-term memory Store (pgvector) without swapping containers.
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ops_pilot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ops_pilot}
+      POSTGRES_DB: ${POSTGRES_DB:-ops_pilot}
+    ports:
+      # 5433 on the host avoids clashing with a default local Postgres (5432)
+      # and the Langfuse stack's Postgres (15432).
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  postgres_data:

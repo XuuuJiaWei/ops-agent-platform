@@ -15,7 +15,7 @@ create_agent_runtime_async = build_agent_runtime
 def create_agent_runtime(
     settings: Settings | None = None,
     *,
-    use_memory_checkpointer: bool = True,
+    attach_checkpointer: bool = True,
 ) -> AgentRuntime:
     """Synchronously build the runtime for LangGraph graph imports and CLI use."""
 
@@ -25,7 +25,7 @@ def create_agent_runtime(
         return asyncio.run(
             build_agent_runtime(
                 settings,
-                use_memory_checkpointer=use_memory_checkpointer,
+                attach_checkpointer=attach_checkpointer,
             )
         )
     raise RuntimeError(

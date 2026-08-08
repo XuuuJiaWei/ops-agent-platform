@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -31,6 +32,7 @@ class AgentRuntime:
     tracing: TracingSetup = field(default_factory=lambda: TracingSetup(enabled=False))
     sandbox: SandboxManager | SandboxRuntime | None = None
     model_metadata: dict[str, Any] = field(default_factory=dict)
+    checkpointer_closer: Callable[[], Awaitable[None]] | None = None
 
     def close(self) -> None:
         if self.sandbox is not None:
@@ -40,7 +42,11 @@ class AgentRuntime:
         try:
             await self.mcp.aclose()
         finally:
-            self.close()
+            try:
+                if self.checkpointer_closer is not None:
+                    await self.checkpointer_closer()
+            finally:
+                self.close()
 
     def runnable_config(
         self,
@@ -130,12 +136,16 @@ class AgentRuntime:
 async def build_agent_runtime(
     settings: Settings | None = None,
     *,
-    use_memory_checkpointer: bool = True,
+    attach_checkpointer: bool = True,
 ) -> AgentRuntime:
     """Build the shared DeepAgent runtime.
 
     DeepAgents long-term/semantic memory is intentionally not configured here.
-    Runtime continuity is provided by LangGraph's checkpointer when available.
+    Runtime continuity is provided by LangGraph's checkpointer: an in-memory
+    saver by default, or a durable ``AsyncPostgresSaver`` when
+    ``persistence.backend`` is ``postgres``. ``attach_checkpointer=False`` skips
+    it for callers that supply their own persistence (e.g. the LangGraph
+    platform server) or need a stateless graph (eval runs).
     """
 
     resolved_settings = settings or load_settings()
@@ -150,7 +160,11 @@ async def build_agent_runtime(
         tools.extend(get_smoke_tools())
 
     sandbox: SandboxManager | None = None
+    checkpointer_closer: Callable[[], Awaitable[None]] | None = None
     try:
+        checkpointer, checkpointer_closer = (
+            await _create_checkpointer(resolved_settings) if attach_checkpointer else (None, None)
+        )
         sandbox = create_sandbox_manager(resolved_settings)
         skills = _resolve_backend_skill_paths(local_skills, sandbox)
         interrupt_on = {name: True for name in mcp_registry.hitl_tools}
@@ -160,12 +174,14 @@ async def build_agent_runtime(
             skills=list(skills),
             system_prompt=resolved_settings.configured_system_prompt(),
             tracing=tracing,
-            use_memory_checkpointer=use_memory_checkpointer,
+            checkpointer=checkpointer,
             backend=sandbox.backend if sandbox is not None else None,
             interrupt_on=interrupt_on,
         )
     except Exception:
         await mcp_registry.aclose()
+        if checkpointer_closer is not None:
+            await checkpointer_closer()
         if sandbox is not None:
             sandbox.close()
         raise
@@ -178,6 +194,7 @@ async def build_agent_runtime(
         tracing=tracing,
         sandbox=sandbox,
         model_metadata=model_metadata,
+        checkpointer_closer=checkpointer_closer,
     )
 
 
@@ -201,7 +218,7 @@ def _create_deep_agent(
     skills: list[str],
     system_prompt: str | None,
     tracing: TracingSetup,
-    use_memory_checkpointer: bool,
+    checkpointer: Any | None,
     backend: Any | None,
     interrupt_on: dict[str, Any] | None = None,
 ) -> Any:
@@ -229,10 +246,8 @@ def _create_deep_agent(
         middleware.insert(0, copilotkit_middleware)
     kwargs["middleware"] = middleware
 
-    if use_memory_checkpointer:
-        checkpointer = _create_memory_checkpointer()
-        if checkpointer is not None:
-            kwargs["checkpointer"] = checkpointer
+    if checkpointer is not None:
+        kwargs["checkpointer"] = checkpointer
 
     graph = create_deep_agent(**kwargs)
     if tracing.callbacks:
@@ -248,12 +263,67 @@ def _create_copilotkit_middleware() -> Any | None:
     return CopilotKitMiddleware()
 
 
+async def _create_checkpointer(
+    settings: Settings,
+) -> tuple[Any | None, Callable[[], Awaitable[None]] | None]:
+    """Build a LangGraph checkpointer for durable execution.
+
+    Returns ``(checkpointer, closer)``. ``closer`` releases any owned resources
+    (e.g. a Postgres connection pool) and must be awaited on runtime shutdown;
+    it is ``None`` when the checkpointer holds nothing to release.
+    """
+
+    if settings.persistence_backend == "postgres":
+        return await _create_postgres_checkpointer(settings)
+    return _create_memory_checkpointer(), None
+
+
 def _create_memory_checkpointer() -> Any | None:
     try:
         from langgraph.checkpoint.memory import MemorySaver
     except ImportError:
         return None
     return MemorySaver()
+
+
+async def _create_postgres_checkpointer(
+    settings: Settings,
+) -> tuple[Any, Callable[[], Awaitable[None]]]:
+    """Open a long-lived psycopg pool and wrap it in ``AsyncPostgresSaver``.
+
+    The official production pattern owns the connection pool for the process
+    lifetime (never per-request ``from_conn_string``) and runs ``setup()`` once
+    to create the ``checkpoints``/``writes`` tables.
+    """
+
+    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+    from psycopg_pool import AsyncConnectionPool
+
+    conn_string = settings.psycopg_database_url()
+    if not conn_string:
+        raise RuntimeError("persistence.backend is 'postgres' but DATABASE_URL is not set.")
+
+    # autocommit + no prepared-statement server-side caching is what the
+    # AsyncPostgresSaver examples use for pooled connections.
+    pool = AsyncConnectionPool(
+        conninfo=conn_string,
+        max_size=20,
+        open=False,
+        kwargs={"autocommit": True, "prepare_threshold": 0},
+    )
+    await pool.open(wait=True)
+    try:
+        checkpointer = AsyncPostgresSaver(pool)
+        if settings.persistence_setup_on_start:
+            await checkpointer.setup()
+    except Exception:
+        await pool.close()
+        raise
+
+    async def _close() -> None:
+        await pool.close()
+
+    return checkpointer, _close
 
 
 def _graph_recursion_limit(graph: Any) -> int | None:

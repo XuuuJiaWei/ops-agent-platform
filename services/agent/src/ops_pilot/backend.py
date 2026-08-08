@@ -9,6 +9,7 @@ from fastapi import FastAPI
 
 from ops_pilot.a2a.agent_card import build_agent_card
 from ops_pilot.a2a.executor import create_executor
+from ops_pilot.a2a.task_store import create_task_store
 from ops_pilot.agent.factory import create_agent_runtime_async
 from ops_pilot.agent.manager import AgentRuntimeManager
 from ops_pilot.agui.resilient import create_resilient_agui_agent
@@ -27,7 +28,6 @@ async def create_backend_app(
     from a2a.server.routes.agent_card_routes import create_agent_card_routes
     from a2a.server.routes.fastapi_routes import add_a2a_routes_to_fastapi
     from a2a.server.routes.jsonrpc_routes import create_jsonrpc_routes
-    from a2a.server.tasks import InMemoryTaskStore as A2ATaskStore
     from ag_ui_langgraph import add_langgraph_fastapi_endpoint
     from copilotkit import LangGraphAGUIAgent
     from copilotkit.langgraph import copilotkit_customize_config
@@ -35,7 +35,7 @@ async def create_backend_app(
     resolved_settings = settings or get_settings()
     runtime_manager = AgentRuntimeManager(settings=resolved_settings, runtime=runtime)
 
-    def _mount_protocol_routes(app: FastAPI, resolved_runtime: Any) -> None:
+    def _mount_protocol_routes(app: FastAPI, resolved_runtime: Any, task_store: Any) -> None:
         agui_config = copilotkit_customize_config(
             emit_tool_calls=True,
             emit_messages=True,
@@ -61,7 +61,7 @@ async def create_backend_app(
         agent_card = build_agent_card(resolved_settings)
         request_handler = DefaultRequestHandler(
             agent_executor=create_executor(runtime_manager.runtime_proxy(), resolved_settings),
-            task_store=A2ATaskStore(),
+            task_store=task_store,
             agent_card=agent_card,
         )
         base_path = resolved_settings.a2a_base_path.rstrip("/") or "/a2a"
@@ -80,15 +80,21 @@ async def create_backend_app(
 
     @asynccontextmanager
     async def _lifespan(app: FastAPI):
+        task_store_closer = None
         try:
             if runtime is None:
                 runtime_manager.attach_runtime(await create_agent_runtime_async(resolved_settings))
             if not getattr(app.state, "protocol_routes_mounted", False):
-                _mount_protocol_routes(app, runtime_manager.current)
+                task_store, task_store_closer = await create_task_store(resolved_settings)
+                app.state.a2a_task_store_closer = task_store_closer
+                _mount_protocol_routes(app, runtime_manager.current, task_store)
                 app.state.protocol_routes_mounted = True
             yield
         finally:
-            # Read the manager from state at shutdown so test-swapped fakes are honored.
+            # Read owners from state at shutdown so test-swapped fakes are honored.
+            store_closer = getattr(app.state, "a2a_task_store_closer", None)
+            if store_closer is not None:
+                await store_closer()
             runtime_owner = getattr(app.state, "agent_runtime_manager", None)
             runtime_shutdown = getattr(runtime_owner, "shutdown", None)
             if runtime_shutdown is not None:
