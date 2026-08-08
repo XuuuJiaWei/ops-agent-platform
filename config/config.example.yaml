@@ -49,23 +49,78 @@ open_sandbox:
   workspace_path: /workspace
   internal_root: /workspace/.ops-pilot
 
-# MCP servers (same shape as the retired config/mcp.example.json) plus two
-# permission lists per server:
+# MCP servers for the open-source OTel Demo ops stack. Secrets stay in .env.
+# Permission lists per server:
 #   allow_tools: allowlist of tool names; empty/omitted = allow all.
 #   hitl_tools:  tools that require human-in-the-loop approval before running.
+#   headers:     only for http/sse/streamable_http MCP transports, e.g.
+#                Authorization: ${MCP_BASIC_AUTH_HEADER}
 mcpServers:
-  dynatrace-managed:
-    required: true
+  kubernetes:
+    required: false
     transport: stdio
     command: npx
-    args: ["-y", "@dynatrace-oss/dynatrace-managed-mcp-server@1.0.0"]
+    timeout: 60
+    args:
+      - -y
+      - kubernetes-mcp-server@latest
+      - --read-only
+      - --disable-multi-cluster
+      - --kubeconfig
+      - /path/to/kubeconfig-gardenlogin--cloud--shoot.yaml
     cwd: .
     allow_tools: []
     hitl_tools: []
     env:
-      DT_CONFIG_FILE: ./config/dt-config.yaml
-      DT_PROD_TOKEN: ${DT_PROD_TOKEN}
-      DT_STAGING_TOKEN: ${DT_STAGING_TOKEN}
-      DT_MCP_DISABLE_TELEMETRY: "true"
-      LOG_FILE: /tmp/ops-agent-dynatrace-managed-mcp.log
-      LOG_LEVEL: info
+      KUBECONFIG: /path/to/kubeconfig-gardenlogin--cloud--shoot.yaml
+  prometheus:
+    required: false
+    transport: stdio
+    command: npx
+    args: ["-y", "prometheus-mcp@latest", "stdio"]
+    cwd: .
+    timeout: 60
+    allow_tools: []
+    hitl_tools: []
+    env:
+      PROMETHEUS_URL: http://${OTEL_BASIC_AUTH_USER}:${OTEL_BASIC_AUTH_PASSWORD}@prometheus-otel.example.com
+  jaeger:
+    required: false
+    transport: stdio
+    command: uvx
+    args: ["opentelemetry-mcp", "--backend", "jaeger"]
+    cwd: .
+    timeout: 60
+    allow_tools: []
+    hitl_tools: []
+    env:
+      BACKEND_URL: http://${OTEL_BASIC_AUTH_USER}:${OTEL_BASIC_AUTH_PASSWORD}@jaeger-otel.example.com/jaeger/ui
+  opensearch:
+    required: false
+    transport: stdio
+    command: uvx
+    args: ["opensearch-mcp-server-py"]
+    cwd: .
+    timeout: 90
+    allow_tools:
+      - ListIndexTool
+      - IndexMappingTool
+      - SearchIndexTool
+      - GetShardsTool
+      - ClusterHealthTool
+      - CountTool
+      - ExplainTool
+      - MsearchTool
+      - GenericOpenSearchApiTool
+      - PPLQueryTool
+    hitl_tools:
+      - GenericOpenSearchApiTool
+    env:
+      OPENSEARCH_URL: http://opensearch-otel.example.com
+      OPENSEARCH_USERNAME: ${OTEL_BASIC_AUTH_USER}
+      OPENSEARCH_PASSWORD: ${OTEL_BASIC_AUTH_PASSWORD}
+      OPENSEARCH_ENABLED_CATEGORIES: core_tools,observability
+      OPENSEARCH_SETTINGS_ALLOW_WRITE: "false"
+  # github: disabled by default; re-enable when a GitHub PAT is ready.
+  # dynatrace-managed: disabled for the local open-source ops demo.
+  # kibana: disabled for the local open-source ops demo.
