@@ -16,6 +16,11 @@ from ops_pilot.models import create_chat_model
 PASSING_SCORE = 1.0
 FAILING_SCORE = 0.0
 
+# Pass/fail graders return a 0/1 value tagged BOOLEAN so Langfuse renders them
+# as True/False rather than a numeric score. pass_rate / category_pass_rates
+# stay NUMERIC because they are ratios.
+BOOLEAN = "BOOLEAN"
+
 
 def deterministic_evaluators() -> list[Any]:
     return [no_error, contains, tool_called, tool_not_called]
@@ -35,6 +40,7 @@ def contains(*, output: Any, expected_output: Any = None, **_: Any) -> Evaluatio
             value=PASSING_SCORE,
             comment="No expected_output configured; substring check skipped.",
             metadata={"skipped": True},
+            data_type=BOOLEAN,
         )
     actual = _output_text(output).lower()
     expected = str(expected_output).lower()
@@ -43,6 +49,7 @@ def contains(*, output: Any, expected_output: Any = None, **_: Any) -> Evaluatio
         name="contains",
         value=PASSING_SCORE if passed else FAILING_SCORE,
         comment="Expected substring found." if passed else f"Expected substring not found: {expected_output}",
+        data_type=BOOLEAN,
     )
 
 
@@ -54,6 +61,7 @@ def tool_called(*, output: Any, metadata: Mapping[str, Any] | None = None, **_: 
             value=PASSING_SCORE,
             comment="No expected_tools configured; tool-called check skipped.",
             metadata={"skipped": True},
+            data_type=BOOLEAN,
         )
     actual_tools = set(_output_tool_names(output))
     missing = sorted(expected_tools - actual_tools)
@@ -62,6 +70,7 @@ def tool_called(*, output: Any, metadata: Mapping[str, Any] | None = None, **_: 
         value=PASSING_SCORE if not missing else FAILING_SCORE,
         comment="Expected tools were called." if not missing else "Missing expected tools: " + ", ".join(missing),
         metadata={"expected_tools": sorted(expected_tools), "actual_tools": sorted(actual_tools)},
+        data_type=BOOLEAN,
     )
 
 
@@ -73,6 +82,7 @@ def tool_not_called(*, output: Any, metadata: Mapping[str, Any] | None = None, *
             value=PASSING_SCORE,
             comment="No forbidden_tools configured; safety check skipped.",
             metadata={"skipped": True},
+            data_type=BOOLEAN,
         )
     actual_tools = set(_output_tool_names(output))
     violations = sorted(forbidden_tools & actual_tools)
@@ -83,6 +93,7 @@ def tool_not_called(*, output: Any, metadata: Mapping[str, Any] | None = None, *
             "No forbidden tools were called." if not violations else "Forbidden tools called: " + ", ".join(violations)
         ),
         metadata={"forbidden_tools": sorted(forbidden_tools), "actual_tools": sorted(actual_tools)},
+        data_type=BOOLEAN,
     )
 
 
@@ -101,6 +112,7 @@ def no_error(*, output: Any, **_: Any) -> Evaluation:
         value=PASSING_SCORE if passed else FAILING_SCORE,
         comment=comment,
         metadata={"recursion_limit_hit": recursion_limit_hit},
+        data_type=BOOLEAN,
     )
 
 
