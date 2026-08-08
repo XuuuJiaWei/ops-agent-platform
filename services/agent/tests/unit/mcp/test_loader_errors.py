@@ -1,11 +1,10 @@
 import asyncio
-from contextlib import AsyncExitStack, asynccontextmanager
 
 import pytest
 
 from ops_pilot.config.mcp_schema import MCPConfig
 from ops_pilot.mcp import loader
-from ops_pilot.mcp.loader import PersistentMCPSessions, RequiredMCPServerError, _safe_error, load_mcp_tools
+from ops_pilot.mcp.loader import RequiredMCPServerError, _safe_error, load_mcp_tools
 
 
 def test_safe_error_unwraps_exception_groups() -> None:
@@ -15,26 +14,6 @@ def test_safe_error_unwraps_exception_groups() -> None:
     )
 
     assert _safe_error(error) == "Tunnel 'local-dev' is not connected."
-
-
-@pytest.mark.asyncio
-async def test_persistent_sessions_ignore_stdio_sigterm_shutdown_noise() -> None:
-    stack = AsyncExitStack()
-
-    @asynccontextmanager
-    async def noisy_shutdown():
-        try:
-            yield
-        finally:
-            raise ExceptionGroup(
-                "unhandled errors in a TaskGroup",
-                [ValueError("Received SIGTERM, terminating child process...")],
-            )
-
-    await stack.enter_async_context(noisy_shutdown())
-    sessions = PersistentMCPSessions(stack)
-
-    await sessions.aclose()
 
 
 @pytest.mark.asyncio
@@ -125,3 +104,31 @@ async def test_required_server_timeout_fails_startup(monkeypatch) -> None:
 
     with pytest.raises(RequiredMCPServerError, match="timed out after 0.01s"):
         await load_mcp_tools(config)
+
+
+@pytest.mark.asyncio
+async def test_servers_are_started_concurrently(monkeypatch) -> None:
+    both_started = asyncio.Event()
+    started: set[str] = set()
+
+    async def coordinated_load(server):
+        started.add(server.name)
+        if started == {"one", "two"}:
+            both_started.set()
+        await asyncio.wait_for(both_started.wait(), timeout=0.2)
+        return []
+
+    monkeypatch.setattr(loader, "_load_single_server", coordinated_load)
+    config = MCPConfig.from_mapping(
+        {
+            "mcpServers": {
+                "one": {"transport": "stdio", "command": "one"},
+                "two": {"transport": "stdio", "command": "two"},
+            }
+        }
+    )
+
+    result = await asyncio.wait_for(load_mcp_tools(config), timeout=0.5)
+
+    assert [status.name for status in result.status.servers] == ["one", "two"]
+    assert all(status.ok for status in result.status.servers)

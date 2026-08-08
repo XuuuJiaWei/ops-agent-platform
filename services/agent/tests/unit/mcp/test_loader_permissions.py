@@ -72,6 +72,7 @@ async def test_hitl_collected_for_allowed_tool(stub_tools):
 async def test_single_server_tools_reuse_persistent_session(monkeypatch):
     events: list[tuple[str, str, int]] = []
     sessions: list[_FakeSession] = []
+    lifecycle_tasks = []
 
     class FakeClient:
         def __init__(self, connections):
@@ -79,12 +80,14 @@ async def test_single_server_tools_reuse_persistent_session(monkeypatch):
 
         @asynccontextmanager
         async def session(self, server_name):
+            lifecycle_tasks.append(__import__("asyncio").current_task())
             session = _FakeSession()
             sessions.append(session)
             events.append(("enter", server_name, id(session)))
             try:
                 yield session
             finally:
+                lifecycle_tasks.append(__import__("asyncio").current_task())
                 session.closed = True
                 events.append(("exit", server_name, id(session)))
 
@@ -94,7 +97,8 @@ async def test_single_server_tools_reuse_persistent_session(monkeypatch):
     monkeypatch.setattr("langchain_mcp_adapters.client.MultiServerMCPClient", FakeClient)
     monkeypatch.setattr("langchain_mcp_adapters.tools.load_mcp_tools", fake_load_session_tools)
 
-    tools, session_manager = await _load_single_server(_config().servers[0])
+    caller_task = __import__("asyncio").current_task()
+    tools, session_owner = await _load_single_server(_config().servers[0])
 
     assert [tool.name for tool in tools] == ["query"]
     assert len(sessions) == 1
@@ -105,10 +109,12 @@ async def test_single_server_tools_reuse_persistent_session(monkeypatch):
     assert sessions[0].closed is False
     assert len(sessions) == 1
 
-    await session_manager.aclose()
+    await session_owner.aclose()
 
     assert sessions[0].closed is True
     assert events[-1] == ("exit", "dyna", id(sessions[0]))
+    assert lifecycle_tasks[0] is lifecycle_tasks[1]
+    assert lifecycle_tasks[0] is not caller_task
 
 
 class _FakeSession:
