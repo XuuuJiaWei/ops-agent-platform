@@ -78,6 +78,12 @@ def build_runnable_config(
     effective_configurable = dict(configurable or {})
     if thread_id:
         effective_configurable.setdefault("thread_id", thread_id)
+    if run_id:
+        effective_configurable.setdefault("run_id", run_id)
+    if a2a_task_id:
+        effective_configurable.setdefault("a2a_task_id", a2a_task_id)
+    if a2a_context_id:
+        effective_configurable.setdefault("a2a_context_id", a2a_context_id)
     if effective_configurable:
         config["configurable"] = effective_configurable
     return config
