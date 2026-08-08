@@ -77,3 +77,12 @@ def test_mcp_config_passes_cwd_to_stdio_connection():
     )
 
     assert config.servers[0].to_client_connection()["cwd"] == str((REPO_ROOT / "config").resolve())
+
+
+def test_mcp_config_timeout_is_loader_only():
+    config = MCPConfig.from_mapping(
+        {"mcpServers": {"dyna": {"transport": "stdio", "command": "npx", "timeout": 5}}}
+    )
+
+    assert config.servers[0].timeout == 5.0
+    assert "timeout" not in config.servers[0].to_client_connection()

@@ -86,8 +86,6 @@ class MCPServerConfig:
             connection["headers"] = dict(self.headers)
         if self.env:
             connection["env"] = dict(self.env)
-        if self.timeout is not None:
-            connection["timeout"] = self.timeout
         return connection
 
     def to_langchain_config(self) -> dict[str, Any]:

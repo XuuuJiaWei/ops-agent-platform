@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
@@ -42,7 +43,13 @@ class PersistentMCPSessions:
         if self._closed:
             return
         self._closed = True
-        await self._stack.aclose()
+        try:
+            await self._stack.aclose()
+        except BaseException as exc:
+            if _is_stdio_shutdown_noise(exc):
+                logger.debug("Ignoring MCP stdio shutdown noise: %s", _safe_error(exc))
+                return
+            raise
 
 
 async def load_mcp_tools(settings: Settings | MCPConfig) -> MCPLoadResult:
@@ -70,7 +77,7 @@ async def _load_from_config(config: MCPConfig, *, config_path: str | None) -> MC
     for server in config.servers:
         try:
             expanded = _expand_server_env(server)
-            loaded = await _load_single_server(expanded)
+            loaded = await _load_single_server_with_timeout(expanded)
             server_tools, session_manager = _unpack_server_load_result(loaded)
         except Exception as exc:  # noqa: BLE001 - convert adapter errors to startup status.
             status = MCPServerLoadStatus(
@@ -164,10 +171,20 @@ async def _load_single_server(server: MCPServerConfig) -> tuple[list[Any], Persi
     try:
         session = await stack.enter_async_context(client.session(server.name))
         tools = list(await load_session_tools(session, server_name=server.name))
-    except Exception:
+    except BaseException:
         await stack.aclose()
         raise
     return tools, PersistentMCPSessions(stack)
+
+
+async def _load_single_server_with_timeout(server: MCPServerConfig) -> tuple[list[Any], PersistentMCPSessions]:
+    if server.timeout is None:
+        return await _load_single_server(server)
+    try:
+        return await asyncio.wait_for(_load_single_server(server), timeout=server.timeout)
+    except TimeoutError as exc:
+        timeout = f"{server.timeout:g}"
+        raise MCPLoadError(f"MCP server '{server.name}' timed out after {timeout}s while loading tools.") from exc
 
 
 def _unpack_server_load_result(loaded: Any) -> tuple[list[Any], PersistentMCPSessions | None]:
@@ -216,6 +233,18 @@ def _safe_error(exc: BaseException) -> str:
         if _looks_secret(key) and value:
             text = text.replace(value, "[redacted]")
     return text
+
+
+def _is_stdio_shutdown_noise(exc: BaseException) -> bool:
+    text = _error_text(exc)
+    return any(
+        marker in text
+        for marker in (
+            "Received SIGTERM, terminating child process",
+            "Child process terminated by signal: SIGTERM",
+            "BrokenResourceError",
+        )
+    )
 
 
 def _error_text(exc: BaseException) -> str:
