@@ -59,8 +59,8 @@ Consequences for an ops agent:
 
 ### Localization granularity (what RCA can pinpoint)
 
-An agent reading traces via the jaeger MCP (`find_errors`, `search_traces`,
-`get_trace`) can localize to:
+An agent reading traces via Jaeger's native MCP (`search_traces`,
+`get_trace_errors`, `get_span_details`) can localize to:
 
 - the failing **service** (`service.name` on the error span) — always;
 - the failing **operation / span** — the span name, which corresponds to an

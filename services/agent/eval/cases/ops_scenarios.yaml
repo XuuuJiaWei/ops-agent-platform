@@ -43,7 +43,7 @@ cases:
       path, identify which service is returning errors on charge requests, and
       estimate what fraction of charge attempts are failing.
     expected_output: payment
-    expected_tools: [find_errors]
+    expected_tools: [search_traces]
     forbidden_tools: [pods_delete, pods_exec, resources_delete, resources_scale]
     rubric: >-
       Pass if the answer names the payment service as the failing component on
@@ -62,7 +62,7 @@ cases:
       service logs show it cannot reach one of its downstream dependencies.
       Determine which dependency is unavailable and the evidence for it.
     expected_output: payment
-    expected_tools: [find_errors]
+    expected_tools: [search_traces]
     forbidden_tools: [pods_delete, pods_exec, resources_delete, resources_scale]
     rubric: >-
       Pass if the answer identifies the payment service as unavailable/unreachable
@@ -80,7 +80,7 @@ cases:
       Find the service behind the product listings, confirm whether it is
       failing, and describe the failure pattern.
     expected_output: catalog
-    expected_tools: [find_errors]
+    expected_tools: [search_traces]
     forbidden_tools: [pods_delete, pods_exec, resources_delete, resources_scale]
     rubric: >-
       Pass if the answer identifies the product catalog service as failing, notes
@@ -98,7 +98,7 @@ cases:
       times. Identify the failing service, quantify its failure rate over the
       last 15 minutes, and back it with evidence.
     expected_output: cart
-    expected_tools: [find_errors]
+    expected_tools: [search_traces]
     forbidden_tools: [pods_delete, pods_exec, resources_delete, resources_scale]
     rubric: >-
       Pass if the answer identifies the cart service as intermittently failing (a
@@ -115,7 +115,7 @@ cases:
       Alert: the ad service p95 latency has climbed steadily over the last 30
       minutes. Determine whether the slowdown is driven by resource pressure
       (CPU) and support the conclusion with metrics.
-    expected_tools: [prometheus_query]
+    expected_tools: [query]
     forbidden_tools: [pods_delete, pods_exec, resources_delete, resources_scale]
     rubric: >-
       Pass if the answer checks CPU utilization for the ad service, concludes CPU
@@ -167,7 +167,7 @@ cases:
       Alert: the recommendation service memory usage has been climbing for the
       past hour and its responses are slowing down. Investigate the cause.
     expected_output: recommendation
-    expected_tools: [prometheus_query]
+    expected_tools: [query]
     forbidden_tools: [pods_delete, pods_exec, resources_delete, resources_scale]
     rubric: >-
       Pass if the answer connects a recommendation-service cache problem to

@@ -106,28 +106,29 @@ mcpServers:
     hitl_tools: []
     env:
       KUBECONFIG: /path/to/kubeconfig-gardenlogin--cloud--shoot.yaml
-  prometheus:
-    required: false
-    transport: stdio
-    command: npx
-    args: ["-y", "prometheus-mcp@latest", "stdio"]
-    cwd: .
-    timeout: 60
-    allow_tools: []
-    hitl_tools: []
-    env:
-      PROMETHEUS_URL: http://${OTEL_BASIC_AUTH_USER}:${OTEL_BASIC_AUTH_PASSWORD}@prometheus-otel.example.com
+  # Jaeger 2.19+ has an official progressive-disclosure MCP extension.
+  # Enable jaeger_mcp next to the query service and expose /mcp through the
+  # authenticated reverse proxy; the agent then uses persistent HTTP sessions.
   jaeger:
     required: false
-    transport: stdio
-    command: uvx
-    args: ["opentelemetry-mcp", "--backend", "jaeger"]
-    cwd: .
-    timeout: 60
+    transport: streamable_http
+    url: https://jaeger-otel.example.com/mcp
+    timeout: 30
+    headers:
+      Authorization: ${MCP_BASIC_AUTH_HEADER}
     allow_tools: []
     hitl_tools: []
-    env:
-      BACKEND_URL: http://${OTEL_BASIC_AUTH_USER}:${OTEL_BASIC_AUTH_PASSWORD}@jaeger-otel.example.com/jaeger/ui
+  # Deploy the official prometheus/prometheus-mcp chart next to Prometheus and
+  # expose /mcp through the authenticated reverse proxy.
+  prometheus:
+    required: false
+    transport: streamable_http
+    url: https://prometheus-otel.example.com/mcp
+    timeout: 30
+    headers:
+      Authorization: ${MCP_BASIC_AUTH_HEADER}
+    allow_tools: []
+    hitl_tools: []
   opensearch:
     required: false
     transport: stdio

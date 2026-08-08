@@ -13,41 +13,39 @@ per-server `allow_tools` / `hitl_tools` allowlists.
 
 ## prometheus
 
-- Package: `prometheus-mcp` (npm), repo `idanfishman/prometheus-mcp`, v1.1.3
-- Launch: `npx -y prometheus-mcp@latest stdio`
+- Server: official `prometheus/prometheus-mcp` v0.18.0
+- Transport: authenticated Streamable HTTP at `/mcp`; the server reaches
+  Prometheus over the cluster-internal Service.
 
 | Tool | Purpose |
 | --- | --- |
-| `prometheus_query` | Instant PromQL query at a single timestamp |
-| `prometheus_query_range` | PromQL query over a time range (trends) |
-| `prometheus_list_metrics` | List available metric names |
-| `prometheus_list_labels` | List label names |
-| `prometheus_label_values` | List values for a label |
-| `prometheus_list_targets` | List scrape targets |
-| `prometheus_metric_metadata` | Metadata (type/help) for a metric |
-| `prometheus_build_info` | Prometheus build info |
-| `prometheus_runtime_info` | Prometheus runtime info |
-| `prometheus_scrape_pool_targets` | Targets for a scrape pool |
+| `query` | Instant PromQL query at a single timestamp |
+| `range_query` | PromQL query over a time range |
+| `metric_metadata` | Metric type/help metadata |
+| `label_names` | List label names |
+| `label_values` | List values for a label |
+| `series` | Find time series by label matchers |
+| `docs_list`, `docs_read`, `docs_search` | Read official Prometheus documentation |
 
 ## jaeger
 
-- Package: `opentelemetry-mcp` (PyPI), repo `traceloop/opentelemetry-mcp-server`
-- Launch: `uvx opentelemetry-mcp --backend jaeger`
-- Tool names are the `@mcp.tool()` function names in `src/opentelemetry_mcp/server.py`.
+- Server: Jaeger v2.19+ native `jaeger_mcp` extension
+- Transport: authenticated Streamable HTTP at `/mcp`
 
-Trace-facing tools (relevant to the OTel demo):
+The native tools use progressive disclosure so an investigation can inspect
+topology, errors, or individual spans without downloading every span in a
+trace:
 
 | Tool | Purpose |
 | --- | --- |
-| `list_services` | List services reporting traces |
+| `get_services` | List services reporting traces |
+| `get_span_names` | List span names for a service |
 | `search_traces` | Search traces by service/operation/tags/time |
-| `get_trace` | Fetch a single trace by `trace_id` |
-| `find_errors` | Find error/failed traces |
-| `search_spans_tool` | Search individual spans |
-
-LLM-observability tools also registered but not used for the demo:
-`get_llm_usage`, `list_llm_models`, `get_llm_model_stats`,
-`get_llm_expensive_traces`, `get_llm_slow_traces`, `list_llm_tools_tool`.
+| `get_trace_topology` | Summarize a trace's service and call topology |
+| `get_trace_errors` | Return only error spans and error details for one trace |
+| `get_span_details` | Fetch selected span details |
+| `get_critical_path` | Find latency-critical spans in one trace |
+| `get_service_dependencies` | Summarize service dependencies |
 
 ## opensearch
 

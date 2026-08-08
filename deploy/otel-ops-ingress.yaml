@@ -4,6 +4,7 @@ metadata:
   name: otel-ops-public
   namespace: otel-demo
   annotations:
+    cert.gardener.cloud/purpose: managed
     dns.gardener.cloud/class: garden
     dns.gardener.cloud/dnsnames: prometheus-otel.example.com,jaeger-otel.example.com,opensearch-otel.example.com
     dns.gardener.cloud/ttl: "300"
@@ -12,12 +13,26 @@ metadata:
     nginx.ingress.kubernetes.io/auth-realm: Authentication Required - OpenTelemetry Ops
     nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
 spec:
   ingressClassName: nginx
+  tls:
+    - secretName: otel-ops-public-tls
+      hosts:
+        - prometheus-otel.example.com
+        - jaeger-otel.example.com
+        - opensearch-otel.example.com
   rules:
     - host: prometheus-otel.example.com
       http:
         paths:
+          - path: /mcp
+            pathType: Prefix
+            backend:
+              service:
+                name: prometheus-mcp
+                port:
+                  number: 8080
           - path: /
             pathType: Prefix
             backend:
@@ -28,6 +43,13 @@ spec:
     - host: jaeger-otel.example.com
       http:
         paths:
+          - path: /mcp
+            pathType: Prefix
+            backend:
+              service:
+                name: jaeger
+                port:
+                  name: mcp
           - path: /
             pathType: Prefix
             backend:
