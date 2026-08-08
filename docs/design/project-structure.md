@@ -170,7 +170,7 @@ ops-agent-platform/
 
 - [ ] Root `package.json` owns local orchestration only, not application code.
 - [ ] Root `pnpm-workspace.yaml` includes `apps/*` and may later include shared frontend packages.
-- [ ] Root `.env.example` documents the full local stack: frontend URL, `/chat` route, `/a2a` route, SAP model name, optional SAP credential overrides, MCP config path, skills paths, and Langfuse credentials.
+- [ ] Root `.env.example` documents backend secrets only: required sensitive runtime values without usable values. Non-secret frontend/runtime config lives next to each process (`apps/web/.env.example`, `apps/copilot-runtime/.env.example`).
 - [ ] Root `config/` contains example deployment-level configuration files that can be referenced from `.env`.
 - [ ] Root `skills/` contains local development skills and examples, not Python implementation code.
 - [ ] Root `docs/` remains the source of requirements, research, design decisions, and operating notes.
@@ -317,19 +317,15 @@ Shared behavior comes from shared Python modules, not necessarily a single share
 
 ## 7. Configuration Files
 
-### 7.1 Root `.env.example`
+### 7.1 Environment Files
 
-Root `.env.example` should document the full stack:
+Environment configuration is layered by process, not pooled in a single root file:
 
-- [ ] `SAP_AI_CORE_MODEL_NAME=anthropic--claude-4.6-sonnet` as the default local model name.
-- [ ] Optional `AICORE_*` credential overrides for developers who are not relying on local SAP SDK authentication config.
-- [ ] Langfuse credentials and base URL.
-- [ ] `ASSISTANT_ID`.
-- [ ] `MCP_CONFIG_PATH`.
-- [ ] `SKILLS_PATHS`.
-- [ ] `CHAT_BASE_PATH` and local LangGraph target URL.
-- [ ] `A2A_BASE_PATH`, local A2A target URL, and `A2A_TASK_STORE=memory`.
-- [ ] frontend public variables such as `VITE_CHAT_API_URL`, `VITE_A2A_API_URL`, and `VITE_ASSISTANT_ID`.
+- [ ] Root `.env.example` documents **backend secrets only**: optional `AICORE_*` credential overrides, `MODEL_API_KEY`, Langfuse credentials, `OPEN_SANDBOX_API_KEY`, `OTEL_BASIC_AUTH_USER/PASSWORD`, `MCP_BASIC_AUTH_HEADER`, Dynatrace tokens, and `OPS_PILOT_CONFIG`. Non-secret backend runtime settings (model name, server host/port, `/chat` base path, assistant id, MCP config, skills paths) live in `config/config.yaml`.
+- [ ] `apps/web/.env.example` documents the frontend's browser-visible variables (`VITE_BACKEND_URL`, `VITE_ASSISTANT_ID`, `VITE_COPILOT_RUNTIME_URL`, `VITE_PILOT_BRIDGE_INSTALL_URL`) plus optional Vite dev-server/proxy overrides. Only `VITE_`-prefixed vars are exposed to frontend code.
+- [ ] `apps/copilot-runtime/.env.example` documents the Copilot runtime's config (`ASSISTANT_ID`, `AGUI_AGENT_URL`, `COPILOT_RUNTIME_PORT`, `COPILOT_RUNTIME_HOST`).
+
+During `pnpm dev`, the backend host/port, `/chat` base path, and assistant id are derived from `config/config.yaml` (via `ops_pilot settings`) and injected into the web and copilot processes through `process.env`, so `config/config.yaml`'s `server` section is the single source of truth and the per-process `.env` values only serve standalone starts.
 
 ### 7.2 MCP Config
 

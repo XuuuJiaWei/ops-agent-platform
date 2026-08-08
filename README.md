@@ -62,11 +62,19 @@ Create local configuration:
 ```bash
 cp .env.example .env
 cp config/config.example.yaml config/config.yaml
+# Frontend / Copilot runtime config (non-secret; optional for `pnpm dev`):
+cp apps/web/.env.example apps/web/.env
+cp apps/copilot-runtime/.env.example apps/copilot-runtime/.env
 # Only needed when enabling the Dynatrace Managed MCP server:
 cp config/dt-config.example.yaml config/dt-config.yaml
 ```
 
-Secrets live in `.env`; regular configuration (including MCP servers) lives in `config/config.yaml`. Fill SAP AI Core / Generative AI Hub values in `.env` as needed. If the SAP SDK is already configured through local SDK configuration or `VCAP_SERVICES`, the `AICORE_*` values can stay empty. Add Dynatrace credentials (referenced from `config/config.yaml` via `${VAR}`) only when enabling the Dynatrace MCP server.
+The root `.env` holds backend secrets only. Frontend and Copilot-runtime
+config lives next to each process (`apps/web/.env`, `apps/copilot-runtime/.env`).
+During `pnpm dev` the backend host/port and assistant id are derived from
+`config/config.yaml` (server section) and injected into the web and copilot
+processes, so those `.env` files only matter when a process is started on its
+own. Regular configuration (including MCP servers) lives in `config/config.yaml`. Fill SAP AI Core / Generative AI Hub values in `.env` as needed. If the SAP SDK is already configured through local SDK configuration or `VCAP_SERVICES`, the `AICORE_*` values can stay empty. Add Dynatrace credentials (referenced from `config/config.yaml` via `${VAR}`) only when enabling the Dynatrace MCP server.
 
 Start the full development stack:
 
@@ -89,7 +97,7 @@ The Vite development server proxies `/api/copilotkit/*` to the Copilot runtime a
 Regular (non-secret) configuration lives in `config/config.yaml` (copy from `config/config.example.yaml`); secrets live in `.env`. `OPS_PILOT_CONFIG` can point the backend at a different config file.
 
 - `config/config.yaml` holds app, model, server, sandbox, and inline MCP server configuration. Each MCP server may declare `allow_tools` (allowlist; empty = allow all) and `hitl_tools` (tools that require human-in-the-loop approval before running).
-- The `model:` section selects the chat backend via `provider`: `sap` (default, SAP Generative AI Hub) or an OpenAI-compatible provider such as `deepseek` (set `base_url` and the `MODEL_API_KEY` secret in `.env`). The legacy `sap:` section is still honored as an alias.
+- The `model:` section selects the chat backend via `provider`: `sap` (default, SAP Generative AI Hub) or an OpenAI-compatible provider such as `deepseek` (set `base_url` and the `MODEL_API_KEY` secret in `.env`).
 
 Useful development overrides:
 

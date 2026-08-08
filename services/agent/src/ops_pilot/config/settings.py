@@ -114,11 +114,7 @@ def load_settings(env: Mapping[str, str] | None = None, *, config: Mapping[str, 
     secret_source = os.environ if env is None else env
     config_data = config if config is not None else _load_config_file(secret_source)
 
-    sap = _section(config_data, "sap")
-    # ``model`` is the provider-agnostic section; ``sap`` is the historical
-    # alias kept for backward compatibility. Keys in ``model`` win when both
-    # are present so existing config.yaml files keep working untouched.
-    model = {**sap, **_section(config_data, "model")}
+    model = _section(config_data, "model")
     reasoning = _section(model, "reasoning")
     langfuse = _section(config_data, "langfuse")
     server = _section(config_data, "server")

@@ -9,7 +9,16 @@ if [ ! -f "$ROOT_DIR/apps/copilot-runtime/package.json" ]; then
 fi
 
 cd "$ROOT_DIR"
-if [ -z "${AGUI_AGENT_URL:-}" ]; then
-  export AGUI_AGENT_URL=http://127.0.0.1:8123/chat
+
+# Derive backend chat URL and assistant id from config/config.yaml (single
+# source of truth). Falls back to hardcoded defaults if derivation fails.
+. "$ROOT_DIR/scripts/derive-backend-env.sh"
+if [ -n "${BACKEND_URL:-}" ]; then
+  : "${AGUI_AGENT_URL:=${BACKEND_URL}${CHAT_PATH}}"
+  : "${ASSISTANT_ID:=${ASSISTANT}}"
 fi
+: "${AGUI_AGENT_URL:=http://127.0.0.1:8123/chat}"
+export AGUI_AGENT_URL
+[ -n "${ASSISTANT_ID:-}" ] && export ASSISTANT_ID
+
 exec pnpm --filter "./apps/copilot-runtime" dev

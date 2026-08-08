@@ -2,10 +2,19 @@
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
+# Derive the backend address from config/config.yaml (single source of truth)
+# and inject VITE_BACKEND_URL so Vite prefers it over apps/web/.env. Health-check
+# URLs are built from the same derived values.
+. "$ROOT_DIR/scripts/derive-backend-env.sh"
+: "${BACKEND_URL:=http://127.0.0.1:8123}"
+export VITE_BACKEND_URL="${VITE_BACKEND_URL:-$BACKEND_URL}"
+COPILOT_PORT=${COPILOT_RUNTIME_PORT:-4001}
+
 WEB_WAIT_TIMEOUT=${WEB_WAIT_TIMEOUT:-300}
 WEB_WAIT_FOR_BACKENDS=${WEB_WAIT_FOR_BACKENDS:-true}
-WEB_WAIT_COPILOT_INFO_URL=${WEB_WAIT_COPILOT_INFO_URL:-http://127.0.0.1:4001/api/copilotkit}
-WEB_WAIT_CHAT_HEALTH_URL=${WEB_WAIT_CHAT_HEALTH_URL:-http://127.0.0.1:8123/health}
+WEB_WAIT_COPILOT_INFO_URL=${WEB_WAIT_COPILOT_INFO_URL:-http://127.0.0.1:${COPILOT_PORT}/api/copilotkit}
+WEB_WAIT_CHAT_HEALTH_URL=${WEB_WAIT_CHAT_HEALTH_URL:-${BACKEND_URL}/health}
 
 if [ ! -f "$ROOT_DIR/apps/web/package.json" ]; then
   echo "Missing apps/web/package.json. Scaffold the frontend before running pnpm dev:web." >&2

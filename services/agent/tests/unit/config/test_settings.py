@@ -69,7 +69,7 @@ def test_load_settings_reads_model_section_for_deepseek():
     assert settings.sap_max_tokens == 4096
 
 
-def test_load_settings_model_section_overrides_legacy_sap_alias():
+def test_load_settings_ignores_removed_sap_alias_section():
     settings = load_settings(
         env={},
         config={
@@ -80,8 +80,8 @@ def test_load_settings_model_section_overrides_legacy_sap_alias():
 
     assert settings.model_provider == "openai"
     assert settings.model_name == "gpt-4o-mini"
-    # Unset model keys fall back to the legacy sap alias.
-    assert settings.sap_max_tokens == 1024
+    # The deprecated ``sap:`` section is no longer read; defaults apply.
+    assert settings.sap_max_tokens == 16384
 
 
 def test_load_settings_rejects_unknown_model_provider():
@@ -94,7 +94,7 @@ def test_load_settings_reads_nested_regular_config():
         env={},
         config={
             "app_env": "test",
-            "sap": {"model_name": "custom-model", "max_tokens": 4096, "top_p": 0.9},
+            "model": {"model_name": "custom-model", "max_tokens": 4096, "top_p": 0.9},
             "skills_paths": ["./skills/examples", "./skills/other"],
             "server": {"chat_port": 8130},
         },

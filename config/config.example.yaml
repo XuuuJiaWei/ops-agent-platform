@@ -10,7 +10,6 @@ assistant_id: agent
 #   sap       = SAP Generative AI Hub proxy (default; company AI Core).
 #   deepseek  = DeepSeek API (OpenAI-compatible; set base_url + MODEL_API_KEY).
 #   openai / anthropic / google_genai / ollama = LangChain init_chat_model.
-# The legacy `sap:` section below is still honored as an alias for `model:`.
 model:
   provider: sap
   model_name: anthropic--claude-4.6-sonnet
@@ -37,13 +36,6 @@ model:
 #   model_name: deepseek-chat
 #   base_url: https://api.deepseek.com
 #   max_tokens: 8192
-
-# Deprecated alias for `model:`; kept so existing configs keep working.
-sap:
-  model_name: anthropic--claude-4.6-sonnet
-  temperature: 0.0
-  top_p: null
-  max_tokens: 16384
 
 system_prompt: null
 skills_paths: [./skills]
