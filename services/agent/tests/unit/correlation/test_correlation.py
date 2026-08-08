@@ -11,7 +11,7 @@ import json
 
 import pytest
 
-from ops_pilot.correlation.adapters import ToolRegistry, to_epoch_ms
+from ops_pilot.correlation.adapters import ToolRegistry, invoke_tool, to_epoch_ms
 from ops_pilot.correlation.adapters.kibana import _extract_hits, _log_node, _unwrap_api_response
 from ops_pilot.correlation.align import align_nodes
 from ops_pilot.correlation.correlate import correlate_scores
@@ -157,6 +157,24 @@ def test_tool_registry_first_returns_available_variant():
     registry = ToolRegistry([tool])
     assert registry.first("dynatrace_managed_list_problems", "list_problems") is tool
     assert registry.first("nonexistent") is None
+
+
+@pytest.mark.asyncio
+async def test_invoke_tool_uses_tool_call_envelope_for_toolmessage_output():
+    from langchain_core.messages import ToolMessage
+    from langchain_core.tools import tool
+
+    @tool
+    async def content_blocks(query: str) -> list[dict[str, str]]:
+        """Return MCP-style content blocks."""
+
+        return [{"type": "text", "text": f"result: {query}"}]
+
+    result = await invoke_tool(content_blocks, {"query": "x"})
+
+    assert isinstance(result, ToolMessage)
+    assert result.tool_call_id.startswith("storyline-content_blocks-")
+    assert result.content == [{"type": "text", "text": "result: x"}]
 
 
 # ---- full pipeline ---------------------------------------------------------

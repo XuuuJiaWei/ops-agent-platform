@@ -6,6 +6,7 @@ import json
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
+from uuid import uuid4
 
 
 class ToolRegistry:
@@ -37,11 +38,27 @@ class ToolRegistry:
 
 
 async def invoke_tool(tool: Any, args: Mapping[str, Any]) -> Any:
-    """Invoke a LangChain tool, preferring the async path."""
+    """Invoke a LangChain tool with a proper ToolCall envelope.
 
+    The storyline workflow calls MCP tools from inside another agent tool. Passing
+    only the raw args makes LangChain return raw content blocks to callbacks;
+    passing a ToolCall id lets LangChain normalize results into ToolMessage.
+    """
+
+    tool_input = _tool_call_input(tool, args)
     if hasattr(tool, "ainvoke"):
-        return await tool.ainvoke(dict(args))
-    return tool.invoke(dict(args))
+        return await tool.ainvoke(tool_input)
+    return tool.invoke(tool_input)
+
+
+def _tool_call_input(tool: Any, args: Mapping[str, Any]) -> dict[str, Any]:
+    name = str(getattr(tool, "name", "tool") or "tool")
+    return {
+        "name": name,
+        "args": dict(args),
+        "id": f"storyline-{name}-{uuid4().hex}",
+        "type": "tool_call",
+    }
 
 
 def parse_tool_payload(result: Any) -> Any:
