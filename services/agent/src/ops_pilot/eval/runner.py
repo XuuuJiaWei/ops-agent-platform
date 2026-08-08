@@ -147,7 +147,7 @@ async def _run_langfuse_eval(
         return await asyncio.to_thread(execute_experiment)
     finally:
         flush_tracing(runtime.tracing)
-        runtime.close()
+        await _close_runtime(runtime)
 
 
 async def _run_local_eval(
@@ -201,10 +201,54 @@ async def _run_local_eval(
         )
     finally:
         flush_tracing(runtime.tracing)
-        runtime.close()
+        await _close_runtime(runtime)
 
 
 def _build_task(runtime: Any, *, run_name: str) -> Any:
+    # Persistent MCP sessions belong to the loop that created the runtime.
+    # Langfuse's synchronous experiment API executes async tasks on a worker loop,
+    # so all runtime work is dispatched back here.
+    runtime_loop = asyncio.get_running_loop()
+
+    async def invoke(
+        *,
+        input_text: str,
+        case_id: str,
+        metadata: Mapping[str, Any],
+        timeout_s: float,
+    ) -> Any:
+        # Keep deadline cancellation inside a child task. Cancelling the caller
+        # can also cancel the task that owns AnyIO's MCP session scopes.
+        invocation = asyncio.create_task(
+            runtime.ainvoke_trace(
+                input_text,
+                protocol="eval",
+                thread_id=f"eval-{case_id}",
+                run_id=f"{run_name}:{case_id}",
+                extra_metadata={
+                    "eval_case_id": case_id,
+                    "eval_category": metadata.get("category"),
+                    "eval_run_name": run_name,
+                },
+            ),
+            name=f"eval-{case_id}",
+        )
+        try:
+            done, _ = await asyncio.wait((invocation,), timeout=timeout_s)
+        except BaseException:
+            invocation.cancel()
+            await asyncio.gather(invocation, return_exceptions=True)
+            raise
+        if invocation in done:
+            return invocation.result()
+
+        invocation.cancel()
+        try:
+            await invocation
+        except asyncio.CancelledError:
+            pass
+        raise TimeoutError(f"Agent invocation timed out after {timeout_s:g}s.")
+
     async def task(*, item: Any, **_: Any) -> dict[str, Any]:
         input_text = _item_input(item)
         metadata = _item_metadata(item)
@@ -212,20 +256,17 @@ def _build_task(runtime: Any, *, run_name: str) -> Any:
         timeout_s = _timeout_s(metadata)
         started = time.perf_counter()
         try:
-            trace = await asyncio.wait_for(
-                runtime.ainvoke_trace(
-                    input_text,
-                    protocol="eval",
-                    thread_id=f"eval-{case_id}",
-                    run_id=f"{run_name}:{case_id}",
-                    extra_metadata={
-                        "eval_case_id": case_id,
-                        "eval_category": metadata.get("category"),
-                        "eval_run_name": run_name,
-                    },
-                ),
-                timeout=timeout_s,
+            invocation = invoke(
+                input_text=input_text,
+                case_id=case_id,
+                metadata=metadata,
+                timeout_s=timeout_s,
             )
+            current_loop = asyncio.get_running_loop()
+            if current_loop is runtime_loop:
+                trace = await invocation
+            else:
+                trace = await _run_on_loop(invocation, runtime_loop)
             return trace.as_output()
         except Exception as exc:  # noqa: BLE001 - task errors are scored by no_error.
             latency_s = time.perf_counter() - started
@@ -242,6 +283,21 @@ def _build_task(runtime: Any, *, run_name: str) -> Any:
     return task
 
 
+async def _run_on_loop(coro: Any, loop: asyncio.AbstractEventLoop) -> Any:
+    """Run loop-bound runtime work from an SDK worker event loop."""
+
+    future = asyncio.run_coroutine_threadsafe(coro, loop)
+    try:
+        return await asyncio.wrap_future(future)
+    except asyncio.CancelledError:
+        future.cancel()
+        try:
+            await asyncio.wrap_future(future)
+        except asyncio.CancelledError:
+            pass
+        raise
+
+
 async def _run_evaluator(evaluator: Any, **kwargs: Any) -> list[Any]:
     result = evaluator(**kwargs)
     if inspect.isawaitable(result):
@@ -249,6 +305,16 @@ async def _run_evaluator(evaluator: Any, **kwargs: Any) -> list[Any]:
     if isinstance(result, list):
         return result
     return [result]
+
+
+async def _close_runtime(runtime: Any) -> None:
+    aclose = getattr(runtime, "aclose", None)
+    if aclose is not None:
+        await aclose()
+        return
+    close = getattr(runtime, "close", None)
+    if close is not None:
+        close()
 
 
 def _item_input(item: Any) -> str:
