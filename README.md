@@ -89,7 +89,6 @@ The Vite development server proxies `/api/copilotkit/*` to the Copilot runtime a
 Regular (non-secret) configuration lives in `config/config.yaml` (copy from `config/config.example.yaml`); secrets live in `.env`. `OPS_PILOT_CONFIG` can point the backend at a different config file.
 
 - `config/config.yaml` holds app, SAP model, server, sandbox, and inline MCP server configuration. Each MCP server may declare `allow_tools` (allowlist; empty = allow all) and `hitl_tools` (tools that require human-in-the-loop approval before running).
-- `config/subagents.example.json` reserves future custom subagent configuration. The current version can keep `subagents` empty and use DeepAgents defaults.
 
 Useful development overrides:
 

@@ -145,7 +145,6 @@ ops-agent-platform/
 
   config/
     config.example.yaml
-    subagents.example.json
 
   skills/
     README.md
@@ -359,16 +358,6 @@ Root `.env.example` should document the full stack:
 The loader may normalize the `mcpServers` shape into the internal format required by `MultiServerMCPClient`.
 
 MCP server package versions should be pinned in committed config. Use explicit version bumps when updating MCP servers; do not rely on `@latest` for reproducible local development.
-
-### 7.3 Subagent Config
-
-`config/subagents.example.json` should exist as a future-facing schema example, but the first version should not require it:
-
-```json
-{
-  "subagents": []
-}
-```
 
 ## 8. Test Layout
 
