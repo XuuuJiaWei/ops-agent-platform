@@ -28,54 +28,6 @@ class DummyAGUIAgent:
         pass
 
 
-class FakeReloadResult:
-    def as_dict(self) -> dict[str, object]:
-        return {
-            "ok": True,
-            "generation": 1,
-            "dynamic_mcp": {"tool_count": 0, "servers": []},
-        }
-
-
-class FakeRuntimeManager:
-    def __init__(self) -> None:
-        self.applied_server = None
-
-    def status(self) -> FakeReloadResult:
-        return FakeReloadResult()
-
-    async def apply_mcp_server(self, server) -> FakeReloadResult:
-        self.applied_server = server
-        return FakeReloadResult()
-
-    async def remove_mcp_server(self, name: str) -> FakeReloadResult:
-        return FakeReloadResult()
-
-
-class FakeLocalBridgeManager:
-    def __init__(self) -> None:
-        self.started_config = None
-        self.waited_tunnel_id = None
-        self.stopped_tunnel_id = None
-
-    def status(self) -> dict:
-        return {}
-
-    async def start(self, config) -> object:
-        self.started_config = config
-        return object()
-
-    async def wait_connected(self, tunnel_id: str, *, timeout: float) -> None:
-        self.waited_tunnel_id = tunnel_id
-
-    async def stop(self, tunnel_id: str) -> None:
-        self.stopped_tunnel_id = tunnel_id
-
-    async def shutdown(self) -> None:
-        # Invoked by the FastAPI lifespan shutdown when this fake is installed.
-        pass
-
-
 def _patch_agui(monkeypatch) -> None:
     """Replace the heavy AG-UI / CopilotKit wiring with fakes.
 
@@ -101,7 +53,7 @@ def _patch_agui(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_unified_backend_mounts_chat_a2a_and_tunnel_routes(monkeypatch) -> None:
+async def test_unified_backend_mounts_chat_a2a_and_health_routes(monkeypatch) -> None:
     _patch_agui(monkeypatch)
 
     settings = load_settings(env={}, config={"app_env": "test", "assistant_id": "agent"})
@@ -113,7 +65,6 @@ async def test_unified_backend_mounts_chat_a2a_and_tunnel_routes(monkeypatch) ->
         assert "/a2a/jsonrpc" in paths
         assert "/a2a/.well-known/agent-card.json" in paths
         assert client.get("/health").status_code == 200
-        assert client.get("/dev/mcp-tunnels").status_code == 200
 
 
 @pytest.mark.asyncio
@@ -142,73 +93,3 @@ async def test_backend_builds_runtime_inside_lifespan(monkeypatch) -> None:
         assert client.get("/health").status_code == 200
 
     assert created[0].closed is True
-
-
-@pytest.mark.asyncio
-async def test_tunnel_agent_config_applies_to_runtime_manager(monkeypatch) -> None:
-    import ops_pilot.tunnel.app as tunnel_app
-
-    _patch_agui(monkeypatch)
-    monkeypatch.setattr(tunnel_app.manager, "get", lambda tunnel_id: object())
-
-    settings = load_settings(env={}, config={"app_env": "test", "assistant_id": "agent"})
-    app = await create_backend_app(settings, runtime=DummyRuntime())
-    fake_manager = FakeRuntimeManager()
-    app.state.agent_runtime_manager = fake_manager
-
-    with TestClient(app) as client:
-        response = client.put(
-            "/dev/mcp-tunnels/local-dev/agent-config",
-            json={"token": "secret"},
-        )
-
-    assert response.status_code == 200
-    assert fake_manager.applied_server.name == "local-dev"
-    assert fake_manager.applied_server.transport == "streamable_http"
-    assert fake_manager.applied_server.url == "http://testserver/dev/mcp-tunnels/local-dev/mcp"
-    assert fake_manager.applied_server.headers == {"Authorization": "Bearer secret"}
-
-
-@pytest.mark.asyncio
-async def test_tunnel_agent_config_starts_local_bridge_for_profile(monkeypatch) -> None:
-    _patch_agui(monkeypatch)
-
-    settings = load_settings(env={}, config={"app_env": "test", "assistant_id": "agent"})
-    app = await create_backend_app(settings, runtime=DummyRuntime())
-    fake_runtime_manager = FakeRuntimeManager()
-    fake_bridge_manager = FakeLocalBridgeManager()
-    app.state.agent_runtime_manager = fake_runtime_manager
-    app.state.local_bridge_manager = fake_bridge_manager
-
-    with TestClient(app) as client:
-        response = client.put(
-            "/dev/mcp-tunnels/kibana/agent-config",
-            json={
-                "mcp_config": "/Users/me/.mcp.json",
-                "mcp_server": "kibana",
-                "server_url": "http://127.0.0.1:8123",
-            },
-        )
-
-    assert response.status_code == 200
-    assert fake_bridge_manager.started_config.tunnel_id == "kibana"
-    assert fake_bridge_manager.started_config.mcp_config == "/Users/me/.mcp.json"
-    assert fake_bridge_manager.started_config.mcp_server == "kibana"
-    assert fake_bridge_manager.waited_tunnel_id == "kibana"
-    assert fake_runtime_manager.applied_server.name == "kibana"
-
-
-@pytest.mark.asyncio
-async def test_tunnel_agent_config_requires_connected_tunnel(monkeypatch) -> None:
-    _patch_agui(monkeypatch)
-
-    settings = load_settings(env={}, config={"app_env": "test", "assistant_id": "agent"})
-    app = await create_backend_app(settings, runtime=DummyRuntime())
-    app.state.agent_runtime_manager = FakeRuntimeManager()
-
-    with TestClient(app) as client:
-        response = client.put("/dev/mcp-tunnels/not-connected/agent-config", json={})
-
-    assert response.status_code == 503
-    assert "not-connected" in response.json()["detail"]
-    assert "Configure a local MCP profile" in response.json()["detail"]

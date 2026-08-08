@@ -15,7 +15,7 @@ The product currently exposes three primary surfaces:
 ## Capabilities
 
 - DeepAgents runtime with SAP AI Core / Generative AI Hub model integration.
-- MCP tool loading from deployment configuration, including Dynatrace Managed MCP when credentials are configured.
+- MCP tool loading from deployment configuration (`config/config.yaml`).
 - CopilotKit-compatible chat streaming through AG-UI.
 - A2A agent card discovery and JSON-RPC execution through the official Python SDK.
 - Optional Langfuse tracing when credentials are configured.
@@ -44,7 +44,7 @@ The frontend does not implement agent policy or tool orchestration. It renders t
 | --- | --- | --- |
 | Web app | `http://localhost:3000` | CopilotKit chat frontend |
 | Copilot runtime | `http://127.0.0.1:4001/api/copilotkit` | Runtime bridge between browser and AG-UI |
-| Backend | `http://127.0.0.1:8123` | AG-UI, A2A, health, and MCP tunnel relay |
+| Backend | `http://127.0.0.1:8123` | AG-UI, A2A, and health |
 | A2A agent card | `http://127.0.0.1:8123/a2a/.well-known/agent-card.json` | Agent discovery metadata |
 | A2A JSON-RPC | `http://127.0.0.1:8123/a2a/jsonrpc` | Programmatic agent execution |
 
@@ -65,8 +65,6 @@ cp config/config.example.yaml config/config.yaml
 # Frontend / Copilot runtime config (non-secret; optional for `pnpm dev`):
 cp apps/web/.env.example apps/web/.env
 cp apps/copilot-runtime/.env.example apps/copilot-runtime/.env
-# Only needed when enabling the Dynatrace Managed MCP server:
-cp config/dt-config.example.yaml config/dt-config.yaml
 ```
 
 The root `.env` holds backend secrets only. Frontend and Copilot-runtime
@@ -74,7 +72,7 @@ config lives next to each process (`apps/web/.env`, `apps/copilot-runtime/.env`)
 During `pnpm dev` the backend host/port and assistant id are derived from
 `config/config.yaml` (server section) and injected into the web and copilot
 processes, so those `.env` files only matter when a process is started on its
-own. Regular configuration (including MCP servers) lives in `config/config.yaml`. Fill SAP AI Core / Generative AI Hub values in `.env` as needed. If the SAP SDK is already configured through local SDK configuration or `VCAP_SERVICES`, the `AICORE_*` values can stay empty. Add Dynatrace credentials (referenced from `config/config.yaml` via `${VAR}`) only when enabling the Dynatrace MCP server.
+own. Regular configuration (including MCP servers) lives in `config/config.yaml`. Fill SAP AI Core / Generative AI Hub values in `.env` as needed. If the SAP SDK is already configured through local SDK configuration or `VCAP_SERVICES`, the `AICORE_*` values can stay empty.
 
 Start the full development stack:
 

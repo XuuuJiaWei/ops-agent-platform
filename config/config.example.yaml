@@ -40,7 +40,6 @@ model:
 system_prompt: null
 skills_paths: [./skills]
 enable_smoke_tools: true
-enable_storyline_tool: false
 
 langfuse:
   # Public/secret keys stay in .env; only the base URL is regular config.
@@ -148,5 +147,3 @@ mcpServers:
       OPENSEARCH_ENABLED_CATEGORIES: core_tools,observability
       OPENSEARCH_SETTINGS_ALLOW_WRITE: "false"
   # github: disabled by default; re-enable when a GitHub PAT is ready.
-  # dynatrace-managed: disabled for the local open-source ops demo.
-  # kibana: disabled for the local open-source ops demo.

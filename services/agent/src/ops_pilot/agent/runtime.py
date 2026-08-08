@@ -7,10 +7,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from ops_pilot.agent.middleware import NormalizeSystemMessagesMiddleware
-from ops_pilot.config.mcp_schema import MCPConfig
 from ops_pilot.config.settings import Settings, load_settings
 from ops_pilot.mcp.registry import MCPRegistry, create_mcp_registry
-from ops_pilot.mcp.status import MCPLoadStatus
 from ops_pilot.models import create_chat_model
 from ops_pilot.observability.langfuse import TracingSetup, create_callback_handler
 from ops_pilot.observability.metadata import build_model_metadata, build_runnable_config
@@ -132,7 +130,6 @@ class AgentRuntime:
 async def build_agent_runtime(
     settings: Settings | None = None,
     *,
-    dynamic_mcp_config: MCPConfig | None = None,
     use_memory_checkpointer: bool = True,
 ) -> AgentRuntime:
     """Build the shared DeepAgent runtime.
@@ -145,23 +142,12 @@ async def build_agent_runtime(
     model = create_chat_model(resolved_settings)
     model_metadata = build_model_metadata(resolved_settings, model)
     mcp_registry = await create_mcp_registry(resolved_settings)
-    if dynamic_mcp_config is not None and dynamic_mcp_config.servers:
-        dynamic_registry = await MCPRegistry.from_config(dynamic_mcp_config, config_path="dynamic")
-        mcp_registry = _combine_mcp_registries(mcp_registry, dynamic_registry)
     local_skills = tuple(resolve_skill_paths(resolved_settings))
     tracing = create_callback_handler(resolved_settings)
 
     tools = list(mcp_registry.tools)
     if resolved_settings.enable_smoke_tools:
         tools.extend(get_smoke_tools())
-
-    if resolved_settings.enable_storyline_tool:
-        # Multi-source fault storyline: a deterministic correlation workflow
-        # exposed as one tool. It reads the same MCP tools the agent has
-        # (Dynatrace/Kibana) and uses the same chat model for narration.
-        from ops_pilot.correlation.orchestrator import build_storyline_tool
-
-        tools.append(build_storyline_tool(tuple(mcp_registry.tools), model))
 
     sandbox: SandboxManager | None = None
     try:
@@ -208,30 +194,6 @@ def _resolve_backend_skill_paths(
     return sync_result.remote_paths
 
 
-def _combine_mcp_registries(*registries: MCPRegistry) -> MCPRegistry:
-    tools: list[Any] = []
-    server_statuses = []
-    config_paths: list[str] = []
-    hitl_tools: list[str] = []
-    session_managers: list[Any] = []
-    for registry in registries:
-        tools.extend(registry.tools)
-        server_statuses.extend(registry.status.servers)
-        hitl_tools.extend(registry.hitl_tools)
-        session_managers.extend(registry.session_managers)
-        if registry.status.config_path:
-            config_paths.append(registry.status.config_path)
-    return MCPRegistry(
-        tools=tuple(tools),
-        status=MCPLoadStatus(
-            config_path=", ".join(config_paths) if config_paths else None,
-            servers=tuple(server_statuses),
-        ),
-        hitl_tools=tuple(dict.fromkeys(hitl_tools)),
-        session_managers=tuple(session_managers),
-    )
-
-
 def _create_deep_agent(
     *,
     model: Any,
@@ -248,12 +210,9 @@ def _create_deep_agent(
     except ImportError as exc:
         raise RuntimeError("deepagents is not installed. Run 'uv sync' in services/agent.") from exc
 
-    from ops_pilot.agent.state import StorylineAgentState
-
     kwargs: dict[str, Any] = {
         "model": model,
         "tools": tools,
-        "state_schema": StorylineAgentState,
     }
     if system_prompt:
         kwargs["system_prompt"] = system_prompt

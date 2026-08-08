@@ -32,7 +32,7 @@ def build_agent_card(settings: Settings):
                 name="Operations assistant",
                 description="Answer operations questions and use configured MCP tools.",
                 tags=["operations", "sap-ai-core", "deepagents"],
-                examples=["Summarize the current Dynatrace problem status."],
+                examples=["Summarize the current production incident status."],
                 input_modes=["text/plain"],
                 output_modes=["text/plain", "task-status"],
             )

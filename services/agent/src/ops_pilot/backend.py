@@ -15,16 +15,13 @@ from ops_pilot.agui.resilient import create_resilient_agui_agent
 from ops_pilot.api.errors import register_exception_handlers
 from ops_pilot.config.settings import Settings, get_settings
 from ops_pilot.health.app import router as health_router
-from ops_pilot.tunnel.app import router as tunnel_router
-from ops_pilot.tunnel.local_bridge import LocalBridgeManager
-from ops_pilot.tunnel.manager import manager as tunnel_manager
 
 
 async def create_backend_app(
     settings: Settings | None = None,
     runtime: Any | None = None,
 ) -> FastAPI:
-    """Create the standard backend with AG-UI, A2A, health, and tunnel routes."""
+    """Create the standard backend with AG-UI, A2A, and health routes."""
 
     from a2a.server.request_handlers import DefaultRequestHandler
     from a2a.server.routes.agent_card_routes import create_agent_card_routes
@@ -37,7 +34,6 @@ async def create_backend_app(
 
     resolved_settings = settings or get_settings()
     runtime_manager = AgentRuntimeManager(settings=resolved_settings, runtime=runtime)
-    local_bridge_manager = LocalBridgeManager(tunnel_manager)
 
     def _mount_protocol_routes(app: FastAPI, resolved_runtime: Any) -> None:
         agui_config = copilotkit_customize_config(
@@ -92,11 +88,7 @@ async def create_backend_app(
                 app.state.protocol_routes_mounted = True
             yield
         finally:
-            # Read managers from state at shutdown so test-swapped fakes are honored.
-            manager = getattr(app.state, "local_bridge_manager", None)
-            bridge_shutdown = getattr(manager, "shutdown", None)
-            if bridge_shutdown is not None:
-                await bridge_shutdown()
+            # Read the manager from state at shutdown so test-swapped fakes are honored.
             runtime_owner = getattr(app.state, "agent_runtime_manager", None)
             runtime_shutdown = getattr(runtime_owner, "shutdown", None)
             if runtime_shutdown is not None:
@@ -105,7 +97,5 @@ async def create_backend_app(
     app = FastAPI(title="ops_pilot Backend", version="0.1.0", lifespan=_lifespan)
     register_exception_handlers(app)
     app.state.agent_runtime_manager = runtime_manager
-    app.state.local_bridge_manager = local_bridge_manager
     app.include_router(health_router)
-    app.include_router(tunnel_router)
     return app

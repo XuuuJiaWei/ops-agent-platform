@@ -12,7 +12,6 @@ from ops_pilot.agui.resilient import create_resilient_agui_agent
 from ops_pilot.api.errors import register_exception_handlers
 from ops_pilot.config.settings import Settings, get_settings
 from ops_pilot.health.app import router as health_router
-from ops_pilot.tunnel.app import router as tunnel_router
 
 
 async def create_agui_app(settings: Settings | None = None, runtime: Any | None = None) -> FastAPI:
@@ -39,7 +38,6 @@ async def create_agui_app(settings: Settings | None = None, runtime: Any | None 
     app = FastAPI(title="ops_pilot AG-UI", version="0.1.0", lifespan=_lifespan)
     register_exception_handlers(app)
     app.include_router(health_router)
-    app.include_router(tunnel_router)
 
     agui_config = copilotkit_customize_config(
         emit_tool_calls=True,

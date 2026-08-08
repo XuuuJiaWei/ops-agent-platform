@@ -9,7 +9,6 @@
     "dev:langgraph": "sh ./scripts/dev-langgraph.sh",
     "dev:copilot": "sh ./scripts/dev-copilot-runtime.sh",
     "dev:check": "sh ./scripts/dev-check.sh",
-    "tunnel:otel": "sh ./scripts/tunnel-otel.sh",
     "lint": "pnpm --filter \"./apps/web\" lint",
     "test": "pnpm run test:backend",
     "test:backend": "cd services/agent && uv run pytest",

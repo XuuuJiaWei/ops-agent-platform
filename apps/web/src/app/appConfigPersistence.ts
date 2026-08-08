@@ -1,5 +1,4 @@
 export type PersistedMainView = "chat" | "app";
-export type PersistedSidebarView = "conversations" | "settings";
 export type PersistedThreadSource = "copilot" | "local";
 
 export type PersistedAppConfig = {
@@ -8,7 +7,6 @@ export type PersistedAppConfig = {
   desktopSidebarOpen: boolean;
   hasExplicitThreadId: boolean;
   mainView: PersistedMainView;
-  sidebarView: PersistedSidebarView;
 };
 
 const STORAGE_VERSION = 2;
@@ -24,7 +22,6 @@ const defaultAppConfig: PersistedAppConfig = {
   desktopSidebarOpen: true,
   hasExplicitThreadId: false,
   mainView: "chat",
-  sidebarView: "conversations",
 };
 
 export function appConfigStorageKey(agentId: string): string {
@@ -76,7 +73,6 @@ function isPersistedAppConfig(value: unknown): value is PersistedAppConfig {
     (candidate.activeThreadSource === "copilot" || candidate.activeThreadSource === "local") &&
     typeof candidate.desktopSidebarOpen === "boolean" &&
     typeof candidate.hasExplicitThreadId === "boolean" &&
-    (candidate.mainView === "chat" || candidate.mainView === "app") &&
-    (candidate.sidebarView === "conversations" || candidate.sidebarView === "settings")
+    (candidate.mainView === "chat" || candidate.mainView === "app")
   );
 }

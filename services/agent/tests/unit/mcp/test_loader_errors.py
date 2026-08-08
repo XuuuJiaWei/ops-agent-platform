@@ -10,10 +10,10 @@ from ops_pilot.mcp.loader import RequiredMCPServerError, _safe_error, load_mcp_t
 def test_safe_error_unwraps_exception_groups() -> None:
     error = ExceptionGroup(
         "unhandled errors in a TaskGroup",
-        [RuntimeError("Tunnel 'local-dev' is not connected.")],
+        [RuntimeError("MCP server 'kubernetes' is not connected.")],
     )
 
-    assert _safe_error(error) == "Tunnel 'local-dev' is not connected."
+    assert _safe_error(error) == "MCP server 'kubernetes' is not connected."
 
 
 @pytest.mark.asyncio

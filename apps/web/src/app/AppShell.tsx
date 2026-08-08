@@ -23,7 +23,6 @@ type AppShellProps = {
   env: BrowserEnv;
 };
 
-type SidebarView = "conversations" | "settings";
 type MainView = "chat" | "app";
 const viewSwitcherFrameClass = import.meta.env.DEV ? "relative z-[2147483647] ml-auto mr-14" : "relative z-40 ml-auto";
 const chatMessageView = {
@@ -46,7 +45,6 @@ export function AppShell({ env }: AppShellProps) {
   const [hasExplicitThreadId, setHasExplicitThreadId] = useState(initialConfig.hasExplicitThreadId);
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(initialConfig.desktopSidebarOpen);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [sidebarView, setSidebarView] = useState<SidebarView>(initialConfig.sidebarView);
   const [mainView, setMainView] = useState<MainView>(initialConfig.mainView);
   const threadsState = useConversationThreads({ agentId: env.assistantId });
   const { setThreadTitle, touchThread } = threadsState;
@@ -66,9 +64,8 @@ export function AppShell({ env }: AppShellProps) {
       desktopSidebarOpen,
       hasExplicitThreadId,
       mainView,
-      sidebarView,
     });
-  }, [activeThreadId, activeThreadSource, desktopSidebarOpen, env.assistantId, hasExplicitThreadId, mainView, sidebarView]);
+  }, [activeThreadId, activeThreadSource, desktopSidebarOpen, env.assistantId, hasExplicitThreadId, mainView]);
 
   useEffect(() => {
     touchThread(activeThreadId);
@@ -85,7 +82,6 @@ export function AppShell({ env }: AppShellProps) {
       setActiveThreadSource(nextConfig.activeThreadSource);
       setHasExplicitThreadId(nextConfig.hasExplicitThreadId);
       setDesktopSidebarOpen(nextConfig.desktopSidebarOpen);
-      setSidebarView(nextConfig.sidebarView);
       setMainView(nextConfig.mainView);
     }
 
@@ -98,7 +94,6 @@ export function AppShell({ env }: AppShellProps) {
     setActiveThreadId(thread.id);
     setActiveThreadSource(threadsState.source);
     setHasExplicitThreadId(false);
-    setSidebarView("conversations");
     setMobileSidebarOpen(false);
   }
 
@@ -107,7 +102,6 @@ export function AppShell({ env }: AppShellProps) {
     setActiveThreadId(threadId);
     setActiveThreadSource(threadsState.source);
     setHasExplicitThreadId(true);
-    setSidebarView("conversations");
     setMobileSidebarOpen(false);
   }
 
@@ -136,7 +130,6 @@ export function AppShell({ env }: AppShellProps) {
       <main className="flex h-dvh min-h-screen bg-[var(--surface-page)]">
         <ThreadSidebar
           activeThreadId={activeThreadId}
-          env={env}
           isDesktopOpen={desktopSidebarOpen}
           isMobileOpen={mobileSidebarOpen}
           onCloseDesktop={() => setDesktopSidebarOpen(false)}
@@ -145,9 +138,7 @@ export function AppShell({ env }: AppShellProps) {
           onNewThread={startNewThread}
           onSelectThread={selectThread}
           onToggleMobile={() => setMobileSidebarOpen((open) => !open)}
-          onViewChange={setSidebarView}
           threadsState={threadsState}
-          view={sidebarView}
         />
 
         <section className="flex min-w-0 flex-1 flex-col bg-white">

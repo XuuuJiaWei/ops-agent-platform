@@ -13,7 +13,7 @@ uv run pytest
 ```
 
 The service reads root `.env` when present. Leave Langfuse keys empty for local startup with tracing disabled.
-The standard backend exposes AG-UI under `/chat`, A2A JSON-RPC at `/a2a/jsonrpc`, agent-card discovery at `/a2a/.well-known/agent-card.json`, and MCP tunnel relay routes under `/dev/mcp-tunnels`.
+The standard backend exposes AG-UI under `/chat`, A2A JSON-RPC at `/a2a/jsonrpc`, agent-card discovery at `/a2a/.well-known/agent-card.json`, and a health endpoint at `/health`.
 
 ## DeepAgents Sandbox
 

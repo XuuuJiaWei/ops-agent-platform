@@ -16,7 +16,6 @@ from ops_pilot.config.settings import load_settings
 from ops_pilot.eval.cli import add_chaos_subcommands, add_eval_subcommands, run_chaos_command, run_eval_command
 from ops_pilot.health.status import build_runtime_status, health_snapshot
 from ops_pilot.models.smoke import smoke_bind_tools, smoke_invoke, smoke_model_invocation
-from ops_pilot.tunnel.profile import resolve_tunnel_mcp_spec
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -30,20 +29,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     serve = subcommands.add_parser("serve", help="Start the unified backend server.")
     serve.add_argument("--host", default=None)
     serve.add_argument("--port", type=int, default=None)
-
-    tunnel = subcommands.add_parser("tunnel", help="Run local MCP tunnel commands.")
-    tunnel_subcommands = tunnel.add_subparsers(dest="tunnel_command", required=True)
-    tunnel_run = tunnel_subcommands.add_parser(
-        "run",
-        help="Connect a local stdio MCP server to the backend through an outbound tunnel.",
-    )
-    tunnel_run.add_argument("--server-url", default="http://127.0.0.1:8123")
-    tunnel_run.add_argument("--tunnel-id", required=True)
-    tunnel_run.add_argument("--token", default=None)
-    tunnel_run.add_argument("--mcp-command", default=None)
-    tunnel_run.add_argument("--mcp-config", default=None)
-    tunnel_run.add_argument("--mcp-server", default=None)
-    tunnel_run.add_argument("--cwd", default=None)
 
     smoke = subcommands.add_parser("smoke", help="Run local smoke checks.")
     smoke_subcommands = smoke.add_subparsers(dest="smoke_command", required=True)
@@ -64,18 +49,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "serve":
         return _serve_backend(args.host, args.port)
-    if args.command == "tunnel" and args.tunnel_command == "run":
-        return _run_server(
-            _run_tunnel(
-                server_url=args.server_url,
-                tunnel_id=args.tunnel_id,
-                token=args.token,
-                mcp_command=args.mcp_command,
-                mcp_config=args.mcp_config,
-                mcp_server=args.mcp_server,
-                cwd=args.cwd,
-            )
-        )
     if args.command == "smoke":
         return _smoke(args.smoke_command)
     if args.command == "eval":
@@ -142,36 +115,6 @@ def _serve_backend(host: str | None, port: int | None) -> int:
         uvicorn.Server(config).run()
     except KeyboardInterrupt:
         pass
-    return 0
-
-
-async def _run_tunnel(
-    *,
-    server_url: str,
-    tunnel_id: str,
-    token: str | None,
-    mcp_command: str | None,
-    mcp_config: str | None,
-    mcp_server: str | None,
-    cwd: str | None,
-) -> int:
-    from ops_pilot.tunnel.client import TunnelClientConfig, run_local_tunnel_client
-
-    spec = resolve_tunnel_mcp_spec(
-        mcp_command=mcp_command,
-        mcp_config=mcp_config,
-        mcp_server=mcp_server,
-    )
-    await run_local_tunnel_client(
-        TunnelClientConfig(
-            server_url=server_url,
-            tunnel_id=tunnel_id,
-            token=token,
-            mcp_command=spec.command,
-            cwd=cwd,
-            env=spec.env,
-        )
-    )
     return 0
 
 

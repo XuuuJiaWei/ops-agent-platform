@@ -45,7 +45,6 @@ class Settings:
     mcp: MCPConfig = field(default_factory=MCPConfig)
     skills_paths: tuple[Path, ...] = field(default_factory=tuple)
     enable_smoke_tools: bool = True
-    enable_storyline_tool: bool = True
     langfuse_public_key: str | None = None
     langfuse_secret_key: str | None = None
     langfuse_base_url: str | None = "https://cloud.langfuse.com"
@@ -153,7 +152,6 @@ def load_settings(env: Mapping[str, str] | None = None, *, config: Mapping[str, 
         mcp=MCPConfig.from_mapping(config_data),
         skills_paths=tuple(resolve_path(path) for path in _str_list(config_data.get("skills_paths"))),
         enable_smoke_tools=_bool(config_data.get("enable_smoke_tools"), True),
-        enable_storyline_tool=_bool(config_data.get("enable_storyline_tool"), True),
         langfuse_public_key=_optional_str(secret_source.get("LANGFUSE_PUBLIC_KEY")),
         langfuse_secret_key=_optional_str(secret_source.get("LANGFUSE_SECRET_KEY")),
         langfuse_base_url=_optional_str(langfuse.get("base_url")),

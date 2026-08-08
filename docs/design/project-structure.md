@@ -321,37 +321,33 @@ Shared behavior comes from shared Python modules, not necessarily a single share
 
 Environment configuration is layered by process, not pooled in a single root file:
 
-- [ ] Root `.env.example` documents **backend secrets only**: optional `AICORE_*` credential overrides, `MODEL_API_KEY`, Langfuse credentials, `OPEN_SANDBOX_API_KEY`, `OTEL_BASIC_AUTH_USER/PASSWORD`, `MCP_BASIC_AUTH_HEADER`, Dynatrace tokens, and `OPS_PILOT_CONFIG`. Non-secret backend runtime settings (model name, server host/port, `/chat` base path, assistant id, MCP config, skills paths) live in `config/config.yaml`.
-- [ ] `apps/web/.env.example` documents the frontend's browser-visible variables (`VITE_BACKEND_URL`, `VITE_ASSISTANT_ID`, `VITE_COPILOT_RUNTIME_URL`, `VITE_PILOT_BRIDGE_INSTALL_URL`) plus optional Vite dev-server/proxy overrides. Only `VITE_`-prefixed vars are exposed to frontend code.
+- [ ] Root `.env.example` documents **backend secrets only**: optional `AICORE_*` credential overrides, `MODEL_API_KEY`, Langfuse credentials, `OPEN_SANDBOX_API_KEY`, `OTEL_BASIC_AUTH_USER/PASSWORD`, `MCP_BASIC_AUTH_HEADER`, and `OPS_PILOT_CONFIG`. Non-secret backend runtime settings (model name, server host/port, `/chat` base path, assistant id, MCP config, skills paths) live in `config/config.yaml`.
+- [ ] `apps/web/.env.example` documents the frontend's browser-visible variables (`VITE_BACKEND_URL`, `VITE_ASSISTANT_ID`, `VITE_COPILOT_RUNTIME_URL`) plus optional Vite dev-server/proxy overrides. Only `VITE_`-prefixed vars are exposed to frontend code.
 - [ ] `apps/copilot-runtime/.env.example` documents the Copilot runtime's config (`ASSISTANT_ID`, `AGUI_AGENT_URL`, `COPILOT_RUNTIME_PORT`, `COPILOT_RUNTIME_HOST`).
 
 During `pnpm dev`, the backend host/port, `/chat` base path, and assistant id are derived from `config/config.yaml` (via `ops_pilot settings`) and injected into the web and copilot processes through `process.env`, so `config/config.yaml`'s `server` section is the single source of truth and the per-process `.env` values only serve standalone starts.
 
 ### 7.2 MCP Config
 
-`config/mcp.example.json` should include the first required MCP server, `dynatrace-managed`. Tokens must be placeholders or environment references only:
+MCP servers are declared inline under `mcpServers` in `config/config.yaml`
+(copied from `config.example.yaml`). Each server sets a `transport` (`stdio`,
+`sse`, or `streamable_http`) and may declare `allow_tools`/`hitl_tools`. Secrets
+are environment references only, resolved from `.env` at load time:
 
-```json
-{
-  "mcpServers": {
-    "dynatrace-managed": {
-      "required": true,
-      "transport": "stdio",
-      "command": "npx",
-      "args": ["-y", "@dynatrace-oss/dynatrace-managed-mcp-server@1.0.0"],
-      "cwd": ".",
-      "env": {
-        "DT_CONFIG_FILE": "./config/dt-config.yaml",
-        "DT_PROD_TOKEN": "${DT_PROD_TOKEN}",
-        "DT_STAGING_TOKEN": "${DT_STAGING_TOKEN}",
-        "LOG_LEVEL": "info"
-      }
-    }
-  }
-}
+```yaml
+mcpServers:
+  prometheus:
+    required: false
+    transport: streamable_http
+    url: https://prometheus-otel.example.com/mcp
+    timeout: 30
+    headers:
+      Authorization: ${MCP_BASIC_AUTH_HEADER}
+    allow_tools: []
+    hitl_tools: []
 ```
 
-The loader may normalize the `mcpServers` shape into the internal format required by `MultiServerMCPClient`.
+The loader normalizes the `mcpServers` shape into the internal format required by `MultiServerMCPClient`.
 
 MCP server package versions should be pinned in committed config. Use explicit version bumps when updating MCP servers; do not rely on `@latest` for reproducible local development.
 

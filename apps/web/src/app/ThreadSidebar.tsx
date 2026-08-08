@@ -3,12 +3,9 @@ import {
   ChevronLeft,
   CircleAlert,
   Database,
-  Download,
-  ExternalLink,
   Menu,
   MessageSquarePlus,
   RefreshCw,
-  Settings,
   SlidersHorizontal,
   Trash2,
   Unplug,
@@ -16,14 +13,9 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import type { ConversationThread, ConversationThreadsState } from "./conversationThreads";
-import { TunnelControlPanel } from "./TunnelControlPanel";
-import type { BrowserEnv } from "@/lib/env";
-
-type SidebarView = "conversations" | "settings";
 
 type ThreadSidebarProps = {
   activeThreadId: string | undefined;
-  env: BrowserEnv;
   isDesktopOpen: boolean;
   isMobileOpen: boolean;
   onCloseDesktop: () => void;
@@ -33,13 +25,10 @@ type ThreadSidebarProps = {
   onSelectThread: (threadId: string) => void;
   onToggleMobile: () => void;
   threadsState: ConversationThreadsState;
-  view: SidebarView;
-  onViewChange: (view: SidebarView) => void;
 };
 
 export function ThreadSidebar({
   activeThreadId,
-  env,
   isDesktopOpen,
   isMobileOpen,
   onCloseDesktop,
@@ -49,8 +38,6 @@ export function ThreadSidebar({
   onSelectThread,
   onToggleMobile,
   threadsState,
-  view,
-  onViewChange,
 }: ThreadSidebarProps) {
   function closeFromHeader() {
     if (typeof window !== "undefined" && window.matchMedia("(min-width: 768px)").matches) {
@@ -95,18 +82,13 @@ export function ThreadSidebar({
           </button>
         </header>
 
-        {view === "conversations" ? (
-          <ConversationPanel
-            activeThreadId={activeThreadId}
-            onNewThread={onNewThread}
-            onOpenSettings={() => onViewChange("settings")}
-            onDeleteThread={onDeleteThread}
-            onSelectThread={onSelectThread}
-            threadsState={threadsState}
-          />
-        ) : (
-          <SettingsPanel conversationStore={threadsState.source} env={env} onBack={() => onViewChange("conversations")} />
-        )}
+        <ConversationPanel
+          activeThreadId={activeThreadId}
+          onNewThread={onNewThread}
+          onDeleteThread={onDeleteThread}
+          onSelectThread={onSelectThread}
+          threadsState={threadsState}
+        />
       </aside>
     </>
   );
@@ -115,7 +97,6 @@ export function ThreadSidebar({
 type ConversationPanelProps = {
   activeThreadId: string | undefined;
   onNewThread: () => void;
-  onOpenSettings: () => void;
   onDeleteThread: (threadId: string) => Promise<void>;
   onSelectThread: (threadId: string) => void;
   threadsState: ConversationThreadsState;
@@ -125,7 +106,6 @@ function ConversationPanel({
   activeThreadId,
   onDeleteThread,
   onNewThread,
-  onOpenSettings,
   onSelectThread,
   threadsState,
 }: ConversationPanelProps) {
@@ -205,8 +185,6 @@ function ConversationPanel({
           </button>
         </div>
       ) : null}
-
-      <SettingsDock onOpenSettings={onOpenSettings} />
     </div>
   );
 }
@@ -280,117 +258,6 @@ function IconButton({ children, danger, label, onClick }: IconButtonProps) {
     >
       {children}
     </button>
-  );
-}
-
-function SettingsDock({ onOpenSettings }: { onOpenSettings: () => void }) {
-  return (
-    <footer className="shrink-0 border-t border-[#e5e5e5] bg-white px-4 py-3">
-      <div className="flex items-center justify-start">
-        <button
-          aria-label="Open settings"
-          className="inline-flex size-10 items-center justify-center rounded-md text-[#5f5f5f] hover:bg-[#eeeeee] hover:text-[#111111]"
-          onClick={onOpenSettings}
-          title="Settings"
-          type="button"
-        >
-          <Settings aria-hidden="true" className="size-5" />
-        </button>
-      </div>
-    </footer>
-  );
-}
-
-function SettingsPanel({ conversationStore, env, onBack }: { conversationStore: "copilot" | "local"; env: BrowserEnv; onBack: () => void }) {
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 items-center gap-2 px-4 pb-4">
-        <button
-          aria-label="Back to conversations"
-          className="inline-flex size-8 items-center justify-center rounded-md text-[#5f5f5f] hover:bg-[#eeeeee] hover:text-[#111111]"
-          onClick={onBack}
-          title="Back to conversations"
-          type="button"
-        >
-          <ChevronLeft aria-hidden="true" className="size-5" />
-        </button>
-        <h2 className="text-sm font-semibold text-[#202020]">Settings</h2>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
-        <section className="mb-5">
-          <SectionHeader icon={<Wrench aria-hidden="true" className="size-4" />} title="Runtime" />
-          <SettingRow label="Assistant" value={env.assistantId} />
-          <SettingRow label="Runtime URL" value={env.copilotRuntimeUrl} />
-          <SettingRow label="Conversation Store" value={conversationStore === "copilot" ? "CopilotKit threads" : "Local browser storage"} />
-        </section>
-
-        <section className="mb-5">
-          <SectionHeader icon={<Unplug aria-hidden="true" className="size-4" />} title="Pilot Bridge" />
-          <StatusRow label="Extension" status="Not connected" tone="warning" />
-          <SettingRow label="Mode" value="Browser bridge" />
-          <PilotBridgeInstallAction installUrl={env.pilotBridge.installUrl} />
-        </section>
-
-        <TunnelControlPanel env={env} />
-      </div>
-    </div>
-  );
-}
-
-function SectionHeader({ icon, title }: { icon: ReactNode; title: string }) {
-  return (
-    <h3 className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase text-[#666666]">
-      {icon}
-      {title}
-    </h3>
-  );
-}
-
-function SettingRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="border-b border-[#e8e8e8] py-2 last:border-b-0">
-      <p className="text-xs text-[#666666]">{label}</p>
-      <p className="mt-1 break-words font-mono text-[11px] leading-5 text-[#202020]">{value}</p>
-    </div>
-  );
-}
-
-function PilotBridgeInstallAction({ installUrl }: { installUrl?: string }) {
-  return (
-    <div className="border-b border-[#e8e8e8] py-3 last:border-b-0">
-      <p className="mb-2 text-xs text-[#666666]">Install</p>
-      {installUrl ? (
-        <a
-          className="inline-flex h-9 items-center gap-2 rounded-md border border-[#d8d8d8] bg-white px-3 text-sm font-medium text-[#202020] hover:bg-[#f4f4f4]"
-          href={installUrl}
-          rel="noreferrer"
-          target="_blank"
-        >
-          <Download aria-hidden="true" className="size-4" />
-          Get Pilot Bridge
-          <ExternalLink aria-hidden="true" className="size-3.5" />
-        </a>
-      ) : (
-        <button
-          className="inline-flex h-9 items-center gap-2 rounded-md border border-[#dddddd] px-3 text-sm text-[#777777]"
-          disabled
-          type="button"
-        >
-          <Download aria-hidden="true" className="size-4" />
-          Install source not configured
-        </button>
-      )}
-    </div>
-  );
-}
-
-function StatusRow({ label, status, tone }: { label: string; status: string; tone: "success" | "warning" }) {
-  return (
-    <div className="flex items-center justify-between border-b border-[#e8e8e8] py-2">
-      <span className="text-xs text-[#666666]">{label}</span>
-      <span className={`font-mono text-[11px] ${tone === "success" ? "text-[var(--success)]" : "text-[var(--warning)]"}`}>{status}</span>
-    </div>
   );
 }
 

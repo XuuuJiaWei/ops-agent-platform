@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any, NamedTuple
 
-from ops_pilot.config.paths import REPO_ROOT
 from ops_pilot.config.settings import Settings
 
 
@@ -145,7 +142,7 @@ def create_sandbox_runtime(settings: Settings) -> SandboxRuntime | None:
             "cpu": settings.open_sandbox_cpu_request,
             "memory": settings.open_sandbox_memory_request,
         },
-        env=_dynatrace_sandbox_env(),
+        env={},
         entrypoint=["tail", "-f", "/dev/null"],
         connection_config=connection,
     )
@@ -178,48 +175,3 @@ def _load_opensandbox_symbols() -> _OpenSandboxSymbols:
 def _is_sandbox_not_found_error(exc: Exception) -> bool:
     text = str(exc).lower()
     return "sandbox" in text and "not found" in text
-
-
-def _dynatrace_sandbox_env() -> dict[str, str]:
-    values = {
-        key: value for key, value in os.environ.items() if key.startswith("DT_") and key.endswith("_TOKEN") and value
-    }
-    for entry in _read_dt_config_entries(REPO_ROOT / "config" / "dt-config.yaml"):
-        alias = entry.get("alias")
-        if not alias:
-            continue
-        prefix = f"DT_{_env_key(alias)}"
-        endpoint = entry.get("apiEndpointUrl") or entry.get("dynatraceUrl")
-        if endpoint:
-            values[f"{prefix}_URL"] = endpoint
-        if entry.get("environmentId"):
-            values[f"{prefix}_ENVIRONMENT_ID"] = entry["environmentId"]
-    return values
-
-
-def _read_dt_config_entries(path: Path) -> list[dict[str, str]]:
-    if not path.exists():
-        return []
-    entries: list[dict[str, str]] = []
-    current: dict[str, str] | None = None
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.split("#", 1)[0].strip()
-        if not line:
-            continue
-        if line.startswith("-"):
-            if current:
-                entries.append(current)
-            current = {}
-            line = line[1:].strip()
-            if not line:
-                continue
-        if ":" in line and current is not None:
-            key, value = line.split(":", 1)
-            current[key.strip()] = value.strip().strip("\"'")
-    if current:
-        entries.append(current)
-    return entries
-
-
-def _env_key(value: str) -> str:
-    return "".join(character if character.isalnum() else "_" for character in value.upper())

@@ -37,10 +37,6 @@ export default defineConfig(({ mode }) => {
           target: a2aApiUrl,
           changeOrigin: true,
         },
-        "/dev/mcp-tunnels": {
-          target: backendUrl,
-          changeOrigin: true,
-        },
       },
     },
     preview: {
