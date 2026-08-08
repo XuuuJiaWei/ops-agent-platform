@@ -101,5 +101,32 @@ def _trace_name(protocol: str) -> str:
     return names.get(protocol, "run-agent")
 
 
+def build_model_metadata(settings: Settings, model: Any) -> dict[str, Any]:
+    """Describe effective model capacity and policy without estimating usage."""
+
+    profile = getattr(model, "profile", {})
+    if not isinstance(profile, dict):
+        profile = {}
+    request_model = next(
+        (
+            value
+            for name in ("model_id", "model_name", "model")
+            if isinstance((value := getattr(model, name, None)), str) and value
+        ),
+        settings.model_name,
+    )
+    return {
+        "model_request_name": request_model,
+        "model_context_window_tokens": profile.get("max_input_tokens"),
+        "model_max_output_tokens": profile.get("max_output_tokens"),
+        "model_configured_max_output_tokens": settings.sap_max_tokens,
+        "model_request_timeout_seconds": settings.model_request_timeout_seconds,
+        "model_reasoning_supported": bool(profile.get("reasoning_output", False)),
+        "model_reasoning_mode": settings.model_reasoning_mode,
+        "model_reasoning_effort": settings.model_reasoning_effort,
+        "model_prompt_cache_strategy": "deepagents_provider_middleware",
+    }
+
+
 def _trace_tags(settings: Settings, protocol: str) -> list[str]:
     return ["ops_pilot", protocol, settings.app_env]

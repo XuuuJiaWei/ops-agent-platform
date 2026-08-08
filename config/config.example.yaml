@@ -14,9 +14,19 @@ assistant_id: agent
 model:
   provider: sap
   model_name: anthropic--claude-4.6-sonnet
+  # Sampling parameters are ignored while adaptive reasoning is enabled.
   temperature: 0.0
   top_p: null
-  max_tokens: 8192
+  max_tokens: 16384
+  # Per-model-call transport deadline; keep below the outer request/eval budget.
+  request_timeout_seconds: 300
+  reasoning:
+    # Claude Sonnet 4.6 adaptive thinking; set mode: disabled for models that
+    # do not expose reasoning output.
+    mode: adaptive
+    # Sonnet 4.6's recommended default for tool-heavy application workloads.
+    effort: medium
+  # DeepAgents installs the official provider prompt-caching middleware by default.
   # base_url only for OpenAI-compatible providers (deepseek/openai/vLLM/...).
   # DeepSeek: https://api.deepseek.com  (the API key is MODEL_API_KEY in .env)
   base_url: null
@@ -33,7 +43,7 @@ sap:
   model_name: anthropic--claude-4.6-sonnet
   temperature: 0.0
   top_p: null
-  max_tokens: 8192
+  max_tokens: 16384
 
 system_prompt: null
 skills_paths: [./skills]

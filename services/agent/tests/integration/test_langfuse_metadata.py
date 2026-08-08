@@ -1,6 +1,8 @@
+from types import SimpleNamespace
+
 from ops_pilot.config.settings import load_settings
 from ops_pilot.observability.langfuse import create_callback_handler
-from ops_pilot.observability.metadata import build_trace_metadata
+from ops_pilot.observability.metadata import build_model_metadata, build_trace_metadata
 
 
 def test_langfuse_is_noop_when_keys_are_missing():
@@ -47,3 +49,17 @@ def test_trace_metadata_maps_user_id_to_langfuse_user_id():
     assert metadata["langfuse_session_id"] == "thread-1"
     assert metadata["langfuse_user_id"] == "user-1"
     assert metadata["langfuse_trace_name"] == "handle-copilotkit-run"
+
+
+def test_model_metadata_uses_runtime_profile_capacity():
+    settings = load_settings(env={}, config={})
+    model = SimpleNamespace(
+        model_id="anthropic.claude-sonnet-4-6",
+        profile={"max_input_tokens": 1_000_000, "max_output_tokens": 64_000, "reasoning_output": True},
+    )
+
+    metadata = build_model_metadata(settings, model)
+
+    assert metadata["model_context_window_tokens"] == 1_000_000
+    assert metadata["model_reasoning_mode"] == "adaptive"
+    assert metadata["model_prompt_cache_strategy"] == "deepagents_provider_middleware"

@@ -14,10 +14,38 @@ def test_load_settings_defaults_with_empty_config():
     assert settings.model_name == "anthropic--claude-4.6-sonnet"
     assert settings.sap_temperature == 0.0
     assert settings.sap_top_p is None
-    assert settings.sap_max_tokens == 8192
+    assert settings.sap_max_tokens == 16384
+    assert settings.model_request_timeout_seconds == 300
+    assert settings.model_reasoning_mode == "adaptive"
+    assert settings.model_reasoning_effort == "medium"
     assert settings.langfuse_enabled is False
     assert settings.enable_smoke_tools is True
     assert settings.mcp.servers == ()
+
+
+def test_load_settings_reads_reasoning_policy():
+    settings = load_settings(
+        env={},
+        config={
+            "model": {
+                "reasoning": {"mode": "adaptive", "effort": "medium"},
+            },
+        },
+    )
+
+    assert settings.model_reasoning_mode == "adaptive"
+    assert settings.model_reasoning_effort == "medium"
+
+
+def test_load_settings_reads_model_request_timeout():
+    settings = load_settings(env={}, config={"model": {"request_timeout_seconds": 180}})
+
+    assert settings.model_request_timeout_seconds == 180
+
+
+def test_load_settings_rejects_invalid_model_reasoning_effort():
+    with pytest.raises(SettingsError, match="model.reasoning.effort"):
+        load_settings(env={}, config={"model": {"reasoning": {"effort": "max"}}})
 
 
 def test_load_settings_reads_model_section_for_deepseek():

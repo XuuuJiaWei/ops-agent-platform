@@ -13,7 +13,7 @@ from ops_pilot.mcp.registry import MCPRegistry, create_mcp_registry
 from ops_pilot.mcp.status import MCPLoadStatus
 from ops_pilot.models import create_chat_model
 from ops_pilot.observability.langfuse import TracingSetup, create_callback_handler
-from ops_pilot.observability.metadata import build_runnable_config
+from ops_pilot.observability.metadata import build_model_metadata, build_runnable_config
 from ops_pilot.sandbox import SandboxManager, SandboxRuntime, create_sandbox_manager
 from ops_pilot.skills.resolver import resolve_skill_paths
 from ops_pilot.skills.sync import sync_skill_paths_to_backend
@@ -32,6 +32,7 @@ class AgentRuntime:
     mcp: MCPRegistry = field(default_factory=MCPRegistry)
     tracing: TracingSetup = field(default_factory=lambda: TracingSetup(enabled=False))
     sandbox: SandboxManager | SandboxRuntime | None = None
+    model_metadata: dict[str, Any] = field(default_factory=dict)
 
     def close(self) -> None:
         if self.sandbox is not None:
@@ -54,6 +55,7 @@ class AgentRuntime:
         configurable: dict[str, Any] | None = None,
         extra_metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        metadata = {**self.model_metadata, **(extra_metadata or {})}
         return build_runnable_config(
             self.settings,
             callbacks=self.tracing.callbacks,
@@ -64,7 +66,7 @@ class AgentRuntime:
             a2a_task_id=a2a_task_id,
             a2a_context_id=a2a_context_id,
             configurable=configurable,
-            extra_metadata=extra_metadata,
+            extra_metadata=metadata,
         )
 
     async def ainvoke_text(
@@ -141,6 +143,7 @@ async def build_agent_runtime(
 
     resolved_settings = settings or load_settings()
     model = create_chat_model(resolved_settings)
+    model_metadata = build_model_metadata(resolved_settings, model)
     mcp_registry = await create_mcp_registry(resolved_settings)
     if dynamic_mcp_config is not None and dynamic_mcp_config.servers:
         dynamic_registry = await MCPRegistry.from_config(dynamic_mcp_config, config_path="dynamic")
@@ -188,6 +191,7 @@ async def build_agent_runtime(
         mcp=mcp_registry,
         tracing=tracing,
         sandbox=sandbox,
+        model_metadata=model_metadata,
     )
 
 

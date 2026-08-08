@@ -74,6 +74,7 @@ def _create_with_proxy_chat_openai(settings: Settings) -> Any:
 
 def _create_bedrock_chat_model(settings: Settings, proxy_client: Any) -> Any:
     try:
+        from botocore.config import Config as BotoConfig
         from gen_ai_hub.proxy.langchain.amazon import ChatBedrock
     except ImportError as exc:
         raise SAPModelInitializationError(
@@ -94,14 +95,21 @@ def _create_bedrock_chat_model(settings: Settings, proxy_client: Any) -> Any:
             model_name=deployment.model_name,
             deployment_id=deployment.deployment_id,
             proxy_client=proxy_client,
+            config=BotoConfig(
+                read_timeout=settings.model_request_timeout_seconds,
+                retries={"mode": "standard", "total_max_attempts": 1},
+            ),
             model_kwargs=_generation_kwargs(settings),
         )
 
 
-def _generation_kwargs(settings: Settings) -> dict[str, float | int]:
-    kwargs: dict[str, float | int] = dict(_sampling_kwargs(settings))
+def _generation_kwargs(settings: Settings) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {} if settings.model_reasoning_mode == "adaptive" else dict(_sampling_kwargs(settings))
     if settings.sap_max_tokens is not None:
         kwargs["max_tokens"] = settings.sap_max_tokens
+    kwargs["thinking"] = {"type": settings.model_reasoning_mode}
+    if settings.model_reasoning_mode == "adaptive":
+        kwargs["output_config"] = {"effort": settings.model_reasoning_effort}
     return kwargs
 
 

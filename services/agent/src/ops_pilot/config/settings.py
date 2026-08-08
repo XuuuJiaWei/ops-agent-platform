@@ -37,7 +37,10 @@ class Settings:
     sap_model_name: str = "anthropic--claude-4.6-sonnet"
     sap_temperature: float = 0.0
     sap_top_p: float | None = None
-    sap_max_tokens: int | None = 8192
+    sap_max_tokens: int | None = 16384
+    model_request_timeout_seconds: int = 300
+    model_reasoning_mode: str = "adaptive"
+    model_reasoning_effort: str = "medium"
     system_prompt: str | None = None
     mcp: MCPConfig = field(default_factory=MCPConfig)
     skills_paths: tuple[Path, ...] = field(default_factory=tuple)
@@ -116,6 +119,7 @@ def load_settings(env: Mapping[str, str] | None = None, *, config: Mapping[str, 
     # alias kept for backward compatibility. Keys in ``model`` win when both
     # are present so existing config.yaml files keep working untouched.
     model = {**sap, **_section(config_data, "model")}
+    reasoning = _section(model, "reasoning")
     langfuse = _section(config_data, "langfuse")
     server = _section(config_data, "server")
     sandbox = _section(config_data, "open_sandbox")
@@ -135,7 +139,20 @@ def load_settings(env: Mapping[str, str] | None = None, *, config: Mapping[str, 
         sap_model_name=_str(model.get("model_name"), "anthropic--claude-4.6-sonnet"),
         sap_temperature=_float(model.get("temperature"), 0.0),
         sap_top_p=_optional_float(model.get("top_p")),
-        sap_max_tokens=_optional_int(model.get("max_tokens")) or 8192,
+        sap_max_tokens=_optional_int(model.get("max_tokens")) or 16384,
+        model_request_timeout_seconds=_positive_int(model.get("request_timeout_seconds"), 300),
+        model_reasoning_mode=_choice(
+            reasoning.get("mode"),
+            default="adaptive",
+            allowed={"adaptive", "disabled"},
+            field_name="model.reasoning.mode",
+        ),
+        model_reasoning_effort=_choice(
+            reasoning.get("effort"),
+            default="medium",
+            allowed={"low", "medium", "high"},
+            field_name="model.reasoning.effort",
+        ),
         system_prompt=_optional_str(config_data.get("system_prompt")),
         mcp=MCPConfig.from_mapping(config_data),
         skills_paths=tuple(resolve_path(path) for path in _str_list(config_data.get("skills_paths"))),
@@ -281,6 +298,14 @@ def _model_provider(value: Any) -> str:
         supported = ", ".join(sorted(SUPPORTED_MODEL_PROVIDERS))
         raise SettingsError(f"Expected model.provider to be one of {supported}; got: {value!r}")
     return provider
+
+
+def _choice(value: Any, *, default: str, allowed: set[str], field_name: str) -> str:
+    choice = _str(value, default).lower()
+    if choice not in allowed:
+        supported = ", ".join(sorted(allowed))
+        raise SettingsError(f"Expected {field_name} to be one of {supported}; got: {value!r}")
+    return choice
 
 
 def _sandbox_scope(value: Any) -> str:
