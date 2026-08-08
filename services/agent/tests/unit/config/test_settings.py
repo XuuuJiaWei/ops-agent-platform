@@ -77,6 +77,33 @@ def test_load_settings_auto_enables_open_sandbox_when_domain_and_key_present():
     assert settings.open_sandbox_enabled is True
     assert settings.open_sandbox_domain == "opensandbox.example.test"
     assert settings.open_sandbox_api_key == "secret"
+    assert settings.open_sandbox_scope == "thread"
+    assert settings.open_sandbox_workspace_path == "/workspace"
+
+
+def test_load_settings_reads_open_sandbox_pool_options():
+    settings = load_settings(
+        env={"OPEN_SANDBOX_API_KEY": "secret"},
+        config={
+            "open_sandbox": {
+                "domain": "opensandbox.example.test",
+                "scope": "run",
+                "max_active": 3,
+                "workspace_path": "/work",
+                "internal_root": "/internal",
+            }
+        },
+    )
+
+    assert settings.open_sandbox_scope == "run"
+    assert settings.open_sandbox_max_active == 3
+    assert settings.open_sandbox_workspace_path == "/work"
+    assert settings.open_sandbox_internal_root == "/internal"
+
+
+def test_load_settings_rejects_invalid_open_sandbox_scope():
+    with pytest.raises(SettingsError, match="open_sandbox.scope"):
+        load_settings(env={}, config={"open_sandbox": {"scope": "user"}})
 
 
 def test_load_settings_does_not_enable_open_sandbox_without_key():

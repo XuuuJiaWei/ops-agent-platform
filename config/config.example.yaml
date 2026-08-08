@@ -15,6 +15,7 @@ sap:
 system_prompt: null
 skills_paths: [./skills]
 enable_smoke_tools: true
+enable_storyline_tool: false
 
 langfuse:
   # Public/secret keys stay in .env; only the base URL is regular config.
@@ -40,6 +41,13 @@ open_sandbox:
   memory_limit: 256Mi
   cpu_request: 100m
   memory_request: 128Mi
+  # process = one shared sandbox with logical workspaces.
+  # thread = one sandbox per agent thread (default, strongest practical reuse).
+  # run = one sandbox per agent run/task.
+  scope: thread
+  max_active: 16
+  workspace_path: /workspace
+  internal_root: /workspace/.ops-pilot
 
 # MCP servers (same shape as the retired config/mcp.example.json) plus two
 # permission lists per server:

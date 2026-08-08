@@ -18,6 +18,16 @@ class SkillSyncResult:
     file_count: int
 
 
+@dataclass(frozen=True)
+class SkillSyncPlan:
+    remote_paths: tuple[str, ...]
+    uploads: tuple[tuple[str, bytes], ...]
+
+    @property
+    def file_count(self) -> int:
+        return len(self.uploads)
+
+
 def sync_skill_paths_to_backend(
     paths: Iterable[str | Path],
     backend: Any,
@@ -25,6 +35,18 @@ def sync_skill_paths_to_backend(
     remote_root: str = DEFAULT_REMOTE_SKILLS_ROOT,
 ) -> SkillSyncResult:
     """Upload configured local skill files and return backend-visible sources."""
+
+    plan = plan_skill_paths(paths, remote_root=remote_root)
+    sync_skill_plan_to_backend(plan, backend)
+    return SkillSyncResult(remote_paths=plan.remote_paths, file_count=plan.file_count)
+
+
+def plan_skill_paths(
+    paths: Iterable[str | Path],
+    *,
+    remote_root: str = DEFAULT_REMOTE_SKILLS_ROOT,
+) -> SkillSyncPlan:
+    """Plan backend-visible skill sources without touching a backend."""
 
     uploads: list[tuple[str, bytes]] = []
     remote_sources: list[str] = []
@@ -35,15 +57,21 @@ def sync_skill_paths_to_backend(
                 remote_sources.append(plan.remote_source)
             uploads.extend(_collect_uploads(plan.local_root, plan.remote_root))
 
-    if uploads:
-        _mkdir_remote_parents(backend, uploads)
-        responses = backend.upload_files(uploads)
-        failures = [response for response in responses if getattr(response, "error", None)]
-        if failures:
-            failed_paths = ", ".join(getattr(response, "path", "<unknown>") for response in failures)
-            raise RuntimeError(f"Failed to upload skill files to sandbox: {failed_paths}")
+    return SkillSyncPlan(remote_paths=tuple(remote_sources), uploads=tuple(uploads))
 
-    return SkillSyncResult(remote_paths=tuple(remote_sources), file_count=len(uploads))
+
+def sync_skill_plan_to_backend(plan: SkillSyncPlan, backend: Any) -> None:
+    """Upload a previously planned skill payload to one backend instance."""
+
+    if not plan.uploads:
+        return
+    uploads = list(plan.uploads)
+    _mkdir_remote_parents(backend, uploads)
+    responses = backend.upload_files(uploads)
+    failures = [response for response in responses if getattr(response, "error", None)]
+    if failures:
+        failed_paths = ", ".join(getattr(response, "path", "<unknown>") for response in failures)
+        raise RuntimeError(f"Failed to upload skill files to sandbox: {failed_paths}")
 
 
 @dataclass(frozen=True)

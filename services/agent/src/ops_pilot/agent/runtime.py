@@ -14,7 +14,7 @@ from ops_pilot.mcp.status import MCPLoadStatus
 from ops_pilot.models.sap_genai import create_chat_model
 from ops_pilot.observability.langfuse import TracingSetup, create_callback_handler
 from ops_pilot.observability.metadata import build_runnable_config
-from ops_pilot.sandbox import SandboxRuntime, create_sandbox_runtime
+from ops_pilot.sandbox import SandboxManager, SandboxRuntime, create_sandbox_manager
 from ops_pilot.skills.resolver import resolve_skill_paths
 from ops_pilot.skills.sync import sync_skill_paths_to_backend
 from ops_pilot.tools.smoke_tools import get_smoke_tools
@@ -31,7 +31,7 @@ class AgentRuntime:
     skills: tuple[str, ...] = field(default_factory=tuple)
     mcp: MCPRegistry = field(default_factory=MCPRegistry)
     tracing: TracingSetup = field(default_factory=lambda: TracingSetup(enabled=False))
-    sandbox: SandboxRuntime | None = None
+    sandbox: SandboxManager | SandboxRuntime | None = None
 
     def close(self) -> None:
         if self.sandbox is not None:
@@ -152,16 +152,17 @@ async def build_agent_runtime(
     if resolved_settings.enable_smoke_tools:
         tools.extend(get_smoke_tools())
 
-    # Multi-source fault storyline: a deterministic correlation workflow exposed
-    # as one tool. It reads the same MCP tools the agent has (Dynatrace/Kibana)
-    # and uses the same chat model for its single narration step.
-    from ops_pilot.correlation.orchestrator import build_storyline_tool
+    if resolved_settings.enable_storyline_tool:
+        # Multi-source fault storyline: a deterministic correlation workflow
+        # exposed as one tool. It reads the same MCP tools the agent has
+        # (Dynatrace/Kibana) and uses the same chat model for narration.
+        from ops_pilot.correlation.orchestrator import build_storyline_tool
 
-    tools.append(build_storyline_tool(tuple(mcp_registry.tools), model))
+        tools.append(build_storyline_tool(tuple(mcp_registry.tools), model))
 
-    sandbox: SandboxRuntime | None = None
+    sandbox: SandboxManager | None = None
     try:
-        sandbox = create_sandbox_runtime(resolved_settings)
+        sandbox = create_sandbox_manager(resolved_settings)
         skills = _resolve_backend_skill_paths(local_skills, sandbox)
         interrupt_on = {name: True for name in mcp_registry.hitl_tools}
         graph = _create_deep_agent(
@@ -190,9 +191,15 @@ async def build_agent_runtime(
     )
 
 
-def _resolve_backend_skill_paths(local_skills: tuple[str, ...], sandbox: SandboxRuntime | None) -> tuple[str, ...]:
+def _resolve_backend_skill_paths(
+    local_skills: tuple[str, ...],
+    sandbox: SandboxManager | SandboxRuntime | None,
+) -> tuple[str, ...]:
     if sandbox is None or not local_skills:
         return local_skills
+    configure_skills = getattr(sandbox, "configure_skills", None)
+    if configure_skills is not None:
+        return configure_skills(local_skills)
     sync_result = sync_skill_paths_to_backend(local_skills, sandbox.backend)
     return sync_result.remote_paths
 

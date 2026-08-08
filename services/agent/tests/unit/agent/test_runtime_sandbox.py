@@ -31,7 +31,7 @@ async def test_build_agent_runtime_passes_sandbox_backend(monkeypatch) -> None:
     monkeypatch.setattr(runtime_module, "resolve_skill_paths", lambda _: [])
     monkeypatch.setattr(runtime_module, "create_callback_handler", lambda _: TracingSetup(False))
     monkeypatch.setattr(runtime_module, "get_smoke_tools", lambda: [])
-    monkeypatch.setattr(runtime_module, "create_sandbox_runtime", lambda _: sandbox)
+    monkeypatch.setattr(runtime_module, "create_sandbox_manager", lambda _: sandbox)
 
     def fake_create_deep_agent(**kwargs: object) -> object:
         captured.update(kwargs)
@@ -57,7 +57,7 @@ async def test_build_agent_runtime_syncs_skills_into_sandbox(monkeypatch) -> Non
     monkeypatch.setattr(runtime_module, "resolve_skill_paths", lambda _: ["/local/skills"])
     monkeypatch.setattr(runtime_module, "create_callback_handler", lambda _: TracingSetup(False))
     monkeypatch.setattr(runtime_module, "get_smoke_tools", lambda: [])
-    monkeypatch.setattr(runtime_module, "create_sandbox_runtime", lambda _: sandbox)
+    monkeypatch.setattr(runtime_module, "create_sandbox_manager", lambda _: sandbox)
 
     def fake_sync_skill_paths(paths: tuple[str, ...], backend_arg: object) -> SkillSyncResult:
         synced["paths"] = paths
@@ -87,7 +87,7 @@ async def test_build_agent_runtime_closes_sandbox_when_graph_creation_fails(monk
     monkeypatch.setattr(runtime_module, "resolve_skill_paths", lambda _: [])
     monkeypatch.setattr(runtime_module, "create_callback_handler", lambda _: TracingSetup(False))
     monkeypatch.setattr(runtime_module, "get_smoke_tools", lambda: [])
-    monkeypatch.setattr(runtime_module, "create_sandbox_runtime", lambda _: sandbox)
+    monkeypatch.setattr(runtime_module, "create_sandbox_manager", lambda _: sandbox)
 
     def fake_create_deep_agent(**_: object) -> object:
         raise RuntimeError("boom")
@@ -117,7 +117,7 @@ async def test_build_agent_runtime_builds_interrupt_on_from_hitl_tools(monkeypat
     monkeypatch.setattr(runtime_module, "resolve_skill_paths", lambda _: [])
     monkeypatch.setattr(runtime_module, "create_callback_handler", lambda _: TracingSetup(False))
     monkeypatch.setattr(runtime_module, "get_smoke_tools", lambda: [])
-    monkeypatch.setattr(runtime_module, "create_sandbox_runtime", lambda _: None)
+    monkeypatch.setattr(runtime_module, "create_sandbox_manager", lambda _: None)
 
     def fake_create_deep_agent(**kwargs: object) -> object:
         captured.update(kwargs)

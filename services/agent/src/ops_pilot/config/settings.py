@@ -37,6 +37,7 @@ class Settings:
     mcp: MCPConfig = field(default_factory=MCPConfig)
     skills_paths: tuple[Path, ...] = field(default_factory=tuple)
     enable_smoke_tools: bool = True
+    enable_storyline_tool: bool = True
     langfuse_public_key: str | None = None
     langfuse_secret_key: str | None = None
     langfuse_base_url: str | None = "https://cloud.langfuse.com"
@@ -57,6 +58,10 @@ class Settings:
     open_sandbox_memory_limit: str = "256Mi"
     open_sandbox_cpu_request: str = "100m"
     open_sandbox_memory_request: str = "128Mi"
+    open_sandbox_scope: str = "thread"
+    open_sandbox_max_active: int = 16
+    open_sandbox_workspace_path: str = "/workspace"
+    open_sandbox_internal_root: str = "/workspace/.ops-pilot"
 
     @property
     def langfuse_enabled(self) -> bool:
@@ -113,6 +118,7 @@ def load_settings(env: Mapping[str, str] | None = None, *, config: Mapping[str, 
         mcp=MCPConfig.from_mapping(config_data),
         skills_paths=tuple(resolve_path(path) for path in _str_list(config_data.get("skills_paths"))),
         enable_smoke_tools=_bool(config_data.get("enable_smoke_tools"), True),
+        enable_storyline_tool=_bool(config_data.get("enable_storyline_tool"), True),
         langfuse_public_key=_optional_str(secret_source.get("LANGFUSE_PUBLIC_KEY")),
         langfuse_secret_key=_optional_str(secret_source.get("LANGFUSE_SECRET_KEY")),
         langfuse_base_url=_optional_str(langfuse.get("base_url")),
@@ -133,6 +139,10 @@ def load_settings(env: Mapping[str, str] | None = None, *, config: Mapping[str, 
         open_sandbox_memory_limit=_str(sandbox.get("memory_limit"), "256Mi"),
         open_sandbox_cpu_request=_str(sandbox.get("cpu_request"), "100m"),
         open_sandbox_memory_request=_str(sandbox.get("memory_request"), "128Mi"),
+        open_sandbox_scope=_sandbox_scope(sandbox.get("scope")),
+        open_sandbox_max_active=_positive_int(sandbox.get("max_active"), 16),
+        open_sandbox_workspace_path=_absolute_posix_path(sandbox.get("workspace_path"), "/workspace"),
+        open_sandbox_internal_root=_absolute_posix_path(sandbox.get("internal_root"), "/workspace/.ops-pilot"),
     )
 
 
@@ -200,6 +210,13 @@ def _int(value: Any, default: int) -> int:
     return parsed if parsed is not None else default
 
 
+def _positive_int(value: Any, default: int) -> int:
+    parsed = _int(value, default)
+    if parsed < 1:
+        raise SettingsError(f"Expected a positive integer, got: {value!r}")
+    return parsed
+
+
 def _optional_int(value: Any) -> int | None:
     if value is None or value == "":
         return None
@@ -234,6 +251,20 @@ def _optional_bool(value: Any) -> bool | None:
     if normalized in {"0", "false", "f", "no", "n", "off"}:
         return False
     raise SettingsError(f"Expected a boolean value, got: {value!r}")
+
+
+def _sandbox_scope(value: Any) -> str:
+    scope = _str(value, "thread")
+    if scope not in {"process", "thread", "run"}:
+        raise SettingsError(f"Expected open_sandbox.scope to be one of process, thread, run; got: {value!r}")
+    return scope
+
+
+def _absolute_posix_path(value: Any, default: str) -> str:
+    path = _str(value, default).rstrip("/") or "/"
+    if not path.startswith("/") or "//" in path or "/../" in f"{path}/" or path.endswith("/.."):
+        raise SettingsError(f"Expected an absolute POSIX path, got: {value!r}")
+    return path
 
 
 def _str_list(value: Any) -> list[str]:

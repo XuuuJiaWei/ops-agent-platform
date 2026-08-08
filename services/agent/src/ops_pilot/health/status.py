@@ -60,4 +60,7 @@ def _settings_sandbox_status(settings: Settings) -> dict[str, Any]:
         "image": settings.open_sandbox_image,
         "use_server_proxy": settings.open_sandbox_use_server_proxy,
         "api_key_configured": bool(settings.open_sandbox_api_key),
+        "allocation_scope": settings.open_sandbox_scope,
+        "workspace_path": settings.open_sandbox_workspace_path,
+        "max_active": settings.open_sandbox_max_active,
     }
