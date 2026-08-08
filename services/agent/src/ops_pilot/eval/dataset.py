@@ -18,6 +18,62 @@ class EvalDatasetError(ValueError):
 
 
 @dataclass(frozen=True)
+class InjectSpec:
+    """A chaos fault to inject before running a diagnosis case.
+
+    ``flag``/``variant`` drive the flagd ConfigMap (see ``eval/chaos.py``);
+    ``settle_s`` is how long to wait after enabling the flag for signals to
+    appear, ``cooldown_s`` how long to drain after disabling it. ``signal`` is
+    parsed-but-unused, reserved for a future readiness-poll (Phase 2).
+
+    This lives in ``EvalCase.metadata()`` only — it NEVER reaches the agent's
+    prompt (``to_experiment_item()["input"]``), so the injected fault stays
+    ground truth the agent must discover, not a leaked answer.
+    """
+
+    flag: str
+    variant: str
+    settle_s: float = 120.0
+    cooldown_s: float = 30.0
+    signal: Mapping[str, Any] | None = None
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any], *, source: str) -> InjectSpec:
+        from ops_pilot.eval.chaos import FAULT_FLAGS
+
+        flag = _required_string(data, "flag", source)
+        if flag not in FAULT_FLAGS:
+            available = ", ".join(sorted(FAULT_FLAGS))
+            raise EvalDatasetError(f"{source}: inject.flag '{flag}' is not a known fault flag. Available: {available}.")
+        variant = _required_string(data, "variant", source)
+        settle_s = _float_value(data.get("settle_s", 120.0), "inject.settle_s", source)
+        cooldown_s = _float_value(data.get("cooldown_s", 30.0), "inject.cooldown_s", source)
+        if settle_s < 0 or cooldown_s < 0:
+            raise EvalDatasetError(f"{source}: inject.settle_s and inject.cooldown_s must be >= 0.")
+        signal = data.get("signal")
+        if signal is not None and not isinstance(signal, Mapping):
+            raise EvalDatasetError(f"{source}: inject.signal must be a mapping if present.")
+        return cls(
+            flag=flag,
+            variant=variant,
+            settle_s=settle_s,
+            cooldown_s=cooldown_s,
+            signal=dict(signal) if isinstance(signal, Mapping) else None,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "flag": self.flag,
+            "variant": self.variant,
+            "settle_s": self.settle_s,
+            "cooldown_s": self.cooldown_s,
+        }
+        if self.signal is not None:
+            payload["signal"] = dict(self.signal)
+        return payload
+
+
+@dataclass(frozen=True)
 class EvalCase:
     id: str
     prompt: str
@@ -28,6 +84,7 @@ class EvalCase:
     rubric: str | None = None
     tags: tuple[str, ...] = field(default_factory=tuple)
     timeout_s: float = 60.0
+    inject: InjectSpec | None = None
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any], *, source: str = "<eval-case>") -> EvalCase:
@@ -40,6 +97,11 @@ class EvalCase:
         if timeout_s <= 0:
             raise EvalDatasetError(f"{source}: timeout_s must be greater than 0.")
 
+        inject_data = data.get("inject")
+        if inject_data is not None and not isinstance(inject_data, Mapping):
+            raise EvalDatasetError(f"{source}: field 'inject' must be a mapping.")
+        inject = InjectSpec.from_mapping(inject_data, source=source) if inject_data is not None else None
+
         return cls(
             id=case_id,
             prompt=prompt,
@@ -50,6 +112,7 @@ class EvalCase:
             rubric=rubric,
             tags=_string_tuple(data.get("tags", ()), "tags", source),
             timeout_s=timeout_s,
+            inject=inject,
         )
 
     def metadata(self) -> dict[str, Any]:
@@ -61,9 +124,13 @@ class EvalCase:
             "rubric": self.rubric,
             "tags": list(self.tags),
             "timeout_s": self.timeout_s,
+            "inject": self.inject.to_dict() if self.inject else None,
         }
 
     def to_experiment_item(self) -> dict[str, Any]:
+        # NOTE: only `input` (= the prompt) reaches the agent. `inject` lives in
+        # metadata alongside `rubric`, so the injected fault stays ground truth
+        # the agent must diagnose — never a leaked answer in the prompt.
         return {
             "input": self.prompt,
             "expected_output": self.expected_output,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from ops_pilot.eval.dataset import EvalDatasetError, load_cases_from_yaml
+from ops_pilot.eval.dataset import DEFAULT_CASES_DIR, EvalDatasetError, load_cases_from_yaml
 
 
 def test_load_cases_from_yaml_directory(tmp_path):
@@ -69,3 +69,11 @@ def test_load_cases_rejects_invalid_yaml(tmp_path):
 
     with pytest.raises(EvalDatasetError, match="invalid YAML"):
         load_cases_from_yaml(path)
+
+
+def test_ops_diagnosis_cases_allow_slow_mcp_investigations() -> None:
+    cases = load_cases_from_yaml(DEFAULT_CASES_DIR / "ops_scenarios.yaml")
+    diagnosis_cases = [case for case in cases if case.category == "diagnosis"]
+
+    assert len(diagnosis_cases) == 8
+    assert all(case.timeout_s >= 600 for case in diagnosis_cases)
