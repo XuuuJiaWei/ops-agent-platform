@@ -11,7 +11,7 @@ from ops_pilot.config.mcp_schema import MCPConfig
 from ops_pilot.config.settings import Settings, load_settings
 from ops_pilot.mcp.registry import MCPRegistry, create_mcp_registry
 from ops_pilot.mcp.status import MCPLoadStatus
-from ops_pilot.models.sap_genai import create_chat_model
+from ops_pilot.models import create_chat_model
 from ops_pilot.observability.langfuse import TracingSetup, create_callback_handler
 from ops_pilot.observability.metadata import build_runnable_config
 from ops_pilot.sandbox import SandboxManager, SandboxRuntime, create_sandbox_manager

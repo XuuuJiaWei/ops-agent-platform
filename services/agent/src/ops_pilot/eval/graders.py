@@ -11,7 +11,7 @@ from langfuse import Evaluation
 
 from ops_pilot.config.settings import Settings
 from ops_pilot.eval.trace import AgentTrace
-from ops_pilot.models.sap_genai import create_chat_model
+from ops_pilot.models import create_chat_model
 
 PASSING_SCORE = 1.0
 FAILING_SCORE = 0.0

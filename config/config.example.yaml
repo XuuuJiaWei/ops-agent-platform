@@ -6,6 +6,29 @@
 app_env: local
 assistant_id: agent
 
+# Model provider switch. provider selects the backend:
+#   sap       = SAP Generative AI Hub proxy (default; company AI Core).
+#   deepseek  = DeepSeek API (OpenAI-compatible; set base_url + MODEL_API_KEY).
+#   openai / anthropic / google_genai / ollama = LangChain init_chat_model.
+# The legacy `sap:` section below is still honored as an alias for `model:`.
+model:
+  provider: sap
+  model_name: anthropic--claude-4.6-sonnet
+  temperature: 0.0
+  top_p: null
+  max_tokens: 8192
+  # base_url only for OpenAI-compatible providers (deepseek/openai/vLLM/...).
+  # DeepSeek: https://api.deepseek.com  (the API key is MODEL_API_KEY in .env)
+  base_url: null
+
+# Local DeepSeek example (uncomment to switch off SAP AI Core):
+# model:
+#   provider: deepseek
+#   model_name: deepseek-chat
+#   base_url: https://api.deepseek.com
+#   max_tokens: 8192
+
+# Deprecated alias for `model:`; kept so existing configs keep working.
 sap:
   model_name: anthropic--claude-4.6-sonnet
   temperature: 0.0

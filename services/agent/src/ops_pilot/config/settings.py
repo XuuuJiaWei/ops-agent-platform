@@ -14,6 +14,8 @@ from ops_pilot.config.paths import REPO_ROOT, resolve_path
 
 DEFAULT_CONFIG_PATH = REPO_ROOT / "config" / "config.yaml"
 
+SUPPORTED_MODEL_PROVIDERS = {"sap", "openai", "deepseek", "anthropic", "google_genai", "ollama"}
+
 
 class SettingsError(RuntimeError):
     """Raised when regular configuration cannot be loaded."""
@@ -29,6 +31,9 @@ class Settings:
 
     app_env: str = "local"
     assistant_id: str = "agent"
+    model_provider: str = "sap"
+    model_base_url: str | None = None
+    model_api_key: str | None = None
     sap_model_name: str = "anthropic--claude-4.6-sonnet"
     sap_temperature: float = 0.0
     sap_top_p: float | None = None
@@ -75,6 +80,16 @@ class Settings:
     def sap_ai_core_model_name(self) -> str:
         return self.sap_model_name
 
+    @property
+    def model_name(self) -> str:
+        """Provider-agnostic model name (aliases the historical sap field)."""
+
+        return self.sap_model_name
+
+    @property
+    def uses_sap_ai_core(self) -> bool:
+        return self.model_provider == "sap"
+
     def configured_system_prompt(self) -> str | None:
         if self.system_prompt and self.system_prompt.strip():
             return self.system_prompt.strip()
@@ -97,6 +112,10 @@ def load_settings(env: Mapping[str, str] | None = None, *, config: Mapping[str, 
     config_data = config if config is not None else _load_config_file(secret_source)
 
     sap = _section(config_data, "sap")
+    # ``model`` is the provider-agnostic section; ``sap`` is the historical
+    # alias kept for backward compatibility. Keys in ``model`` win when both
+    # are present so existing config.yaml files keep working untouched.
+    model = {**sap, **_section(config_data, "model")}
     langfuse = _section(config_data, "langfuse")
     server = _section(config_data, "server")
     sandbox = _section(config_data, "open_sandbox")
@@ -110,10 +129,13 @@ def load_settings(env: Mapping[str, str] | None = None, *, config: Mapping[str, 
     return Settings(
         app_env=_str(config_data.get("app_env"), "local"),
         assistant_id=_str(config_data.get("assistant_id"), "agent"),
-        sap_model_name=_str(sap.get("model_name"), "anthropic--claude-4.6-sonnet"),
-        sap_temperature=_float(sap.get("temperature"), 0.0),
-        sap_top_p=_optional_float(sap.get("top_p")),
-        sap_max_tokens=_optional_int(sap.get("max_tokens")) or 8192,
+        model_provider=_model_provider(model.get("provider")),
+        model_base_url=_optional_str(model.get("base_url")),
+        model_api_key=_optional_str(secret_source.get("MODEL_API_KEY")),
+        sap_model_name=_str(model.get("model_name"), "anthropic--claude-4.6-sonnet"),
+        sap_temperature=_float(model.get("temperature"), 0.0),
+        sap_top_p=_optional_float(model.get("top_p")),
+        sap_max_tokens=_optional_int(model.get("max_tokens")) or 8192,
         system_prompt=_optional_str(config_data.get("system_prompt")),
         mcp=MCPConfig.from_mapping(config_data),
         skills_paths=tuple(resolve_path(path) for path in _str_list(config_data.get("skills_paths"))),
@@ -251,6 +273,14 @@ def _optional_bool(value: Any) -> bool | None:
     if normalized in {"0", "false", "f", "no", "n", "off"}:
         return False
     raise SettingsError(f"Expected a boolean value, got: {value!r}")
+
+
+def _model_provider(value: Any) -> str:
+    provider = _str(value, "sap").lower()
+    if provider not in SUPPORTED_MODEL_PROVIDERS:
+        supported = ", ".join(sorted(SUPPORTED_MODEL_PROVIDERS))
+        raise SettingsError(f"Expected model.provider to be one of {supported}; got: {value!r}")
+    return provider
 
 
 def _sandbox_scope(value: Any) -> str:

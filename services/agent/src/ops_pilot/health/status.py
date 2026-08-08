@@ -15,8 +15,8 @@ def build_runtime_status(runtime: AgentRuntime) -> dict[str, Any]:
         "environment": runtime.settings.app_env,
         "assistant_id": runtime.settings.assistant_id,
         "model": {
-            "provider": "sap-ai-core",
-            "name": runtime.settings.sap_model_name,
+            "provider": runtime.settings.model_provider,
+            "name": runtime.settings.model_name,
         },
         "protocols": {
             "chat_base_path": runtime.settings.chat_base_path,

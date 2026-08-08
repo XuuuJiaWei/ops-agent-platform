@@ -8,13 +8,57 @@ def test_load_settings_defaults_with_empty_config():
 
     assert settings.app_env == "local"
     assert settings.assistant_id == "agent"
+    assert settings.model_provider == "sap"
+    assert settings.uses_sap_ai_core is True
     assert settings.sap_model_name == "anthropic--claude-4.6-sonnet"
+    assert settings.model_name == "anthropic--claude-4.6-sonnet"
     assert settings.sap_temperature == 0.0
     assert settings.sap_top_p is None
     assert settings.sap_max_tokens == 8192
     assert settings.langfuse_enabled is False
     assert settings.enable_smoke_tools is True
     assert settings.mcp.servers == ()
+
+
+def test_load_settings_reads_model_section_for_deepseek():
+    settings = load_settings(
+        env={"MODEL_API_KEY": "sk-test"},
+        config={
+            "model": {
+                "provider": "deepseek",
+                "model_name": "deepseek-chat",
+                "base_url": "https://api.deepseek.com",
+                "max_tokens": 4096,
+            }
+        },
+    )
+
+    assert settings.model_provider == "deepseek"
+    assert settings.uses_sap_ai_core is False
+    assert settings.model_name == "deepseek-chat"
+    assert settings.model_base_url == "https://api.deepseek.com"
+    assert settings.model_api_key == "sk-test"
+    assert settings.sap_max_tokens == 4096
+
+
+def test_load_settings_model_section_overrides_legacy_sap_alias():
+    settings = load_settings(
+        env={},
+        config={
+            "sap": {"model_name": "legacy-model", "max_tokens": 1024},
+            "model": {"provider": "openai", "model_name": "gpt-4o-mini"},
+        },
+    )
+
+    assert settings.model_provider == "openai"
+    assert settings.model_name == "gpt-4o-mini"
+    # Unset model keys fall back to the legacy sap alias.
+    assert settings.sap_max_tokens == 1024
+
+
+def test_load_settings_rejects_unknown_model_provider():
+    with pytest.raises(SettingsError, match="model.provider"):
+        load_settings(env={}, config={"model": {"provider": "not-a-provider"}})
 
 
 def test_load_settings_reads_nested_regular_config():

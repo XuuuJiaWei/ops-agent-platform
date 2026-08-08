@@ -22,6 +22,8 @@ def build_trace_metadata(
         "environment": settings.app_env,
         "assistant_id": settings.assistant_id,
         "protocol": protocol,
+        "model_provider": settings.model_provider,
+        "model_name": settings.model_name,
         "sap_model_name": settings.sap_model_name,
         "langfuse_trace_name": _trace_name(protocol),
         "langfuse_tags": _trace_tags(settings, protocol),

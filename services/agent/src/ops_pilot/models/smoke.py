@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ops_pilot.config.settings import Settings, load_settings
-from ops_pilot.models.sap_genai import create_chat_model
+from ops_pilot.models.factory import create_chat_model
 from ops_pilot.tools.smoke_tools import get_smoke_tools
 
 
