@@ -5,6 +5,7 @@
 # dev-copilot-runtime.sh so the backend address is never duplicated.
 #
 # Exports on success: BACKEND_HOST BACKEND_PORT CHAT_PATH ASSISTANT BACKEND_URL
+# OPS_PILOT_PERSISTENCE_BACKEND OPS_PILOT_PERSISTENCE_SETUP_ON_START
 # On any failure it stays silent; callers fall back to their own defaults.
 #
 # Sourced under `set -eu`, so every step is guarded to never abort the caller.
@@ -19,12 +20,15 @@ _derived=$( (cd "$_derive_root/services/agent" 2>/dev/null && uv run ops_pilot s
         `BACKEND_HOST=${s.chat_host}\n` +
         `BACKEND_PORT=${s.chat_port}\n` +
         `CHAT_PATH=${s.chat_base_path}\n` +
-        `ASSISTANT=${s.assistant_id}\n`
+        `ASSISTANT=${s.assistant_id}\n` +
+        `OPS_PILOT_PERSISTENCE_BACKEND=${s.persistence_backend}\n` +
+        `OPS_PILOT_PERSISTENCE_SETUP_ON_START=${s.persistence_setup_on_start}\n`
       );
     } catch (e) { process.exit(1); }' 2>/dev/null ) || _derived=""
 
 if [ -n "$_derived" ]; then
   eval "$_derived"
   export BACKEND_HOST BACKEND_PORT CHAT_PATH ASSISTANT
+  export OPS_PILOT_PERSISTENCE_BACKEND OPS_PILOT_PERSISTENCE_SETUP_ON_START
   export BACKEND_URL="http://${BACKEND_HOST}:${BACKEND_PORT}"
 fi

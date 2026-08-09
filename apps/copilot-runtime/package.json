@@ -5,9 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "node src/index.mjs",
-    "start": "node src/index.mjs"
+    "start": "node src/index.mjs",
+    "test": "node --test"
   },
   "dependencies": {
-    "@copilotkit/runtime": "^1.64.2"
+    "@ag-ui/client": "0.0.57",
+    "@copilotkit/runtime": "^1.64.2",
+    "pg": "^8.23.0",
+    "rxjs": "7.8.1"
   }
 }

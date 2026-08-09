@@ -32,7 +32,7 @@ type StoredThreadPayload = {
 };
 
 export function createConversationThreadId(): string {
-  return `thread-${crypto.randomUUID()}`;
+  return crypto.randomUUID();
 }
 
 export function useConversationThreads({ agentId }: UseConversationThreadsInput): ConversationThreadsState {

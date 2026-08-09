@@ -5,9 +5,9 @@ import {
   type CopilotChatAssistantMessageProps,
 } from "@copilotkit/react-core/v2";
 import { LayoutDashboard, MessageSquareText, PanelLeftOpen } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AgentNativeAppView } from "./AgentNativeAppView";
-import { LocalThreadMessagePersistence } from "./LocalThreadMessagePersistence";
+import { ThreadLifecycleSync } from "./ThreadLifecycleSync";
 import { ThreadSidebar } from "./ThreadSidebar";
 import {
   appConfigStorageKey,
@@ -48,6 +48,19 @@ export function AppShell({ env }: AppShellProps) {
   const [mainView, setMainView] = useState<MainView>(initialConfig.mainView);
   const threadsState = useConversationThreads({ agentId: env.assistantId });
   const { setThreadTitle, touchThread } = threadsState;
+
+  const handleThreadActivity = useCallback(
+    (threadId: string, titleCandidate?: string) => {
+      touchThread(threadId);
+      if (titleCandidate) {
+        setThreadTitle(threadId, titleCandidate);
+      }
+      if (threadId === activeThreadId) {
+        setHasExplicitThreadId(true);
+      }
+    },
+    [activeThreadId, setThreadTitle, touchThread],
+  );
 
   const chatLabels = useMemo(
     () => ({
@@ -123,7 +136,7 @@ export function AppShell({ env }: AppShellProps) {
   return (
     <CopilotChatConfigurationProvider
       agentId={env.assistantId}
-      hasExplicitThreadId={activeThreadSource === "copilot" && hasExplicitThreadId}
+      hasExplicitThreadId={hasExplicitThreadId}
       labels={chatLabels}
       threadId={activeThreadId}
     >
@@ -174,10 +187,9 @@ export function AppShell({ env }: AppShellProps) {
             <div className={mainView === "chat" ? "h-full" : "hidden"}>
               <CopilotChat className="h-full" messageView={chatMessageView} />
             </div>
-            <LocalThreadMessagePersistence
+            <ThreadLifecycleSync
               agentId={env.assistantId}
-              enabled={activeThreadSource === "local"}
-              onTitleCandidate={setThreadTitle}
+              onThreadActivity={handleThreadActivity}
               threadId={activeThreadId}
             />
             <div className={mainView === "app" ? "h-full" : "hidden"}>

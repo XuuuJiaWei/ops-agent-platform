@@ -20,5 +20,7 @@ fi
 : "${AGUI_AGENT_URL:=http://127.0.0.1:8123/chat}"
 export AGUI_AGENT_URL
 [ -n "${ASSISTANT_ID:-}" ] && export ASSISTANT_ID
+[ -n "${OPS_PILOT_PERSISTENCE_BACKEND:-}" ] && export OPS_PILOT_PERSISTENCE_BACKEND
+[ -n "${OPS_PILOT_PERSISTENCE_SETUP_ON_START:-}" ] && export OPS_PILOT_PERSISTENCE_SETUP_ON_START
 
 exec pnpm --filter "./apps/copilot-runtime" dev

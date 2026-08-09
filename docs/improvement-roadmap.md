@@ -125,7 +125,7 @@ LangGraph 有两个**正交**的持久化概念，不是「短期存哪、长期
 业务历史（展示/审计） → messages 表（独立，读多写多，按会话分页）
 长期记忆（检索）      → Store + pgvector
 ```
-> 即使物理上都是同一个 Postgres 集群，也应在 schema / 生命周期 / 读写模式上分离：`checkpoints` 是运行时快照，`messages` 是产品数据。本项目前端当前用 `LocalThreadMessagePersistence`（浏览器 localStorage）存历史，恰好体现「历史独立于 checkpoint」，生产要挪到后端持久层。
+> 即使物理上都是同一个 Postgres 集群，也应在 schema / 生命周期 / 读写模式上分离：`checkpoints` 是运行时快照，`messages` / AG-UI events 是产品数据。本项目前端已不再把浏览器 localStorage 当作消息真相源；Copilot Runtime 通过独立的 Postgres 表保存 AG-UI event log，并用同一个 `thread_id` replay UI。localStorage 只保留当前 thread 选择与侧栏轻量元数据。
 
 ### 3.4 两条推荐架构
 
@@ -163,7 +163,8 @@ LangGraph 有两个**正交**的持久化概念，不是「短期存哪、长期
 5. **生命周期**：连接池/engine 进程级持有（不每请求新建），启动时建表，关闭时释放——`backend.py` 与 `a2a/app.py` 的 lifespan 各自 await closer。`use_memory_checkpointer` 布尔标志重命名为语义更准的 `attach_checkpointer`（graph.py 平台导出、eval 仍传 `False`，各自不挂 continuity checkpointer）。
 6. **中间件容器化**：`deploy/postgres/`（`pgvector/pgvector:pg16`，host `127.0.0.1:5433`，healthcheck + 数据卷）。用 pgvector 镜像是为后续长期记忆 Store 复用同一实例。`docker compose up -d` 起库，`config.yaml` 切 `backend: postgres` + `.env` 填 `DATABASE_URL` 即启用。
 7. **验证**：起 Postgres → 发消息 → 杀后端 → 同 `thread_id` 重连，对话/任务从 checkpoint 恢复。
-8. **测试**：`tests/unit/config/test_settings.py` 覆盖 persistence 解析/校验/URL 归一化；`tests/unit/agent/test_persistence.py` 覆盖两个工厂的 memory 档，Postgres 档的「写→重开→读恢复」集成测试用 `TEST_DATABASE_URL` 环境变量门禁（默认套件保持零外部依赖）。
+8. **前端 / Copilot Runtime 对齐**：前端生成并稳定保存 UUID `threadId`，首次消息后将其标记为可恢复 thread；切换或刷新时由 `CopilotChat` 的 connect 流程 replay 服务端事件，不再 `agent.setMessages(localStorage)`。Copilot Runtime 增加 Postgres `AgentRunner`（`copilotkit_agent_runs` / `copilotkit_run_events` / `copilotkit_thread_locks`），与 LangGraph checkpoint 共用 `threadId` 但分表保存；`persistence.backend: memory` 时继续使用官方 `InMemoryAgentRunner`。
+9. **测试**：`tests/unit/config/test_settings.py` 覆盖 persistence 解析/校验/URL 归一化；`tests/unit/agent/test_persistence.py` 覆盖两个工厂的 memory 档，Postgres 档的「写→重开→读恢复」集成测试用 `TEST_DATABASE_URL` 环境变量门禁（默认套件保持零外部依赖）。
 
 ### 3.7 生产注意点（官方 + 实践）
 
@@ -172,6 +173,7 @@ LangGraph 有两个**正交**的持久化概念，不是「短期存哪、长期
 - **建表/迁移**：首次 `setup()` 建表；生产用受控 migration，不要每次启动 setup。
 - **checkpoint 清理**：super-step 细则写库频繁 → Postgres 加 cron 删 N 天前旧 checkpoint；Redis 用 TTL 自动过期。
 - **序列化演进**：长期运行 Agent 的 state schema 变更要考虑旧 checkpoint 反序列化兼容。
+- **双层持久化**：LangGraph checkpoint 负责执行态恢复；Copilot `AgentRunner` 负责 AG-UI 事件 replay/浏览器重连。两层必须使用同一个稳定 `threadId`，但不能把其中一层误当作另一层。
 - **备份恢复演练**：checkpoint 已是「可恢复系统」的一部分，DB 备份策略要和恢复流程一起验。
 
 ### 3.8 面试话术
@@ -197,3 +199,4 @@ LangGraph 有两个**正交**的持久化概念，不是「短期存哪、长期
 - LangGraph Persistence / Checkpointers（官方）：checkpointer 存 super-step 快照，`PostgresSaver` 为生产推荐、LangSmith 同款；`setup()` 建表 + cron 清理。
 - LangGraph Add Memory（官方）：`AsyncPostgresSaver` + `PostgresStore` 生产用法；checkpointer(short-term) 与 store(long-term) 同时使用。
 - langgraph-checkpoint-redis（Redis 官方）：`RedisSaver`/`AsyncRedisSaver`/`ShallowRedisSaver` + TTL（`default_ttl`/`refresh_on_read`）；`RedisStore` 也支持 TTL。
+- CopilotKit Threads / AgentRunner（官方）：显式稳定 `threadId` 驱动 history hydration 与 active-run reconnect；自托管 Runtime 必须配置持久 `AgentRunner`，LangGraph checkpointer 与 Copilot thread event history 是共享 ID 的两个独立层。

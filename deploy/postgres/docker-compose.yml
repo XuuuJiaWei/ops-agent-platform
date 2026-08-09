@@ -3,6 +3,7 @@ name: ops-pilot-postgres
 # Local Postgres for ops_pilot durable execution:
 #   - LangGraph AsyncPostgresSaver checkpoints (checkpoints/writes tables)
 #   - A2A DatabaseTaskStore (tasks table)
+#   - Copilot Runtime AG-UI event replay (copilotkit_* tables)
 # The pgvector image is used so the same instance can later back the
 # long-term memory Store (pgvector) without swapping containers.
 services:

@@ -82,6 +82,8 @@ def _print_settings() -> int:
         "chat_host": settings.chat_host,
         "chat_port": settings.chat_port,
         "a2a_base_path": settings.a2a_base_path,
+        "persistence_backend": settings.persistence_backend,
+        "persistence_setup_on_start": settings.persistence_setup_on_start,
     }
     print(json.dumps(payload, indent=2, sort_keys=True))
     return 0
