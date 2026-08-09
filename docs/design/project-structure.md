@@ -170,7 +170,7 @@ ops-agent-platform/
 
 - [ ] Root `package.json` owns local orchestration only, not application code.
 - [ ] Root `pnpm-workspace.yaml` includes `apps/*` and may later include shared frontend packages.
-- [ ] Root `.env.example` documents backend secrets only: required sensitive runtime values without usable values. Non-secret frontend/runtime config lives next to each process (`apps/web/.env.example`, `apps/copilot-runtime/.env.example`).
+- [ ] Root `.env.example` names required sensitive runtime values without containing usable values. Non-secret frontend/runtime config lives next to each process (`apps/web/.env.example`, `apps/copilot-runtime/.env.example`).
 - [ ] Root `config/` contains example deployment-level configuration files that can be referenced from `.env`.
 - [ ] Root `skills/` contains local development skills and examples, not Python implementation code.
 - [ ] Root `docs/` remains the source of requirements, research, design decisions, and operating notes.

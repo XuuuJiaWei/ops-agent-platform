@@ -1,6 +1,14 @@
 # ops_pilot
 
+[![CI](https://github.com/XuuuJiaWei/ops-agent-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/XuuuJiaWei/ops-agent-platform/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 ops_pilot is an agentic operations assistant built on DeepAgents, SAP AI Core / Generative AI Hub, CopilotKit, AG-UI, and Google Agent2Agent. It provides a standard CopilotKit chat experience while keeping agent behavior, tool access, prompts, protocol adapters, and data boundaries under backend control.
+
+This is an independent personal engineering project, not an SAP product or an
+official implementation from any dependency vendor. Committed configuration
+contains examples only; never use production credentials, company data, or
+internal endpoints in a public checkout.
 
 ## Product Overview
 
@@ -18,6 +26,12 @@ The product currently exposes three primary surfaces:
 - MCP tool loading from deployment configuration (`config/config.yaml`).
 - CopilotKit-compatible chat streaming through AG-UI.
 - A2A agent card discovery and JSON-RPC execution through the official Python SDK.
+- Durable LangGraph checkpoints, A2A tasks, CopilotKit event replay, and agent-authored Spaces through PostgreSQL.
+- Reliable MCP execution with tool-call deduplication, bounded retry with jitter,
+  server-local circuit breakers, run deadlines, cancellation, and explicit
+  `unknown` outcomes for ambiguous non-idempotent writes.
+- Human-in-the-loop approval for configured high-risk tools and optional remote
+  sandbox isolation for filesystem and command execution.
 - Optional Langfuse tracing when credentials are configured.
 - Local development stack with frontend, Copilot runtime, and one unified backend started from one command.
 
@@ -73,6 +87,10 @@ During `pnpm dev` the backend host/port and assistant id are derived from
 `config/config.yaml` (server section) and injected into the web and copilot
 processes, so those `.env` files only matter when a process is started on its
 own. Regular configuration (including MCP servers) lives in `config/config.yaml`. Fill SAP AI Core / Generative AI Hub values in `.env` as needed. If the SAP SDK is already configured through local SDK configuration or `VCAP_SERVICES`, the `AICORE_*` values can stay empty.
+
+For a non-SAP environment, select an OpenAI-compatible provider such as
+DeepSeek in `config/config.yaml` and put only its API key in `.env`; the example
+configuration documents both provider shapes.
 
 Start the full development stack:
 
@@ -147,3 +165,21 @@ pnpm --filter "./apps/web" typecheck
 pnpm --filter "./apps/web" lint
 pnpm --filter "./apps/web" build
 ```
+
+The same secret-free checks run in [GitHub Actions](.github/workflows/ci.yml).
+The workflow grants only `contents: read`, pins third-party actions to commit
+SHAs, installs dependencies from lockfiles, and receives no deployment or
+model credentials.
+
+## Reliability Semantics
+
+The runtime does not claim mathematical exactly-once execution across an
+external side-effecting system. It uses a durable `(run_id, tool_call_id)`
+journal and returns cached terminal results for duplicate calls. Read-only or
+explicitly idempotent tools may be retried; an ambiguous failure from a
+non-idempotent write is recorded as `unknown` and must be reconciled rather
+than repeated blindly. See [Reliable Agent Execution](docs/reliability-execution.md).
+
+## License
+
+Licensed under the [MIT License](LICENSE).

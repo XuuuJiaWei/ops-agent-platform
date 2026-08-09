@@ -21,7 +21,10 @@ def build_agent_card(settings: Settings):
     return AgentCard(
         name="ops_pilot",
         description="Local DeepAgents runtime backed by SAP AI Core / Generative AI Hub.",
-        provider=AgentProvider(organization="SAP", url="https://www.sap.com"),
+        provider=AgentProvider(
+            organization="ops_pilot contributors",
+            url="https://github.com/XuuuJiaWei/ops-agent-platform",
+        ),
         version="0.1.0",
         capabilities=AgentCapabilities(streaming=True, push_notifications=False),
         default_input_modes=["text/plain"],

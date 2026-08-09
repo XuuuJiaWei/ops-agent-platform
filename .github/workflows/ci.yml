@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend / Python 3.12
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: services/agent
+    env:
+      OPS_PILOT_CONFIG: ../../config/config.example.yaml
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.32"
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: services/agent/uv.lock
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Lint
+        run: uv run ruff check src tests
+      - name: Check formatting
+        run: uv run ruff format --check src tests
+      - name: Test
+        run: uv run pytest
+
+  web:
+    name: Web / Node 24
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+      - name: Install Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Test web
+        run: pnpm --filter "./apps/web" test
+      - name: Test Copilot runtime
+        run: pnpm --filter "./apps/copilot-runtime" test
+      - name: Type-check web
+        run: pnpm --filter "./apps/web" typecheck
+      - name: Lint web
+        run: pnpm --filter "./apps/web" lint
+      - name: Build web
+        run: pnpm --filter "./apps/web" build
