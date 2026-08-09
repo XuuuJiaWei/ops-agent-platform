@@ -33,10 +33,12 @@ def stub_tools(monkeypatch):
 async def test_default_allow_keeps_all_tools(stub_tools):
     stub_tools(["get_problems", "restart_service"])
 
-    result = await load_mcp_tools(_config())
+    result = await load_mcp_tools(_config(retry_tools=["get_problems"]))
 
     assert {tool.name for tool in result.tools} == {"get_problems", "restart_service"}
     assert result.hitl_tools == ()
+    assert result.tool_servers == {"get_problems": "dyna", "restart_service": "dyna"}
+    assert result.retry_tools == ("get_problems",)
 
 
 @pytest.mark.asyncio

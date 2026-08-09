@@ -8,12 +8,15 @@ run only when ``TEST_DATABASE_URL`` points at a reachable database (see
 from __future__ import annotations
 
 import os
+import uuid
 
 import pytest
 
 from ops_pilot.a2a.task_store import create_task_store
 from ops_pilot.agent.runtime import _create_checkpointer
 from ops_pilot.config.settings import load_settings
+from ops_pilot.reliability.execution import ReliableToolExecutor, ToolCall
+from ops_pilot.reliability.journal import create_execution_journal
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 requires_db = pytest.mark.skipif(
@@ -40,6 +43,16 @@ async def test_create_task_store_defaults_to_in_memory_store():
     store, closer = await create_task_store(settings)
 
     assert type(store).__name__ == "InMemoryTaskStore"
+    assert closer is None
+
+
+@pytest.mark.asyncio
+async def test_create_execution_journal_defaults_to_process_memory():
+    settings = load_settings(env={}, config={"app_env": "test"})
+
+    journal, closer = await create_execution_journal(settings)
+
+    assert type(journal).__name__ == "MemoryExecutionJournal"
     assert closer is None
 
 
@@ -113,3 +126,46 @@ async def test_postgres_task_store_persists_and_resumes_across_reopen():
         assert loaded.id == "test-task-1"
     finally:
         await reopened_closer()
+
+
+@requires_db
+@pytest.mark.asyncio
+async def test_postgres_execution_journal_reuses_success_after_reopen():
+    settings = load_settings(
+        env={"DATABASE_URL": TEST_DATABASE_URL},
+        config={"persistence": {"backend": "postgres"}},
+    )
+    unique = uuid.uuid4().hex
+    call = ToolCall(
+        run_id=f"test-run-{unique}",
+        tool_call_id="create-once",
+        tool_name="create_incident",
+        arguments={"summary": unique},
+        dependency="incident-mcp",
+        retry_safe=False,
+    )
+
+    journal, closer = await create_execution_journal(settings)
+    assert closer is not None
+    try:
+        first = await ReliableToolExecutor(journal=journal).execute(call, _return_incident)
+        assert first.reused is False
+    finally:
+        await closer()
+
+    reopened, reopened_closer = await create_execution_journal(settings)
+    assert reopened_closer is not None
+    try:
+        second = await ReliableToolExecutor(journal=reopened).execute(call, _fail_if_called)
+        assert second.value == {"incident_id": "INC-1"}
+        assert second.reused is True
+    finally:
+        await reopened_closer()
+
+
+async def _return_incident() -> dict[str, str]:
+    return {"incident_id": "INC-1"}
+
+
+async def _fail_if_called() -> dict[str, str]:
+    raise AssertionError("persisted successful side effect must not run again")

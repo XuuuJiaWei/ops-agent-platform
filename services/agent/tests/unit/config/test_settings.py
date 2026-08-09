@@ -21,6 +21,35 @@ def test_load_settings_defaults_with_empty_config():
     assert settings.langfuse_enabled is False
     assert settings.enable_smoke_tools is True
     assert settings.mcp.servers == ()
+    assert settings.reliability_enabled is True
+    assert settings.run_deadline_seconds == 600.0
+    assert settings.tool_retry_max_attempts == 3
+    assert settings.circuit_breaker_failure_threshold == 5
+
+
+def test_load_settings_reads_reliability_policy() -> None:
+    settings = load_settings(
+        env={},
+        config={
+            "reliability": {
+                "run_deadline_seconds": 90,
+                "max_attempts": 2,
+                "initial_backoff_seconds": 0,
+                "backoff_multiplier": 3,
+                "jitter_ratio": 0,
+                "failure_threshold": 4,
+                "recovery_seconds": 15,
+            }
+        },
+    )
+
+    assert settings.run_deadline_seconds == 90
+    assert settings.tool_retry_max_attempts == 2
+    assert settings.tool_retry_initial_backoff_seconds == 0
+    assert settings.tool_retry_backoff_multiplier == 3
+    assert settings.tool_retry_jitter_ratio == 0
+    assert settings.circuit_breaker_failure_threshold == 4
+    assert settings.circuit_breaker_recovery_seconds == 15
 
 
 def test_load_settings_reads_reasoning_policy():

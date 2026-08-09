@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -13,6 +14,14 @@ from ops_pilot.mcp.registry import MCPRegistry, create_mcp_registry
 from ops_pilot.models import create_chat_model
 from ops_pilot.observability.langfuse import TracingSetup, create_callback_handler
 from ops_pilot.observability.metadata import build_model_metadata, build_runnable_config
+from ops_pilot.reliability.execution import (
+    CircuitBreakerPolicy,
+    ReliableToolExecutor,
+    RetryPolicy,
+)
+from ops_pilot.reliability.journal import create_execution_journal
+from ops_pilot.reliability.middleware import ReliableToolMiddleware
+from ops_pilot.reliability.run import RunController
 from ops_pilot.sandbox import SandboxManager, SandboxRuntime, create_sandbox_manager
 from ops_pilot.skills.resolver import resolve_skill_paths
 from ops_pilot.skills.sync import sync_skill_paths_to_backend
@@ -36,6 +45,8 @@ class AgentRuntime:
     checkpointer_closer: Callable[[], Awaitable[None]] | None = None
     spaces: SpaceRepository = field(default_factory=MemorySpaceRepository)
     space_repository_closer: Callable[[], Awaitable[None]] | None = None
+    run_controller: RunController = field(default_factory=RunController)
+    execution_journal_closer: Callable[[], Awaitable[None]] | None = None
 
     def close(self) -> None:
         if self.sandbox is not None:
@@ -53,7 +64,11 @@ class AgentRuntime:
                     if self.space_repository_closer is not None:
                         await self.space_repository_closer()
                 finally:
-                    self.close()
+                    try:
+                        if self.execution_journal_closer is not None:
+                            await self.execution_journal_closer()
+                    finally:
+                        self.close()
 
     def runnable_config(
         self,
@@ -94,18 +109,23 @@ class AgentRuntime:
     ) -> str:
         """Invoke the shared DeepAgent with one user text message."""
 
-        result = await self.graph.ainvoke(
-            {"messages": [{"role": "user", "content": text}]},
-            config=self.runnable_config(
-                protocol=protocol,
-                thread_id=thread_id,
-                run_id=run_id,
-                a2a_task_id=a2a_task_id,
-                a2a_context_id=a2a_context_id,
-                configurable=configurable,
-                extra_metadata=extra_metadata,
-            ),
-        )
+        effective_run_id = run_id or a2a_task_id or f"{protocol}:{thread_id or uuid.uuid4()}"
+
+        async def invoke() -> Any:
+            return await self.graph.ainvoke(
+                {"messages": [{"role": "user", "content": text}]},
+                config=self.runnable_config(
+                    protocol=protocol,
+                    thread_id=thread_id,
+                    run_id=effective_run_id,
+                    a2a_task_id=a2a_task_id,
+                    a2a_context_id=a2a_context_id,
+                    configurable=configurable,
+                    extra_metadata=extra_metadata,
+                ),
+            )
+
+        result = await self.run_controller.run(effective_run_id, invoke)
         return _extract_result_text(result)
 
     async def ainvoke_trace(
@@ -125,19 +145,27 @@ class AgentRuntime:
         from ops_pilot.eval.trace import build_agent_trace
 
         started = time.perf_counter()
-        result = await self.graph.ainvoke(
-            {"messages": [{"role": "user", "content": text}]},
-            config=self.runnable_config(
-                protocol=protocol,
-                thread_id=thread_id,
-                run_id=run_id,
-                a2a_task_id=a2a_task_id,
-                a2a_context_id=a2a_context_id,
-                configurable=configurable,
-                extra_metadata=extra_metadata,
-            ),
-        )
+        effective_run_id = run_id or a2a_task_id or f"{protocol}:{thread_id or uuid.uuid4()}"
+
+        async def invoke() -> Any:
+            return await self.graph.ainvoke(
+                {"messages": [{"role": "user", "content": text}]},
+                config=self.runnable_config(
+                    protocol=protocol,
+                    thread_id=thread_id,
+                    run_id=effective_run_id,
+                    a2a_task_id=a2a_task_id,
+                    a2a_context_id=a2a_context_id,
+                    configurable=configurable,
+                    extra_metadata=extra_metadata,
+                ),
+            )
+
+        result = await self.run_controller.run(effective_run_id, invoke)
         return build_agent_trace(result, latency_s=time.perf_counter() - started)
+
+    async def cancel_run(self, run_id: str, *, reason: str = "cancel requested") -> bool:
+        return await self.run_controller.cancel(run_id, reason=reason)
 
 
 async def build_agent_runtime(
@@ -161,12 +189,37 @@ async def build_agent_runtime(
     mcp_registry = await create_mcp_registry(resolved_settings)
     local_skills = tuple(resolve_skill_paths(resolved_settings))
     tracing = create_callback_handler(resolved_settings)
+    run_controller = RunController(default_deadline_seconds=resolved_settings.run_deadline_seconds)
 
     sandbox: SandboxManager | None = None
     checkpointer_closer: Callable[[], Awaitable[None]] | None = None
     space_repository: SpaceRepository | None = None
     space_repository_closer: Callable[[], Awaitable[None]] | None = None
+    execution_journal_closer: Callable[[], Awaitable[None]] | None = None
     try:
+        journal, execution_journal_closer = await create_execution_journal(resolved_settings)
+        tool_executor = ReliableToolExecutor(
+            journal=journal,
+            retry_policy=RetryPolicy(
+                max_attempts=resolved_settings.tool_retry_max_attempts,
+                initial_backoff_seconds=resolved_settings.tool_retry_initial_backoff_seconds,
+                backoff_multiplier=resolved_settings.tool_retry_backoff_multiplier,
+                jitter_ratio=resolved_settings.tool_retry_jitter_ratio,
+            ),
+            circuit_breaker_policy=CircuitBreakerPolicy(
+                failure_threshold=resolved_settings.circuit_breaker_failure_threshold,
+                recovery_timeout_seconds=resolved_settings.circuit_breaker_recovery_seconds,
+            ),
+        )
+        reliability_middleware = (
+            ReliableToolMiddleware(
+                executor=tool_executor,
+                tool_servers=mcp_registry.tool_servers,
+                retry_tools=set(mcp_registry.retry_tools),
+            )
+            if resolved_settings.reliability_enabled
+            else None
+        )
         space_repository, space_repository_closer = await create_space_repository(resolved_settings)
         tools = [*mcp_registry.tools, *build_space_tools(space_repository)]
         if resolved_settings.enable_smoke_tools:
@@ -186,6 +239,7 @@ async def build_agent_runtime(
             checkpointer=checkpointer,
             backend=sandbox.backend if sandbox is not None else None,
             interrupt_on=interrupt_on,
+            reliability_middleware=reliability_middleware,
         )
     except Exception:
         await mcp_registry.aclose()
@@ -193,6 +247,8 @@ async def build_agent_runtime(
             await checkpointer_closer()
         if space_repository_closer is not None:
             await space_repository_closer()
+        if execution_journal_closer is not None:
+            await execution_journal_closer()
         if sandbox is not None:
             sandbox.close()
         raise
@@ -209,6 +265,8 @@ async def build_agent_runtime(
         checkpointer_closer=checkpointer_closer,
         spaces=space_repository,
         space_repository_closer=space_repository_closer,
+        run_controller=run_controller,
+        execution_journal_closer=execution_journal_closer,
     )
 
 
@@ -246,6 +304,7 @@ def _create_deep_agent(
     checkpointer: Any | None,
     backend: Any | None,
     interrupt_on: dict[str, Any] | None = None,
+    reliability_middleware: Any | None = None,
 ) -> Any:
     try:
         from deepagents import create_deep_agent
@@ -267,6 +326,8 @@ def _create_deep_agent(
 
     copilotkit_middleware = _create_copilotkit_middleware()
     middleware = [NormalizeSystemMessagesMiddleware()]
+    if reliability_middleware is not None:
+        middleware.insert(0, reliability_middleware)
     if copilotkit_middleware is not None:
         middleware.insert(0, copilotkit_middleware)
     kwargs["middleware"] = middleware

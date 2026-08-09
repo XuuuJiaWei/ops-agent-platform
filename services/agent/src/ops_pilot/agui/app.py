@@ -58,6 +58,7 @@ async def create_agui_app(settings: Settings | None = None, runtime: Any | None 
             description="ops_pilot DeepAgent exposed through AG-UI for CopilotKit.",
             graph=resolved_runtime.graph,
             config=agui_config,
+            run_controller=getattr(resolved_runtime, "run_controller", None),
         ),
         path=resolved_settings.chat_base_path.rstrip("/") or "/",
     )

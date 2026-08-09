@@ -60,6 +60,19 @@ persistence:
   # Create tables on startup. Fine for local/dev; use a managed migration in production.
   setup_on_start: true
 
+# Reliable agent/tool execution. Retries are bounded by the run deadline and
+# are automatic only for MCP tools declared read-only/idempotent by the server
+# or explicitly listed in a server's retry_tools.
+reliability:
+  enabled: true
+  run_deadline_seconds: 600
+  max_attempts: 3
+  initial_backoff_seconds: 0.25
+  backoff_multiplier: 2.0
+  jitter_ratio: 0.2
+  failure_threshold: 5
+  recovery_seconds: 30
+
 open_sandbox:
   # null = auto-enable only when domain (here) and api_key (.env) are both set.
   enabled: null
@@ -86,6 +99,8 @@ open_sandbox:
 # Permission lists per server:
 #   allow_tools: allowlist of tool names; empty/omitted = allow all.
 #   hitl_tools:  tools that require human-in-the-loop approval before running.
+#   retry_tools: tools whose business operation is known to be retry-safe even
+#                when the MCP server omits readOnlyHint/idempotentHint.
 #   headers:     only for http/sse/streamable_http MCP transports, e.g.
 #                Authorization: ${MCP_BASIC_AUTH_HEADER}
 mcpServers:
@@ -104,6 +119,7 @@ mcpServers:
     cwd: .
     allow_tools: []
     hitl_tools: []
+    retry_tools: []
     env:
       KUBECONFIG: /path/to/kubeconfig-gardenlogin--cloud--shoot.yaml
   # Jaeger 2.19+ has an official progressive-disclosure MCP extension.
@@ -118,6 +134,7 @@ mcpServers:
       Authorization: ${MCP_BASIC_AUTH_HEADER}
     allow_tools: []
     hitl_tools: []
+    retry_tools: []
   # Deploy the official prometheus/prometheus-mcp chart next to Prometheus and
   # expose /mcp through the authenticated reverse proxy.
   prometheus:
@@ -129,6 +146,7 @@ mcpServers:
       Authorization: ${MCP_BASIC_AUTH_HEADER}
     allow_tools: []
     hitl_tools: []
+    retry_tools: []
   opensearch:
     required: false
     transport: stdio
@@ -149,6 +167,16 @@ mcpServers:
       - PPLQueryTool
     hitl_tools:
       - GenericOpenSearchApiTool
+    retry_tools:
+      - ListIndexTool
+      - IndexMappingTool
+      - SearchIndexTool
+      - GetShardsTool
+      - ClusterHealthTool
+      - CountTool
+      - ExplainTool
+      - MsearchTool
+      - PPLQueryTool
     env:
       OPENSEARCH_URL: http://opensearch-otel.example.com
       OPENSEARCH_USERNAME: ${OTEL_BASIC_AUTH_USER}

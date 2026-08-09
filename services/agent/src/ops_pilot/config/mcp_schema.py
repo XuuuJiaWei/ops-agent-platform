@@ -31,6 +31,7 @@ class MCPServerConfig:
     timeout: float | None = None
     allow_tools: tuple[str, ...] = field(default_factory=tuple)
     hitl_tools: tuple[str, ...] = field(default_factory=tuple)
+    retry_tools: tuple[str, ...] = field(default_factory=tuple)
 
     @classmethod
     def from_mapping(cls, name: str, data: Mapping[str, Any]) -> MCPServerConfig:
@@ -62,6 +63,7 @@ class MCPServerConfig:
             timeout=parsed_timeout,
             allow_tools=_string_list(name, "allow_tools", data.get("allow_tools", ())),
             hitl_tools=_string_list(name, "hitl_tools", data.get("hitl_tools", ())),
+            retry_tools=_string_list(name, "retry_tools", data.get("retry_tools", ())),
         )
         config.validate()
         return config

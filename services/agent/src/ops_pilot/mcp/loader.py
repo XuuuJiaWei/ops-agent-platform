@@ -77,6 +77,8 @@ async def _load_from_config(config: MCPConfig, *, config_path: str | None) -> MC
     tools: list[Any] = []
     statuses: list[MCPServerLoadStatus] = []
     hitl_tools: list[str] = []
+    retry_tools: list[str] = []
+    tool_servers: dict[str, str] = {}
     session_managers: list[MCPServerOwner] = []
 
     async def load(server: MCPServerConfig) -> Any:
@@ -114,6 +116,9 @@ async def _load_from_config(config: MCPConfig, *, config_path: str | None) -> MC
         kept_tools = _apply_allowlist(server, server_tools)
         tools.extend(kept_tools)
         hitl_tools.extend(_collect_hitl_tools(server, kept_tools))
+        kept_names = {_tool_name(tool) for tool in kept_tools}
+        tool_servers.update({name: server.name for name in kept_names})
+        retry_tools.extend(name for name in server.retry_tools if name in kept_names)
         if owner is not None:
             if kept_tools:
                 session_managers.append(owner)
@@ -142,6 +147,8 @@ async def _load_from_config(config: MCPConfig, *, config_path: str | None) -> MC
         status=status,
         hitl_tools=tuple(dict.fromkeys(hitl_tools)),
         session_managers=tuple(session_managers),
+        tool_servers=tool_servers,
+        retry_tools=tuple(dict.fromkeys(retry_tools)),
     )
 
 

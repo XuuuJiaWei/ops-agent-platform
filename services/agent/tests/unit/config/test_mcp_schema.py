@@ -42,6 +42,7 @@ def test_mcp_config_parses_permission_lists():
                     "command": "npx",
                     "allow_tools": ["get_problems", "query_metrics"],
                     "hitl_tools": ["restart_service"],
+                    "retry_tools": ["query_metrics"],
                 }
             }
         }
@@ -50,10 +51,12 @@ def test_mcp_config_parses_permission_lists():
     server = config.servers[0]
     assert server.allow_tools == ("get_problems", "query_metrics")
     assert server.hitl_tools == ("restart_service",)
+    assert server.retry_tools == ("query_metrics",)
     assert config.hitl_tool_names() == {"restart_service"}
     # Permission lists must not leak into the transport connection dict.
     assert "allow_tools" not in server.to_client_connection()
     assert "hitl_tools" not in server.to_client_connection()
+    assert "retry_tools" not in server.to_client_connection()
 
 
 def test_mcp_config_permission_lists_default_empty_when_omitted():
@@ -61,6 +64,7 @@ def test_mcp_config_permission_lists_default_empty_when_omitted():
 
     assert config.servers[0].allow_tools == ()
     assert config.servers[0].hitl_tools == ()
+    assert config.servers[0].retry_tools == ()
     assert config.hitl_tool_names() == set()
 
 
@@ -72,17 +76,13 @@ def test_mcp_config_rejects_non_string_permission_entries():
 
 
 def test_mcp_config_passes_cwd_to_stdio_connection():
-    config = MCPConfig.from_mapping(
-        {"mcpServers": {"dyna": {"transport": "stdio", "command": "npx", "cwd": "config"}}}
-    )
+    config = MCPConfig.from_mapping({"mcpServers": {"dyna": {"transport": "stdio", "command": "npx", "cwd": "config"}}})
 
     assert config.servers[0].to_client_connection()["cwd"] == str((REPO_ROOT / "config").resolve())
 
 
 def test_mcp_config_timeout_is_loader_only():
-    config = MCPConfig.from_mapping(
-        {"mcpServers": {"dyna": {"transport": "stdio", "command": "npx", "timeout": 5}}}
-    )
+    config = MCPConfig.from_mapping({"mcpServers": {"dyna": {"transport": "stdio", "command": "npx", "timeout": 5}}})
 
     assert config.servers[0].timeout == 5.0
     assert "timeout" not in config.servers[0].to_client_connection()

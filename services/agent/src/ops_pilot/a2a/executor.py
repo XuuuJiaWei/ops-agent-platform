@@ -51,6 +51,9 @@ def create_executor(runtime: AgentRuntime, settings: Settings):
             task_id = context.task_id or "task"
             context_id = context.context_id or task_id
             updater = TaskUpdater(event_queue=event_queue, task_id=task_id, context_id=context_id)
+            cancel_run = getattr(runtime, "cancel_run", None)
+            if cancel_run is not None:
+                await cancel_run(task_id, reason="A2A cancel request")
             await updater.cancel()
 
     return DeepAgentA2AExecutor()

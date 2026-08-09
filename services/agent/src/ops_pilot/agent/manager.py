@@ -142,6 +142,12 @@ class CurrentRuntimeProxy:
     def runnable_config(self, **kwargs: Any) -> dict[str, Any]:
         return self._manager.current.runnable_config(**kwargs)
 
+    def iterate(self, run_id: str, source: Any, **kwargs: Any) -> Any:
+        return self._manager.current.run_controller.iterate(run_id, source, **kwargs)
+
+    async def cancel_run(self, run_id: str, **kwargs: Any) -> bool:
+        return await self._manager.current.cancel_run(run_id, **kwargs)
+
 
 class CurrentGraphProxy:
     """Delegates LangGraph calls to the manager's current graph."""

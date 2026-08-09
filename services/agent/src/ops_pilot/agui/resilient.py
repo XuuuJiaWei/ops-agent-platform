@@ -18,7 +18,11 @@ class ResilientAGUIAgentMixin:
     async def run(self, input_data: Any):
         yielded_finished = False
         try:
-            async for event in super().run(input_data):  # type: ignore[misc]
+            source = super().run(input_data)  # type: ignore[misc]
+            controller = getattr(self, "_ops_pilot_run_controller", None)
+            run_id = getattr(input_data, "run_id", None)
+            events = controller.iterate(run_id, source) if controller is not None and run_id else source
+            async for event in events:
                 yielded_finished = yielded_finished or getattr(event, "type", None) == EventType.RUN_FINISHED
                 yield event
         except Exception as exc:  # noqa: BLE001 - protocol boundary: convert to RUN_ERROR.
@@ -35,7 +39,12 @@ class ResilientAGUIAgentMixin:
                 yield RunFinishedEvent(thread_id=thread_id, run_id=run_id)
 
 
-def create_resilient_agui_agent(agent_cls: type[Any], **kwargs: Any) -> Any:
+def create_resilient_agui_agent(
+    agent_cls: type[Any],
+    *,
+    run_controller: Any | None = None,
+    **kwargs: Any,
+) -> Any:
     """Instantiate ``agent_cls`` with resilient streaming error handling."""
 
     resilient_cls = type(
@@ -43,7 +52,9 @@ def create_resilient_agui_agent(agent_cls: type[Any], **kwargs: Any) -> Any:
         (ResilientAGUIAgentMixin, agent_cls),
         {},
     )
-    return resilient_cls(**kwargs)
+    agent = resilient_cls(**kwargs)
+    agent._ops_pilot_run_controller = run_controller
+    return agent
 
 
 def _run_ids(agent: Any, input_data: Any) -> tuple[str | None, str | None]:

@@ -58,6 +58,7 @@ async def create_backend_app(
                 description="ops_pilot DeepAgent exposed through AG-UI for CopilotKit.",
                 graph=runtime_manager.graph_proxy(),
                 config=agui_config,
+                run_controller=runtime_manager.runtime_proxy(),
             ),
             path=resolved_settings.chat_base_path.rstrip("/") or "/",
         )

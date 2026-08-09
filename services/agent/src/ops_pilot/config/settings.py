@@ -57,6 +57,14 @@ class Settings:
     persistence_backend: str = "memory"
     persistence_database_url: str | None = None
     persistence_setup_on_start: bool = True
+    reliability_enabled: bool = True
+    run_deadline_seconds: float | None = 600.0
+    tool_retry_max_attempts: int = 3
+    tool_retry_initial_backoff_seconds: float = 0.25
+    tool_retry_backoff_multiplier: float = 2.0
+    tool_retry_jitter_ratio: float = 0.2
+    circuit_breaker_failure_threshold: int = 5
+    circuit_breaker_recovery_seconds: float = 30.0
     open_sandbox_enabled: bool = False
     open_sandbox_domain: str | None = None
     open_sandbox_api_key: str | None = None
@@ -167,6 +175,7 @@ def load_settings(env: Mapping[str, str] | None = None, *, config: Mapping[str, 
     server = _section(config_data, "server")
     sandbox = _section(config_data, "open_sandbox")
     persistence = _section(config_data, "persistence")
+    reliability = _section(config_data, "reliability")
 
     persistence_backend = _choice(
         persistence.get("backend"),
@@ -224,6 +233,14 @@ def load_settings(env: Mapping[str, str] | None = None, *, config: Mapping[str, 
         persistence_backend=persistence_backend,
         persistence_database_url=persistence_database_url,
         persistence_setup_on_start=_bool(persistence.get("setup_on_start"), True),
+        reliability_enabled=_bool(reliability.get("enabled"), True),
+        run_deadline_seconds=_optional_positive_float(reliability.get("run_deadline_seconds"), 600.0),
+        tool_retry_max_attempts=_positive_int(reliability.get("max_attempts"), 3),
+        tool_retry_initial_backoff_seconds=_nonnegative_float(reliability.get("initial_backoff_seconds"), 0.25),
+        tool_retry_backoff_multiplier=_positive_float(reliability.get("backoff_multiplier"), 2.0),
+        tool_retry_jitter_ratio=_ratio(reliability.get("jitter_ratio"), 0.2),
+        circuit_breaker_failure_threshold=_positive_int(reliability.get("failure_threshold"), 5),
+        circuit_breaker_recovery_seconds=_positive_float(reliability.get("recovery_seconds"), 30.0),
         open_sandbox_enabled=open_sandbox_enabled,
         open_sandbox_domain=open_sandbox_domain,
         open_sandbox_api_key=open_sandbox_api_key,
@@ -331,6 +348,35 @@ def _optional_float(value: Any) -> float | None:
     if value is None or value == "":
         return None
     return float(value)
+
+
+def _positive_float(value: Any, default: float) -> float:
+    parsed = _float(value, default)
+    if parsed <= 0:
+        raise SettingsError(f"Expected a positive number, got: {value!r}")
+    return parsed
+
+
+def _optional_positive_float(value: Any, default: float) -> float | None:
+    if value is None:
+        return default
+    if value == "":
+        return None
+    return _positive_float(value, default)
+
+
+def _nonnegative_float(value: Any, default: float) -> float:
+    parsed = _float(value, default)
+    if parsed < 0:
+        raise SettingsError(f"Expected a non-negative number, got: {value!r}")
+    return parsed
+
+
+def _ratio(value: Any, default: float) -> float:
+    parsed = _float(value, default)
+    if not 0 <= parsed <= 1:
+        raise SettingsError(f"Expected a ratio between 0 and 1, got: {value!r}")
+    return parsed
 
 
 def _bool(value: Any, default: bool) -> bool:

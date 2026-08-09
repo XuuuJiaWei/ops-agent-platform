@@ -4,23 +4,26 @@
 > 依据：LangGraph 官方文档（2025–2026）+ 业界实践 + 本仓库实测缺口。
 > 定位诚实：仍是个人项目/工程原型，roadmap 描述的是「工程能力演进」，不是「已上线」。
 
+企业能力基线、招聘样本和本项目差距的完整调研见 [从 Agent 框架应用到可运营生产系统](research/enterprise-agent-production-readiness.md)。
+
 ---
 
 ## 0. 现状能力盘点
 
-**已扎实：** 协议无关统一 Runtime（CopilotKit/AG-UI + Google A2A 复用 factory）、MCP 动态工具加载（并发/超时/降级）、HITL 审批、Langfuse tracing、Eval 体系（dataset + LLM-as-judge + chaos 故障注入）、OpenSandbox 远程沙箱、自适应推理 + per-call 超时。
+**已扎实：** 协议无关统一 Runtime（CopilotKit/AG-UI + Google A2A 复用 factory）、MCP 动态工具加载（并发/超时/降级）、HITL 审批、Langfuse tracing、Eval 体系（dataset + LLM-as-judge + chaos 故障注入）、OpenSandbox 远程沙箱、Postgres checkpoint/A2A task/AG-UI event 分层持久化、自适应推理 + per-call 超时。
 
-**代码实测缺口（提升抓手）：**
+**代码实测缺口（提升抓手）：** 可靠执行 P0 的首版实现见 [Agent Runtime 可靠执行设计](reliability-execution.md)。
 
 | 缺口 | 位置 | 影响 |
 | --- | --- | --- |
-| checkpointer 纯内存 | `agent/runtime.py` → `MemorySaver()` | 重启丢会话，无法恢复长任务 |
-| A2A task store 内存 | `backend.py` / `a2a/app.py` → `InMemoryTaskStore` | 重启丢任务 |
+| 可靠性指标尚未输出 | 已实现 deadline/cancel、账本、retry、circuit | 仍需 retry/circuit/cancel latency 的 OTel/Langfuse 信号 |
+| 下游业务幂等键未标准化 | Runtime 已按 tool call 去重；外部 MCP 未统一接收 key | “下游成功、账本写入前崩溃”仍需 reconcile |
+| 可靠性故障注入未进 CI | 5 个关键场景已有 deterministic tests | 尚未成为持续 Eval/发布门禁 |
 | 无长期记忆 | runtime 注释 "long-term/semantic memory intentionally not configured" | 与普通 chatbot 无本质差别 |
-| 协议边界无鉴权 | `api/` 只有 errors.py | 任何人可调 `/chat` `/a2a` |
 | 无 CI | 无 `.github/workflows` | prompt/工具变更无回归门禁 |
 | 前端零测试 | `apps/web` 无 test/spec | 无法保证关键链路 |
 | 无上下文压缩/token 预算 | runtime | token 爆炸与成本失控风险 |
+| 企业接入控制缺失 | 无鉴权、租户和完整审计 | 真正共享部署前必须补；个人项目暂不作为 P0 |
 
 ---
 
@@ -30,8 +33,10 @@
 
 | 方向 | 现状 → 目标 | 面试收益 | 优先级 |
 | --- | --- | --- | --- |
-| **持久化 checkpoint** ⭐ | `MemorySaver` → Redis(TTL) 或 PostgresSaver | durable execution / 崩溃恢复 | P0 |
-| **分层记忆** ⭐ | 无 → short-term(checkpointer) + long-term(Store + pgvector 语义检索) | Agent vs Chatbot 分水岭 | P0/P1 |
+| **统一 deadline + cancel** ⭐ | 首版已落地 AG-UI/A2A run controller → 继续传播剩余预算并补 cancel latency | 长任务可终止、资源可回收、状态可恢复 | P0 |
+| **副作用幂等** ⭐ | MCP 执行账本已落地 → 推进下游 idempotency key/reconcile contract | 证明重试和恢复不会重复执行危险动作 | P0 |
+| **分类重试 + 熔断** ⭐ | 首版已按工具语义重试、按 MCP Server 熔断 → 增加指标和多副本策略 | 受控恢复与故障隔离 | P0 |
+| **分层记忆** | 无 → short-term(checkpointer) + long-term(Store + pgvector 语义检索) | Agent vs Chatbot 分水岭 | P2 |
 | 上下文管理 | 无压缩 → 滑动窗口 + 摘要 + 工具输出结构化去重 | 防 token 爆炸 | P1 |
 | Token 预算/成本控制 | 仅 per-call timeout → 会话/租户级 token 硬上限 | 成本墙意识 | P2 |
 | Guardrails | 仅 HITL → prompt injection 防护 + 越权工具拦截 + 敏感数据过滤 | 「可约束地跑」 | P2 |
@@ -41,14 +46,12 @@
 
 | 方向 | 现状 → 目标 | 优先级 |
 | --- | --- | --- |
-| **鉴权 + 多租户** ⭐ | 无 auth → JWT/OIDC + tenant 隔离 + tool 级权限 | P0 |
-| 持久化存储拆分 | 全内存 → 会话/checkpoint/A2A task/memory/audit 各自持久层 | P0（随 checkpoint 一起） |
+| 可靠执行协调 | 协议 adapter 直接调 graph → 统一 execution module | P0 |
+| 故障注入 adapter | 只注入业务故障 → model/MCP/sandbox 瞬态故障与半执行故障 | P0 |
 | 限流 / 配额 | 无 → 按用户/租户/工具 rate limit + token budget | P1 |
-| 流式断线重连 | 无 → event cursor/offset/replay | P1 |
-| 幂等性 | 无 → 工具调用/审批回调/异步重试幂等键 | P2 |
 | OTel 标准化 | 仅 Langfuse → OpenTelemetry 统一 trace/log/metric（`telemetry/` 已占位） | P2 |
-| 结构化审计日志 | 无 → 谁/哪个租户/什么工具/什么动作/审批链 | P2 |
-| 容器化 + 弹性 | 本地脚本 → Worker/API 分离 + 异步队列 + 沙箱池 | P3 |
+| 容器化 + 弹性 | 本地脚本 → Worker/API 分离 + durable queue + 沙箱池 | P2 |
+| 鉴权 + 多租户 + 审计 | 无 → JWT/OIDC + tenant 隔离 + tool 级权限 + 审计账本 | P3（企业接入扩展） |
 
 ### 前端层
 
@@ -68,12 +71,12 @@
 
 若时间有限，做这 4 项最大化面试成果：
 
-1. **持久化 checkpoint + 任务恢复** ⭐ — 最典型生产 runtime 能力，直接对应 `MemorySaver` 缺口，改完即可讲 durable execution。（详见 §3）
-2. **Auth + 多租户 + 配额** — 企业级 Agent 平台门槛，证明懂平台治理而非只堆功能。
-3. **CI + Eval 回归门禁** — 把已有 dataset+judge+chaos 接进发布流程，方法论（测试左移/灰度）好讲。
-4. **长期记忆 + 上下文管理** — 补 Agent 深度，区别于普通 chatbot；AIOps 场景天然适合沉淀故障模式记忆。
+1. **统一 deadline + 取消传播** ⭐ — 先定义一次 run 如何受控结束，以及 model/tool/sandbox 如何共享剩余预算。
+2. **副作用工具幂等** ⭐ — 为写工具增加稳定 idempotency key、执行状态和结果复用；这是安全重试的前提。
+3. **分类重试 + 依赖级熔断** ⭐ — 只重试可恢复错误，按 model deployment/MCP server/sandbox 隔离熔断。
+4. **可靠性故障注入 + CI Eval 门禁** — 验证不重复副作用、不重置 deadline、取消后可恢复、依赖失效时受控降级。
 
-> 组合建议：1+2+3 补「生产工程闭环」，+4 补「Agent 深度」，两个维度都覆盖。
+> 组合建议：把上述能力收敛到协议 adapter 与 graph 之间的统一 execution module，不要在 AG-UI、A2A、MCP 和 sandbox 各自堆重试逻辑。鉴权、多租户和完整审计是共享部署前置条件，但对个人项目降为 P3，先以文档说明边界。
 
 ---
 
@@ -188,9 +191,10 @@ LangGraph 有两个**正交**的持久化概念，不是「短期存哪、长期
 
 | 阶段 | 内容 |
 | --- | --- |
-| **2 周** | 持久化 checkpoint（路径 A 或 B）+ A2A task store 持久化 + resume 集成测试 |
-| **1 个月** | + Auth/多租户/配额 + CI（单测/集成/eval gate） |
-| **3 个月** | + 长期记忆(Store+pgvector) + 上下文压缩 + 流式断线重连 + 前端 generative UI/工具可视化/测试 |
+| **已完成首版** | run deadline/cancel、MCP 工具执行账本、分类重试、Server 级熔断、5 类 deterministic tests |
+| **下一阶段** | 下游 idempotency key/reconcile contract + retry/circuit/cancel 指标 + fault adapter |
+| **形成闭环** | 把可靠性场景接入 CI Eval；补 OTel 运行指标、上下文预算和 durable queue |
+| **企业扩展** | 按真实部署需要增加 Auth/多租户/审计，不作为个人项目近期主线 |
 
 ---
 
