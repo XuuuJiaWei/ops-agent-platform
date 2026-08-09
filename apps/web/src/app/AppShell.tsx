@@ -10,12 +10,12 @@ import { ThreadLifecycleSync } from "./ThreadLifecycleSync";
 import { ThreadSidebar } from "./ThreadSidebar";
 import {
   appConfigStorageKey,
+  normalizeInitialAppConfig,
   readPersistedAppConfig,
   writePersistedAppConfig,
-  type PersistedAppConfig,
   type PersistedThreadSource,
 } from "./appConfigPersistence";
-import { createConversationThreadId, useConversationThreads } from "./conversationThreads";
+import { useConversationThreads } from "./conversationThreads";
 import type { MainView } from "./WorkspaceNavigation";
 import type { BrowserEnv } from "@/lib/env";
 
@@ -41,7 +41,7 @@ const chatMessageView = {
 };
 
 export function AppShell({ env }: AppShellProps) {
-  const initialConfig = useMemo(() => normalizeInitialConfig(readPersistedAppConfig(env.assistantId)), [env.assistantId]);
+  const initialConfig = useMemo(() => normalizeInitialAppConfig(readPersistedAppConfig(env.assistantId)), [env.assistantId]);
   const [activeThreadId, setActiveThreadId] = useState<string>(initialConfig.activeThreadId);
   const [activeThreadSource, setActiveThreadSource] = useState<PersistedThreadSource>(initialConfig.activeThreadSource);
   const [hasExplicitThreadId, setHasExplicitThreadId] = useState(initialConfig.hasExplicitThreadId);
@@ -94,7 +94,7 @@ export function AppShell({ env }: AppShellProps) {
         return;
       }
 
-      const nextConfig = normalizeInitialConfig(readPersistedAppConfig(env.assistantId));
+      const nextConfig = normalizeInitialAppConfig(readPersistedAppConfig(env.assistantId));
       setActiveThreadId(nextConfig.activeThreadId);
       setActiveThreadSource(nextConfig.activeThreadSource);
       setHasExplicitThreadId(nextConfig.hasExplicitThreadId);
@@ -111,7 +111,7 @@ export function AppShell({ env }: AppShellProps) {
     const thread = threadsState.startNewThread();
     setActiveThreadId(thread.id);
     setActiveThreadSource(threadsState.source);
-    setHasExplicitThreadId(false);
+    setHasExplicitThreadId(true);
     setMobileSidebarOpen(false);
   }
 
@@ -129,7 +129,7 @@ export function AppShell({ env }: AppShellProps) {
       const thread = threadsState.startNewThread();
       setActiveThreadId(thread.id);
       setActiveThreadSource(threadsState.source);
-      setHasExplicitThreadId(false);
+      setHasExplicitThreadId(true);
     }
   }
 
@@ -228,16 +228,6 @@ export function AppShell({ env }: AppShellProps) {
       </main>
     </CopilotChatConfigurationProvider>
   );
-}
-
-function normalizeInitialConfig(config: PersistedAppConfig): PersistedAppConfig & { activeThreadId: string } {
-  const activeThreadId = config.activeThreadId ?? createConversationThreadId();
-  return {
-    ...config,
-    activeThreadId,
-    activeThreadSource: config.activeThreadSource,
-    hasExplicitThreadId: Boolean(config.activeThreadId && config.hasExplicitThreadId),
-  };
 }
 
 function AssistantMessageWithTerminalToolbar(props: CopilotChatAssistantMessageProps) {

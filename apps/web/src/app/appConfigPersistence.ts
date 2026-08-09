@@ -62,6 +62,21 @@ export function writePersistedAppConfig(agentId: string, config: PersistedAppCon
   }
 }
 
+export function normalizeInitialAppConfig(
+  config: PersistedAppConfig,
+  createThreadId: () => string = () => crypto.randomUUID(),
+): PersistedAppConfig & { activeThreadId: string } {
+  const activeThreadId = config.activeThreadId ?? createThreadId();
+  return {
+    ...config,
+    activeThreadId,
+    // The UI owns every thread id, including newly generated ids. Marking one
+    // as implicit lets CopilotKit replace it, splitting sidebar metadata from
+    // the runtime event log and making the conversation impossible to reopen.
+    hasExplicitThreadId: true,
+  };
+}
+
 function isStoredAppConfig(value: unknown): value is StoredAppConfigPayload["config"] {
   if (!value || typeof value !== "object") {
     return false;

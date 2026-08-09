@@ -1,5 +1,6 @@
 import { useAgent, UseAgentUpdate } from "@copilotkit/react-core/v2";
 import { useEffect, useRef } from "react";
+import { ThreadActivityGate } from "./threadActivityGate";
 
 type AgentMessage = ReturnType<typeof useAgent>["agent"]["messages"][number];
 
@@ -18,17 +19,23 @@ export function ThreadLifecycleSync({ agentId, onThreadActivity, threadId }: Thr
     agentId,
     updates: [UseAgentUpdate.OnMessagesChanged],
   });
-  const reportedThreadRef = useRef<string | null>(null);
+  const activityGateRef = useRef<ThreadActivityGate | null>(null);
+  activityGateRef.current ??= new ThreadActivityGate();
 
   useEffect(() => {
     // During a thread switch the shared agent can briefly still expose the
     // previous thread's messages. Wait until CopilotKit has applied the new id
     // before promoting it, otherwise an empty thread inherits old metadata.
-    if (agent.threadId !== threadId || agent.messages.length === 0 || reportedThreadRef.current === threadId) {
+    if (
+      !activityGateRef.current?.shouldReport({
+        agentThreadId: agent.threadId,
+        messages: agent.messages,
+        selectedThreadId: threadId,
+      })
+    ) {
       return;
     }
 
-    reportedThreadRef.current = threadId;
     onThreadActivity(threadId, firstUserMessageTitle(agent.messages));
   }, [agent.messages, agent.threadId, onThreadActivity, threadId]);
 
