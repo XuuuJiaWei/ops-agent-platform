@@ -4,9 +4,8 @@ import {
   CopilotChatConfigurationProvider,
   type CopilotChatAssistantMessageProps,
 } from "@copilotkit/react-core/v2";
-import { LayoutDashboard, MessageSquareText, PanelLeftOpen } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { AgentNativeAppView } from "./AgentNativeAppView";
+import { Layers3, MessageSquareText, PanelLeftOpen } from "lucide-react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { ThreadLifecycleSync } from "./ThreadLifecycleSync";
 import { ThreadSidebar } from "./ThreadSidebar";
 import {
@@ -23,7 +22,10 @@ type AppShellProps = {
   env: BrowserEnv;
 };
 
-type MainView = "chat" | "app";
+type MainView = "chat" | "spaces";
+const AgentNativeAppView = lazy(() =>
+  import("./AgentNativeAppView").then((module) => ({ default: module.AgentNativeAppView })),
+);
 const viewSwitcherFrameClass = import.meta.env.DEV ? "relative z-[2147483647] ml-auto mr-14" : "relative z-40 ml-auto";
 const chatMessageView = {
   assistantMessage: Object.assign(AssistantMessageWithTerminalToolbar, {
@@ -46,6 +48,7 @@ export function AppShell({ env }: AppShellProps) {
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(initialConfig.desktopSidebarOpen);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [mainView, setMainView] = useState<MainView>(initialConfig.mainView);
+  const [spacesMounted, setSpacesMounted] = useState(initialConfig.mainView === "spaces");
   const threadsState = useConversationThreads({ agentId: env.assistantId });
   const { setThreadTitle, touchThread } = threadsState;
 
@@ -96,6 +99,7 @@ export function AppShell({ env }: AppShellProps) {
       setHasExplicitThreadId(nextConfig.hasExplicitThreadId);
       setDesktopSidebarOpen(nextConfig.desktopSidebarOpen);
       setMainView(nextConfig.mainView);
+      if (nextConfig.mainView === "spaces") setSpacesMounted(true);
     }
 
     window.addEventListener("storage", handleStorage);
@@ -133,6 +137,11 @@ export function AppShell({ env }: AppShellProps) {
     setMobileSidebarOpen(true);
   }
 
+  function changeMainView(view: MainView) {
+    setMainView(view);
+    if (view === "spaces") setSpacesMounted(true);
+  }
+
   return (
     <CopilotChatConfigurationProvider
       agentId={env.assistantId}
@@ -143,8 +152,8 @@ export function AppShell({ env }: AppShellProps) {
       <main className="flex h-dvh min-h-screen bg-[var(--surface-page)]">
         <ThreadSidebar
           activeThreadId={activeThreadId}
-          isDesktopOpen={desktopSidebarOpen}
-          isMobileOpen={mobileSidebarOpen}
+          isDesktopOpen={desktopSidebarOpen && mainView === "chat"}
+          isMobileOpen={mobileSidebarOpen && mainView === "chat"}
           onCloseDesktop={() => setDesktopSidebarOpen(false)}
           onCloseMobile={() => setMobileSidebarOpen(false)}
           onDeleteThread={deleteThread}
@@ -156,7 +165,7 @@ export function AppShell({ env }: AppShellProps) {
 
         <section className="flex min-w-0 flex-1 flex-col bg-white">
           <header className="flex h-14 shrink-0 items-center gap-3 border-b border-[var(--border-subtle)] px-3 md:px-4">
-            <button
+            {mainView === "chat" ? <button
               aria-label="Open sidebar"
               className={`hidden size-9 items-center justify-center rounded-md border border-[var(--border-subtle)] text-[var(--text-secondary)] hover:bg-[var(--surface-muted)] hover:text-[var(--text-primary)] ${
                 desktopSidebarOpen ? "md:hidden" : "md:inline-flex"
@@ -166,25 +175,25 @@ export function AppShell({ env }: AppShellProps) {
               type="button"
             >
               <PanelLeftOpen aria-hidden="true" className="size-4" />
-            </button>
+            </button> : null}
             <div className="min-w-0 pl-10 md:pl-0">
-              <p className="truncate text-sm font-semibold text-[var(--text-primary)]">Support Desk</p>
+              <p className="truncate text-sm font-semibold text-[var(--text-primary)]">{mainView === "chat" ? "Support Desk" : "Spaces"}</p>
               <p className="truncate font-mono text-[11px] text-[var(--text-secondary)]">
-                {hasExplicitThreadId ? activeThreadId : "new conversation"}
+                {mainView === "chat" ? (hasExplicitThreadId ? activeThreadId : "new conversation") : "agent-authored visual workspace"}
               </p>
             </div>
             <div className={viewSwitcherFrameClass}>
-              <ViewSwitcher value={mainView} onChange={setMainView} />
+              <ViewSwitcher value={mainView} onChange={changeMainView} />
             </div>
           </header>
 
-          <div className="min-h-0 flex-1">
+          <div className="relative min-h-0 flex-1">
             {/* Keep both views mounted and toggle visibility with `hidden` so
                 neither loses state when switching tabs: the Chat keeps its
-                in-progress conversation/input, and the App view keeps its live
+                in-progress conversation/input, and the Spaces view keeps its live
                 agent-state subscription. Unmounting either (e.g. conditional
                 render) discards that state. */}
-            <div className={mainView === "chat" ? "h-full" : "hidden"}>
+            <div aria-hidden={mainView !== "chat"} className={mainView === "chat" ? "h-full" : "invisible absolute inset-0 h-full"} inert={mainView !== "chat"}>
               <CopilotChat className="h-full" messageView={chatMessageView} />
             </div>
             <ThreadLifecycleSync
@@ -192,9 +201,13 @@ export function AppShell({ env }: AppShellProps) {
               onThreadActivity={handleThreadActivity}
               threadId={activeThreadId}
             />
-            <div className={mainView === "app" ? "h-full" : "hidden"}>
-              <AgentNativeAppView activeThreadId={activeThreadId} env={env} />
-            </div>
+            {spacesMounted ? (
+              <div aria-hidden={mainView !== "spaces"} className={mainView === "spaces" ? "h-full" : "invisible absolute inset-0 h-full"} inert={mainView !== "spaces"}>
+                <Suspense fallback={<div className="h-full animate-pulse bg-slate-50" />}>
+                  <AgentNativeAppView activeThreadId={activeThreadId} env={env} />
+                </Suspense>
+              </div>
+            ) : null}
           </div>
         </section>
       </main>
@@ -241,7 +254,7 @@ function ViewSwitcher({ onChange, value }: { onChange: (view: MainView) => void;
       role="tablist"
     >
       <ViewSwitchButton active={value === "chat"} icon={<MessageSquareText aria-hidden="true" className="size-4" />} label="Chat" onClick={() => onChange("chat")} />
-      <ViewSwitchButton active={value === "app"} icon={<LayoutDashboard aria-hidden="true" className="size-4" />} label="App" onClick={() => onChange("app")} />
+      <ViewSwitchButton active={value === "spaces"} icon={<Layers3 aria-hidden="true" className="size-4" />} label="Spaces" onClick={() => onChange("spaces")} />
     </div>
   );
 }

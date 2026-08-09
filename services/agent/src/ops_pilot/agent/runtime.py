@@ -16,6 +16,7 @@ from ops_pilot.observability.metadata import build_model_metadata, build_runnabl
 from ops_pilot.sandbox import SandboxManager, SandboxRuntime, create_sandbox_manager
 from ops_pilot.skills.resolver import resolve_skill_paths
 from ops_pilot.skills.sync import sync_skill_paths_to_backend
+from ops_pilot.spaces import MemorySpaceRepository, SpaceRepository, build_space_tools, create_space_repository
 from ops_pilot.tools.smoke_tools import get_smoke_tools
 
 if TYPE_CHECKING:
@@ -33,6 +34,8 @@ class AgentRuntime:
     sandbox: SandboxManager | SandboxRuntime | None = None
     model_metadata: dict[str, Any] = field(default_factory=dict)
     checkpointer_closer: Callable[[], Awaitable[None]] | None = None
+    spaces: SpaceRepository = field(default_factory=MemorySpaceRepository)
+    space_repository_closer: Callable[[], Awaitable[None]] | None = None
 
     def close(self) -> None:
         if self.sandbox is not None:
@@ -46,7 +49,11 @@ class AgentRuntime:
                 if self.checkpointer_closer is not None:
                     await self.checkpointer_closer()
             finally:
-                self.close()
+                try:
+                    if self.space_repository_closer is not None:
+                        await self.space_repository_closer()
+                finally:
+                    self.close()
 
     def runnable_config(
         self,
@@ -155,13 +162,15 @@ async def build_agent_runtime(
     local_skills = tuple(resolve_skill_paths(resolved_settings))
     tracing = create_callback_handler(resolved_settings)
 
-    tools = list(mcp_registry.tools)
-    if resolved_settings.enable_smoke_tools:
-        tools.extend(get_smoke_tools())
-
     sandbox: SandboxManager | None = None
     checkpointer_closer: Callable[[], Awaitable[None]] | None = None
+    space_repository: SpaceRepository | None = None
+    space_repository_closer: Callable[[], Awaitable[None]] | None = None
     try:
+        space_repository, space_repository_closer = await create_space_repository(resolved_settings)
+        tools = [*mcp_registry.tools, *build_space_tools(space_repository)]
+        if resolved_settings.enable_smoke_tools:
+            tools.extend(get_smoke_tools())
         checkpointer, checkpointer_closer = (
             await _create_checkpointer(resolved_settings) if attach_checkpointer else (None, None)
         )
@@ -172,7 +181,7 @@ async def build_agent_runtime(
             model=model,
             tools=tools,
             skills=list(skills),
-            system_prompt=resolved_settings.configured_system_prompt(),
+            system_prompt=_system_prompt(resolved_settings.configured_system_prompt()),
             tracing=tracing,
             checkpointer=checkpointer,
             backend=sandbox.backend if sandbox is not None else None,
@@ -182,9 +191,12 @@ async def build_agent_runtime(
         await mcp_registry.aclose()
         if checkpointer_closer is not None:
             await checkpointer_closer()
+        if space_repository_closer is not None:
+            await space_repository_closer()
         if sandbox is not None:
             sandbox.close()
         raise
+    assert space_repository is not None
     return AgentRuntime(
         graph=graph,
         settings=resolved_settings,
@@ -195,7 +207,20 @@ async def build_agent_runtime(
         sandbox=sandbox,
         model_metadata=model_metadata,
         checkpointer_closer=checkpointer_closer,
+        spaces=space_repository,
+        space_repository_closer=space_repository_closer,
     )
+
+
+def _system_prompt(configured_prompt: str | None) -> str:
+    spaces_prompt = """You can create agent-native visual experiences with Space tools.
+Use render_ui for a transient card that belongs in the current conversation.
+Use create_space and the card-in-space tools when the user wants a persistent dashboard.
+Before changing an existing Space, use list_spaces or get_space when you do not already have its current ids.
+Cards are declarative data: choose the card type that best communicates the result and keep labels concise."""
+    if configured_prompt:
+        return f"{configured_prompt}\n\n{spaces_prompt}"
+    return spaces_prompt
 
 
 def _resolve_backend_skill_paths(

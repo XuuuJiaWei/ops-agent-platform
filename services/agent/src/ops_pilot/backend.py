@@ -17,6 +17,7 @@ from ops_pilot.agui.resilient import create_resilient_agui_agent
 from ops_pilot.api.errors import register_exception_handlers
 from ops_pilot.config.settings import Settings, get_settings
 from ops_pilot.health.app import router as health_router
+from ops_pilot.spaces.api import create_spaces_router
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -112,6 +113,7 @@ async def create_backend_app(
     register_exception_handlers(app)
     app.state.agent_runtime_manager = runtime_manager
     app.include_router(health_router)
+    app.include_router(create_spaces_router(lambda: runtime_manager.current.spaces))
 
     @app.get("/status")
     async def runtime_status() -> dict[str, Any]:

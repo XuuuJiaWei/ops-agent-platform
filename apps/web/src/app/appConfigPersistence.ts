@@ -1,4 +1,4 @@
-export type PersistedMainView = "chat" | "app";
+export type PersistedMainView = "chat" | "spaces";
 export type PersistedThreadSource = "copilot" | "local";
 
 export type PersistedAppConfig = {
@@ -9,11 +9,11 @@ export type PersistedAppConfig = {
   mainView: PersistedMainView;
 };
 
-const STORAGE_VERSION = 2;
+const STORAGE_VERSION = 3;
 
 type StoredAppConfigPayload = {
-  version: typeof STORAGE_VERSION;
-  config: PersistedAppConfig;
+  version: number;
+  config: Omit<PersistedAppConfig, "mainView"> & { mainView: PersistedMainView | "app" };
 };
 
 const defaultAppConfig: PersistedAppConfig = {
@@ -40,11 +40,11 @@ export function readPersistedAppConfig(agentId: string): PersistedAppConfig {
     }
 
     const parsed = JSON.parse(raw) as Partial<StoredAppConfigPayload>;
-    if (parsed.version !== STORAGE_VERSION || !isPersistedAppConfig(parsed.config)) {
+    if ((parsed.version !== 2 && parsed.version !== STORAGE_VERSION) || !isStoredAppConfig(parsed.config)) {
       return defaultAppConfig;
     }
 
-    return parsed.config;
+    return { ...parsed.config, mainView: parsed.config.mainView === "app" ? "spaces" : parsed.config.mainView };
   } catch {
     return defaultAppConfig;
   }
@@ -62,7 +62,7 @@ export function writePersistedAppConfig(agentId: string, config: PersistedAppCon
   }
 }
 
-function isPersistedAppConfig(value: unknown): value is PersistedAppConfig {
+function isStoredAppConfig(value: unknown): value is StoredAppConfigPayload["config"] {
   if (!value || typeof value !== "object") {
     return false;
   }
@@ -73,6 +73,6 @@ function isPersistedAppConfig(value: unknown): value is PersistedAppConfig {
     (candidate.activeThreadSource === "copilot" || candidate.activeThreadSource === "local") &&
     typeof candidate.desktopSidebarOpen === "boolean" &&
     typeof candidate.hasExplicitThreadId === "boolean" &&
-    (candidate.mainView === "chat" || candidate.mainView === "app")
+    (candidate.mainView === "chat" || candidate.mainView === "spaces" || candidate.mainView === "app")
   );
 }

@@ -37,6 +37,10 @@ export default defineConfig(({ mode }) => {
           target: a2aApiUrl,
           changeOrigin: true,
         },
+        "/spaces": {
+          target: backendUrl,
+          changeOrigin: true,
+        },
       },
     },
     preview: {
