@@ -7,11 +7,12 @@
 
 :root {
   color-scheme: light;
-  --surface-page: #f4f6f8;
+  --surface-page: #f6f7f9;
   --surface-panel: #ffffff;
-  --surface-muted: #eef2f5;
+  --surface-chat: #fbfbfc;
+  --surface-muted: #f1f3f5;
   --surface-strong: #17202a;
-  --border-subtle: #d5dde5;
+  --border-subtle: #e2e6ea;
   --border-strong: #9ba8b5;
   --text-primary: #17202a;
   --text-secondary: #53616f;

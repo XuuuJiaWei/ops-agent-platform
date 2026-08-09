@@ -34,7 +34,7 @@ type SpaceCardViewProps = {
 export function SpaceCardView({ card, compact = false }: SpaceCardViewProps) {
   return (
     <article className="flex h-full min-h-44 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
-      <header className="flex shrink-0 items-start gap-3 border-b border-slate-100 px-5 py-4">
+      <header className="flex shrink-0 items-start gap-3 border-b border-slate-100 px-5 py-3">
         <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg bg-blue-50 text-blue-700">
           <CardIcon type={card.type} />
         </span>
@@ -43,7 +43,7 @@ export function SpaceCardView({ card, compact = false }: SpaceCardViewProps) {
           {card.subtitle ? <p className="mt-0.5 line-clamp-2 text-xs leading-5 text-slate-500">{card.subtitle}</p> : null}
         </div>
       </header>
-      <div className={`min-h-0 flex-1 ${compact ? "p-4" : "p-5"}`}>
+      <div className="min-h-0 flex-1 overflow-auto p-4">
         <CardContent card={card} compact={compact} />
       </div>
     </article>
@@ -71,16 +71,16 @@ function CardContent({ card, compact }: { card: CardDraft | SpaceCard; compact: 
 
 function KpiContent({ card }: { card: CardDraft | SpaceCard }) {
   return (
-    <div className="grid h-full grid-cols-2 content-center gap-x-5 gap-y-6">
+    <div className="grid grid-cols-2 gap-x-5 gap-y-3">
       {card.content.metrics.map((metric) => (
         <div key={metric.label} className="min-w-0">
           <div className="flex items-baseline gap-1.5">
             <span className="truncate text-3xl font-medium tracking-tight text-slate-950">{metric.value}</span>
             {metric.unit ? <span className="text-sm text-slate-500">{metric.unit}</span> : null}
           </div>
-          <p className="mt-1 truncate text-xs text-slate-500">{metric.label}</p>
+          <p className="mt-0.5 truncate text-xs text-slate-500">{metric.label}</p>
           {metric.trend ? (
-            <p className={`mt-2 flex items-center gap-1 text-xs font-medium ${trendClass(metric.trend_direction)}`}>
+            <p className={`mt-1 flex items-center gap-1 text-xs font-medium ${trendClass(metric.trend_direction)}`}>
               <TrendIcon direction={metric.trend_direction} />
               {metric.trend}
             </p>
@@ -106,7 +106,7 @@ function trendClass(direction: "up" | "down" | "neutral" | null | undefined) {
 
 function TableContent({ card }: { card: CardDraft | SpaceCard }) {
   return (
-    <div className="h-full overflow-auto">
+    <div className="max-h-full overflow-auto">
       <table className="w-full border-separate border-spacing-0 text-left text-xs">
         <thead className="sticky top-0 bg-white text-slate-500">
           <tr>

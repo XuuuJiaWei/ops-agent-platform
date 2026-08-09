@@ -1,17 +1,19 @@
-import { LayoutGrid, MessageSquareText, RefreshCw, Sparkles } from "lucide-react";
+import { LayoutGrid, MessageSquareText, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
 import { getSpace, listSpaces } from "@/spaces/api";
 import { SPACES_CHANGED_EVENT } from "@/spaces/events";
 import { SpaceGrid } from "@/spaces/SpaceGrid";
 import type { BrowserEnv } from "@/lib/env";
+import { WorkspaceNavigation, type MainView } from "./WorkspaceNavigation";
 
 type AgentNativeAppViewProps = {
   activeThreadId: string | undefined;
   env: BrowserEnv;
+  onViewChange: (view: MainView) => void;
 };
 
-export function AgentNativeAppView({ activeThreadId, env }: AgentNativeAppViewProps) {
+export function AgentNativeAppView({ activeThreadId, env, onViewChange }: AgentNativeAppViewProps) {
   const storageKey = useMemo(() => `ops-agent-platform:selected-space:${env.assistantId}`, [env.assistantId]);
   const [selectedSpaceId, setSelectedSpaceId] = useState<string | undefined>(() => readSelectedSpace(storageKey));
   const summariesQuery = useSWR(["spaces", env.backendUrl], () => listSpaces(env));
@@ -42,40 +44,38 @@ export function AgentNativeAppView({ activeThreadId, env }: AgentNativeAppViewPr
   }
 
   return (
-    <div className="flex h-full min-h-0 bg-slate-50">
-      <aside className="hidden w-64 shrink-0 border-r border-slate-200 bg-white lg:flex lg:flex-col">
-        <div className="border-b border-slate-100 px-5 py-5">
-          <div className="flex items-center gap-2 text-sm font-semibold text-slate-950">
-            <span className="grid size-8 place-items-center rounded-lg bg-gradient-to-br from-blue-600 to-violet-600 text-white shadow-sm">
-              <Sparkles aria-hidden="true" className="size-4" />
-            </span>
-            Spaces
-          </div>
-          <p className="mt-2 text-xs leading-5 text-slate-500">Persistent visual workspaces assembled with the agent.</p>
+    <div className="flex h-full min-h-0 bg-[var(--surface-page)]">
+      <aside className="hidden w-72 shrink-0 border-r border-slate-200 bg-slate-50 lg:flex lg:flex-col">
+        <WorkspaceNavigation onChange={onViewChange} value="spaces" />
+        <div className="mx-3 my-4 h-px bg-slate-200" />
+        <div className="flex items-center justify-between px-4 pb-2">
+          <h2 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">Your spaces</h2>
+          <span className="text-[11px] tabular-nums text-slate-400">{summaries.length}</span>
         </div>
-        <nav aria-label="Spaces" className="min-h-0 flex-1 space-y-1 overflow-y-auto p-3">
+        <nav aria-label="Spaces" className="min-h-0 flex-1 space-y-1 overflow-y-auto px-2 pb-3 [scrollbar-width:thin]">
           {summaries.map((summary) => (
             <button
-              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition ${
-                effectiveSpaceId === summary.id ? "bg-blue-50 text-blue-800" : "text-slate-600 hover:bg-slate-50 hover:text-slate-950"
+              className={`relative flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition ${
+                effectiveSpaceId === summary.id ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-200/80" : "text-slate-600 hover:bg-white/70 hover:text-slate-950"
               }`}
               key={summary.id}
               onClick={() => selectSpace(summary.id)}
               type="button"
             >
-              <LayoutGrid aria-hidden="true" className="size-4 shrink-0" />
+              {effectiveSpaceId === summary.id ? <span aria-hidden="true" className="absolute inset-y-2 left-0 w-0.5 rounded-r bg-blue-600" /> : null}
+              <LayoutGrid aria-hidden="true" className="size-4 shrink-0 text-slate-400" />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-sm font-medium">{summary.name}</span>
-                <span className="block text-[11px] opacity-70">{summary.card_count} cards</span>
+                <span className="block text-[11px] text-slate-400">{summary.card_count} {summary.card_count === 1 ? "card" : "cards"}</span>
               </span>
             </button>
           ))}
         </nav>
-        <div className="border-t border-slate-100 p-4 text-[11px] leading-5 text-slate-400">Spaces change when the agent completes a Space tool.</div>
+        <div className="border-t border-slate-200 px-4 py-3 text-[11px] leading-5 text-slate-400">The agent keeps Spaces up to date as it works.</div>
       </aside>
 
       <section className="min-w-0 flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-[1480px] px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
+        <div className="mx-auto w-full max-w-[1360px] px-4 py-5 sm:px-6 lg:px-8 lg:py-8">
           <div className="mb-6 flex items-start justify-between gap-4">
             <div className="min-w-0">
               <div className="mb-3 flex gap-2 overflow-x-auto lg:hidden">
@@ -92,7 +92,7 @@ export function AgentNativeAppView({ activeThreadId, env }: AgentNativeAppViewPr
                   </button>
                 ))}
               </div>
-              <h1 className="truncate text-xl font-semibold tracking-tight text-slate-950 sm:text-2xl">{space?.name ?? "Spaces"}</h1>
+              <h1 className="truncate text-xl font-semibold tracking-[-0.02em] text-slate-950 sm:text-2xl">{space?.name ?? "Spaces"}</h1>
               <p className="mt-1 text-sm text-slate-500">
                 {space?.description ?? (summaries.length ? "Select a visual workspace" : "Create your first visual workspace with the agent")}
               </p>

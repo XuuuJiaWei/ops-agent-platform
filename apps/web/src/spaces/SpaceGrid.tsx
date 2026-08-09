@@ -7,6 +7,9 @@ type Breakpoint = "lg" | "md" | "sm" | "xs";
 
 const breakpoints: Record<Breakpoint, number> = { lg: 1200, md: 820, sm: 560, xs: 0 };
 const columns: Record<Breakpoint, number> = { lg: 12, md: 8, sm: 4, xs: 2 };
+const gridGap: [number, number] = [12, 12];
+const gridRowHeight = 48;
+const markdownCharactersPerHeightUnit: Record<Breakpoint, number> = { lg: 320, md: 240, sm: 160, xs: 100 };
 
 export function SpaceGrid({ cards }: { cards: SpaceCard[] }) {
   const { containerRef, mounted, width } = useContainerWidth({ measureBeforeMount: true });
@@ -26,9 +29,9 @@ export function SpaceGrid({ cards }: { cards: SpaceCard[] }) {
           containerPadding={[0, 0]}
           dragConfig={{ enabled: false }}
           layouts={layouts}
-          margin={[16, 16]}
+          margin={gridGap}
           resizeConfig={{ enabled: false }}
-          rowHeight={64}
+          rowHeight={gridRowHeight}
           width={width}
         >
           {cards.map((card) => (
@@ -50,7 +53,7 @@ function buildLayout(cards: SpaceCard[], breakpoint: Breakpoint): Layout {
 
   return cards.map((card) => {
     const w = cardWidth(card.size, breakpoint);
-    const h = cardHeight(card);
+    const h = cardHeight(card, breakpoint);
     if (x + w > cols) {
       x = 0;
       y += rowHeight;
@@ -77,10 +80,30 @@ function cardWidth(size: CardSize, breakpoint: Breakpoint) {
   return 12;
 }
 
-function cardHeight(card: SpaceCard) {
-  if (card.type === "kpi") return card.content.metrics.length > 4 ? 4 : 3;
-  if (card.type === "line-chart" || card.type === "bar-chart") return 5;
-  if (card.type === "table") return 5;
-  if (card.type === "object-list") return Math.min(6, Math.max(3, card.content.items.length + 1));
-  return 4;
+function cardHeight(card: SpaceCard, breakpoint: Breakpoint) {
+  if (card.type === "kpi") {
+    const metricRows = Math.ceil(card.content.metrics.length / 2);
+    return clampGridRows(metricRows + 3, 4, 8);
+  }
+  if (card.type === "line-chart" || card.type === "bar-chart") return 6;
+  if (card.type === "table") {
+    return clampGridRows(Math.ceil(card.content.rows.length / 3) + 3, 4, 7);
+  }
+  if (card.type === "details") {
+    const fieldColumns = breakpoint === "xs" || breakpoint === "sm" ? 1 : 2;
+    const fieldRows = Math.ceil(card.content.fields.length / fieldColumns);
+    return clampGridRows(fieldRows + (fieldColumns === 1 ? 1 : 2), 4, 10);
+  }
+  if (card.type === "object-list") {
+    return clampGridRows(Math.ceil(card.content.items.length * 0.9) + 3, 4, 8);
+  }
+  if (card.type === "markdown") {
+    const charactersPerHeightUnit = markdownCharactersPerHeightUnit[breakpoint];
+    return clampGridRows(Math.ceil((card.content.markdown?.length ?? 0) / charactersPerHeightUnit) + 3, 4, 12);
+  }
+  return 5;
+}
+
+function clampGridRows(value: number, minimum: number, maximum: number) {
+  return Math.min(maximum, Math.max(minimum, value));
 }

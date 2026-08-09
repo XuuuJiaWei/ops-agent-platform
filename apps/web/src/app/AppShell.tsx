@@ -16,18 +16,18 @@ import {
   type PersistedThreadSource,
 } from "./appConfigPersistence";
 import { createConversationThreadId, useConversationThreads } from "./conversationThreads";
+import type { MainView } from "./WorkspaceNavigation";
 import type { BrowserEnv } from "@/lib/env";
 
 type AppShellProps = {
   env: BrowserEnv;
 };
 
-type MainView = "chat" | "spaces";
 const AgentNativeAppView = lazy(() =>
   import("./AgentNativeAppView").then((module) => ({ default: module.AgentNativeAppView })),
 );
-const viewSwitcherFrameClass = import.meta.env.DEV ? "relative z-[2147483647] ml-auto mr-14" : "relative z-40 ml-auto";
 const chatMessageView = {
+  className: "!bg-transparent",
   assistantMessage: Object.assign(AssistantMessageWithTerminalToolbar, {
     CopyButton: CopilotChatAssistantMessage.CopyButton,
     MarkdownRenderer: CopilotChatAssistantMessage.MarkdownRenderer,
@@ -51,6 +51,7 @@ export function AppShell({ env }: AppShellProps) {
   const [spacesMounted, setSpacesMounted] = useState(initialConfig.mainView === "spaces");
   const threadsState = useConversationThreads({ agentId: env.assistantId });
   const { setThreadTitle, touchThread } = threadsState;
+  const activeThread = threadsState.threads.find((thread) => thread.id === activeThreadId);
 
   const handleThreadActivity = useCallback(
     (threadId: string, titleCandidate?: string) => {
@@ -67,8 +68,8 @@ export function AppShell({ env }: AppShellProps) {
 
   const chatLabels = useMemo(
     () => ({
-      chatInputPlaceholder: "Ask me anything...",
-      welcomeMessageText: "Hello! What can I do for you?",
+      chatInputPlaceholder: "Ask about your systems…",
+      welcomeMessageText: "What would you like to investigate?",
     }),
     [],
   );
@@ -139,6 +140,7 @@ export function AppShell({ env }: AppShellProps) {
 
   function changeMainView(view: MainView) {
     setMainView(view);
+    setMobileSidebarOpen(false);
     if (view === "spaces") setSpacesMounted(true);
   }
 
@@ -152,6 +154,7 @@ export function AppShell({ env }: AppShellProps) {
       <main className="flex h-dvh min-h-screen bg-[var(--surface-page)]">
         <ThreadSidebar
           activeThreadId={activeThreadId}
+          activeView={mainView}
           isDesktopOpen={desktopSidebarOpen && mainView === "chat"}
           isMobileOpen={mobileSidebarOpen && mainView === "chat"}
           onCloseDesktop={() => setDesktopSidebarOpen(false)}
@@ -160,41 +163,53 @@ export function AppShell({ env }: AppShellProps) {
           onNewThread={startNewThread}
           onSelectThread={selectThread}
           onToggleMobile={() => setMobileSidebarOpen((open) => !open)}
+          onViewChange={changeMainView}
           threadsState={threadsState}
         />
 
-        <section className="flex min-w-0 flex-1 flex-col bg-white">
-          <header className="flex h-14 shrink-0 items-center gap-3 border-b border-[var(--border-subtle)] px-3 md:px-4">
-            {mainView === "chat" ? <button
-              aria-label="Open sidebar"
-              className={`hidden size-9 items-center justify-center rounded-md border border-[var(--border-subtle)] text-[var(--text-secondary)] hover:bg-[var(--surface-muted)] hover:text-[var(--text-primary)] ${
-                desktopSidebarOpen ? "md:hidden" : "md:inline-flex"
-              }`}
-              onClick={openSidebar}
-              title="Open sidebar"
-              type="button"
-            >
-              <PanelLeftOpen aria-hidden="true" className="size-4" />
-            </button> : null}
+        <section className="flex min-w-0 flex-1 flex-col bg-[var(--surface-panel)]">
+          <header
+            className={`h-[60px] shrink-0 items-center gap-3 border-b border-slate-200 px-3 md:px-5 ${
+              mainView === "spaces" ? "flex lg:hidden" : "flex"
+            }`}
+          >
+            {mainView === "chat" ? (
+              <button
+                aria-label="Open navigation"
+                className={`hidden size-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-950 ${
+                  desktopSidebarOpen ? "md:hidden" : "md:inline-flex"
+                }`}
+                onClick={openSidebar}
+                title="Open navigation"
+                type="button"
+              >
+                <PanelLeftOpen aria-hidden="true" className="size-4" />
+              </button>
+            ) : null}
             <div className="min-w-0 pl-10 md:pl-0">
-              <p className="truncate text-sm font-semibold text-[var(--text-primary)]">{mainView === "chat" ? "Support Desk" : "Spaces"}</p>
-              <p className="truncate font-mono text-[11px] text-[var(--text-secondary)]">
-                {mainView === "chat" ? (hasExplicitThreadId ? activeThreadId : "new conversation") : "agent-authored visual workspace"}
+              <p className="truncate text-sm font-semibold tracking-[-0.01em] text-slate-950">
+                {mainView === "chat" ? activeThread?.name || "New chat" : "Spaces"}
               </p>
+              <p className="truncate text-[11px] text-slate-500">{mainView === "chat" ? "Conversation" : "Persistent visual workspaces"}</p>
             </div>
-            <div className={viewSwitcherFrameClass}>
-              <ViewSwitcher value={mainView} onChange={changeMainView} />
+            <div className="ml-2 lg:hidden">
+              <ViewSwitcher compact value={mainView} onChange={changeMainView} />
             </div>
           </header>
 
           <div className="relative min-h-0 flex-1">
-            {/* Keep both views mounted and toggle visibility with `hidden` so
+            {/* Keep both views mounted and toggle visibility so
                 neither loses state when switching tabs: the Chat keeps its
                 in-progress conversation/input, and the Spaces view keeps its live
                 agent-state subscription. Unmounting either (e.g. conditional
                 render) discards that state. */}
             <div aria-hidden={mainView !== "chat"} className={mainView === "chat" ? "h-full" : "invisible absolute inset-0 h-full"} inert={mainView !== "chat"}>
-              <CopilotChat className="h-full" messageView={chatMessageView} />
+              <CopilotChat
+                className="ops-chat h-full bg-[var(--surface-chat)]"
+                input="!bg-transparent"
+                messageView={chatMessageView}
+                scrollView="bg-[var(--surface-chat)]"
+              />
             </div>
             <ThreadLifecycleSync
               agentId={env.assistantId}
@@ -204,7 +219,7 @@ export function AppShell({ env }: AppShellProps) {
             {spacesMounted ? (
               <div aria-hidden={mainView !== "spaces"} className={mainView === "spaces" ? "h-full" : "invisible absolute inset-0 h-full"} inert={mainView !== "spaces"}>
                 <Suspense fallback={<div className="h-full animate-pulse bg-slate-50" />}>
-                  <AgentNativeAppView activeThreadId={activeThreadId} env={env} />
+                  <AgentNativeAppView activeThreadId={activeThreadId} env={env} onViewChange={changeMainView} />
                 </Suspense>
               </div>
             ) : null}
@@ -246,25 +261,26 @@ function isTerminalVisibleAssistantMessage({ message, messages }: CopilotChatAss
   return false;
 }
 
-function ViewSwitcher({ onChange, value }: { onChange: (view: MainView) => void; value: MainView }) {
+function ViewSwitcher({ compact = false, onChange, value }: { compact?: boolean; onChange: (view: MainView) => void; value: MainView }) {
   return (
     <div
       aria-label="Main view"
-      className="inline-grid h-10 grid-cols-2 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-muted)] p-1 shadow-sm"
+      className="inline-grid h-9 grid-cols-2 rounded-lg border border-slate-200 bg-slate-100 p-0.5"
       role="tablist"
     >
-      <ViewSwitchButton active={value === "chat"} icon={<MessageSquareText aria-hidden="true" className="size-4" />} label="Chat" onClick={() => onChange("chat")} />
-      <ViewSwitchButton active={value === "spaces"} icon={<Layers3 aria-hidden="true" className="size-4" />} label="Spaces" onClick={() => onChange("spaces")} />
+      <ViewSwitchButton active={value === "chat"} compact={compact} icon={<MessageSquareText aria-hidden="true" className="size-4" />} label="Chat" onClick={() => onChange("chat")} />
+      <ViewSwitchButton active={value === "spaces"} compact={compact} icon={<Layers3 aria-hidden="true" className="size-4" />} label="Spaces" onClick={() => onChange("spaces")} />
     </div>
   );
 }
 
-function ViewSwitchButton({ active, icon, label, onClick }: { active: boolean; icon: React.ReactNode; label: string; onClick: () => void }) {
+function ViewSwitchButton({ active, compact, icon, label, onClick }: { active: boolean; compact: boolean; icon: React.ReactNode; label: string; onClick: () => void }) {
   return (
     <button
       aria-selected={active}
-      className={`inline-flex h-8 min-w-20 items-center justify-center gap-2 rounded-md px-3 text-sm font-medium transition-colors ${
-        active ? "bg-white text-[var(--text-primary)] shadow-sm" : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+      aria-label={label}
+      className={`inline-flex h-8 items-center justify-center gap-2 rounded-md px-2 text-xs font-medium transition-colors ${compact ? "min-w-8 sm:min-w-16" : "min-w-20"} ${
+        active ? "bg-white text-slate-950 shadow-sm" : "text-slate-500 hover:text-slate-950"
       }`}
       onClick={onClick}
       role="tab"
@@ -272,7 +288,7 @@ function ViewSwitchButton({ active, icon, label, onClick }: { active: boolean; i
       type="button"
     >
       {icon}
-      {label}
+      <span className={compact ? "hidden sm:inline" : undefined}>{label}</span>
     </button>
   );
 }
