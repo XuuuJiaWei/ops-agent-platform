@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 import pytest
 
@@ -37,7 +38,7 @@ async def test_required_server_reports_missing_env_reference(monkeypatch) -> Non
 
 
 @pytest.mark.asyncio
-async def test_optional_server_records_missing_env_reference(monkeypatch) -> None:
+async def test_optional_server_records_and_logs_missing_env_reference(monkeypatch, caplog) -> None:
     monkeypatch.delenv("DT_MISSING_TOKEN", raising=False)
     config = MCPConfig.from_mapping(
         {
@@ -51,11 +52,13 @@ async def test_optional_server_records_missing_env_reference(monkeypatch) -> Non
         }
     )
 
-    result = await load_mcp_tools(config)
+    with caplog.at_level(logging.WARNING, logger="ops_pilot.mcp.loader"):
+        result = await load_mcp_tools(config)
 
     assert result.tools == []
     assert result.status.servers[0].ok is False
     assert "DT_MISSING_TOKEN" in result.status.servers[0].error
+    assert "Optional MCP server 'dyna' failed to load" in caplog.text
 
 
 @pytest.mark.asyncio

@@ -80,13 +80,21 @@ Start the full development stack:
 pnpm dev
 ```
 
-`pnpm dev` runs a preflight check, then starts the web app, unified backend, and CopilotKit Runtime. The web process waits for the Copilot runtime and backend health endpoints before Vite starts, so the browser does not call `/api/copilotkit` before the runtime is ready.
+`pnpm dev` uses the single `scripts/dev.mjs` orchestrator to resolve backend settings once, run the preflight, and start the web app, unified backend, and CopilotKit Runtime. The web process waits for the Copilot runtime and backend health endpoints before Vite starts, so the browser does not call `/api/copilotkit` before the runtime is ready.
 
 | Process | Script | Default command |
 | --- | --- | --- |
-| Frontend | `pnpm run dev:web` | `pnpm --filter "./apps/web" dev` |
+| Frontend | `pnpm run dev:web` | `pnpm --filter "./apps/web" dev:vite` after readiness checks |
 | Backend | `pnpm run dev:backend` | `uv run ops_pilot serve --host 127.0.0.1 --port 8123` from `services/agent` |
 | Copilot runtime | `pnpm run dev:copilot` | `pnpm --filter "./apps/copilot-runtime" dev` |
+
+After backend startup, inspect the effective MCP server and tool registry without invoking the model:
+
+```bash
+curl -fsS http://127.0.0.1:8123/status | jq '.mcp'
+```
+
+Optional MCP failures are logged during startup and are also reported by this endpoint.
 
 The Vite development server proxies `/api/copilotkit/*` to the Copilot runtime and `/a2a/*` to the unified backend.
 

@@ -153,8 +153,8 @@ ops-agent-platform/
         SKILL.md
 
   scripts/
-    dev-check.sh
-    smoke-local.sh
+    dev.mjs
+    dev-langgraph.sh
 
   docs/
     design/

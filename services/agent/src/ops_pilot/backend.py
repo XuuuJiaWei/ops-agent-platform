@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -16,6 +17,8 @@ from ops_pilot.agui.resilient import create_resilient_agui_agent
 from ops_pilot.api.errors import register_exception_handlers
 from ops_pilot.config.settings import Settings, get_settings
 from ops_pilot.health.app import router as health_router
+
+logger = logging.getLogger("uvicorn.error")
 
 
 async def create_backend_app(
@@ -84,6 +87,11 @@ async def create_backend_app(
         try:
             if runtime is None:
                 runtime_manager.attach_runtime(await create_agent_runtime_async(resolved_settings))
+            mcp_status = runtime_manager.current.mcp.status
+            server_summary = ", ".join(
+                f"{server.name}={'ok' if server.ok else 'failed'}({server.tool_count})" for server in mcp_status.servers
+            )
+            logger.info("MCP runtime ready: %s; %d tools", server_summary or "no servers", mcp_status.tool_count)
             if not getattr(app.state, "protocol_routes_mounted", False):
                 task_store, task_store_closer = await create_task_store(resolved_settings)
                 app.state.a2a_task_store_closer = task_store_closer
@@ -104,4 +112,9 @@ async def create_backend_app(
     register_exception_handlers(app)
     app.state.agent_runtime_manager = runtime_manager
     app.include_router(health_router)
+
+    @app.get("/status")
+    async def runtime_status() -> dict[str, Any]:
+        return runtime_manager.status().as_dict()
+
     return app

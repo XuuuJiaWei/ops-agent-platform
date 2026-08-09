@@ -3,10 +3,13 @@ from fastapi.testclient import TestClient
 
 from ops_pilot.backend import create_backend_app
 from ops_pilot.config.settings import load_settings
+from ops_pilot.mcp.status import MCPLoadStatus
 
 
 class DummyRuntime:
     graph = object()
+    mcp = type("MCP", (), {"status": MCPLoadStatus()})()
+    tools = ()
 
     def runnable_config(self, **_: object) -> dict:
         return {}
@@ -65,6 +68,9 @@ async def test_unified_backend_mounts_chat_a2a_and_health_routes(monkeypatch) ->
         assert "/a2a/jsonrpc" in paths
         assert "/a2a/.well-known/agent-card.json" in paths
         assert client.get("/health").status_code == 200
+        status = client.get("/status")
+        assert status.status_code == 200
+        assert status.json()["mcp"]["tool_count"] == 0
 
 
 @pytest.mark.asyncio

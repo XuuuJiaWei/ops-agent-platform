@@ -107,6 +107,7 @@ async def _load_from_config(config: MCPConfig, *, config_path: str | None) -> MC
                 raise RequiredMCPServerError(
                     f"Required MCP server '{server.name}' failed to load: {status.error}"
                 ) from exc
+            logger.warning("Optional MCP server '%s' failed to load: %s", server.name, status.error)
             continue
 
         server_tools, owner = _unpack_server_load_result(result)
@@ -127,10 +128,18 @@ async def _load_from_config(config: MCPConfig, *, config_path: str | None) -> MC
                 tool_count=len(kept_tools),
             )
         )
+        logger.info("MCP server '%s' loaded %d tools", server.name, len(kept_tools))
 
+    status = MCPLoadStatus(config_path=config_path, servers=tuple(statuses))
+    logger.info(
+        "MCP runtime loaded %d/%d servers with %d tools",
+        sum(server.ok for server in statuses),
+        len(statuses),
+        status.tool_count,
+    )
     return MCPLoadResult(
         tools=tools,
-        status=MCPLoadStatus(config_path=config_path, servers=tuple(statuses)),
+        status=status,
         hitl_tools=tuple(dict.fromkeys(hitl_tools)),
         session_managers=tuple(session_managers),
     )
