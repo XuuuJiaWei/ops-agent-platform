@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import pytest
+
 from ops_pilot.agent.runtime import AgentRuntime
 from ops_pilot.config.settings import load_settings
 
@@ -37,3 +39,34 @@ def test_runnable_config_does_not_invent_recursion_limit_when_graph_has_no_bound
     config = runtime.runnable_config(protocol="smoke")
 
     assert "recursion_limit" not in config
+
+
+@pytest.mark.asyncio
+async def test_ainvoke_trace_passes_the_case_deadline_to_run_controller() -> None:
+    class Graph:
+        async def ainvoke(self, *_args, **_kwargs):
+            return {"messages": [{"content": "done"}]}
+
+    class Controller:
+        deadline_seconds: float | None = None
+
+        async def run(self, _run_id, operation, *, deadline_seconds=None):
+            self.deadline_seconds = deadline_seconds
+            return await operation()
+
+    controller = Controller()
+    runtime = AgentRuntime(
+        graph=Graph(),
+        settings=load_settings(env={}, config={}),
+        run_controller=controller,
+    )
+
+    trace = await runtime.ainvoke_trace(
+        "hello",
+        protocol="eval",
+        run_id="case-1",
+        deadline_seconds=42,
+    )
+
+    assert trace.final_text == "done"
+    assert controller.deadline_seconds == 42

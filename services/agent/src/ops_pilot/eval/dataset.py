@@ -11,7 +11,7 @@ from ops_pilot.config.paths import SERVICE_ROOT, resolve_path
 from ops_pilot.config.settings import Settings
 
 DEFAULT_CASES_DIR = SERVICE_ROOT / "eval" / "cases"
-DATASET_SCHEMA_VERSION = 2
+DATASET_SCHEMA_VERSION = 3
 
 
 class EvalDatasetError(ValueError):
@@ -22,10 +22,11 @@ class EvalDatasetError(ValueError):
 class InjectSpec:
     """A chaos fault to inject before running a diagnosis case.
 
-    ``flag``/``variant`` drive the flagd ConfigMap (see ``eval/chaos.py``);
-    ``settle_s`` is how long to wait after enabling the flag for signals to
-    appear, ``cooldown_s`` how long to drain after disabling it. ``signal`` is
-    parsed-but-unused, reserved for a future readiness-poll (Phase 2).
+    ``flag``/``variant`` drive the flagd ConfigMap (see ``eval/chaos.py``).
+    ``target`` optionally describes the OpenFeature evaluation context that
+    should receive the injected variant. Readiness and recovery are verified
+    against flagd's OFREP data plane rather than represented as fixed sleeps in
+    every dataset item.
 
     This lives in ``EvalCase.metadata()`` only — it NEVER reaches the agent's
     prompt (``to_experiment_item()["input"]``), so the injected fault stays
@@ -34,9 +35,7 @@ class InjectSpec:
 
     flag: str
     variant: str
-    settle_s: float = 120.0
-    cooldown_s: float = 30.0
-    signal: Mapping[str, Any] | None = None
+    target: Mapping[str, Any] | None = None
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any], *, source: str) -> InjectSpec:
@@ -47,30 +46,22 @@ class InjectSpec:
             available = ", ".join(sorted(FAULT_FLAGS))
             raise EvalDatasetError(f"{source}: inject.flag '{flag}' is not a known fault flag. Available: {available}.")
         variant = _required_string(data, "variant", source)
-        settle_s = _float_value(data.get("settle_s", 120.0), "inject.settle_s", source)
-        cooldown_s = _float_value(data.get("cooldown_s", 30.0), "inject.cooldown_s", source)
-        if settle_s < 0 or cooldown_s < 0:
-            raise EvalDatasetError(f"{source}: inject.settle_s and inject.cooldown_s must be >= 0.")
-        signal = data.get("signal")
-        if signal is not None and not isinstance(signal, Mapping):
-            raise EvalDatasetError(f"{source}: inject.signal must be a mapping if present.")
+        target = data.get("target")
+        if target is not None and (not isinstance(target, Mapping) or not target):
+            raise EvalDatasetError(f"{source}: inject.target must be a non-empty mapping if present.")
         return cls(
             flag=flag,
             variant=variant,
-            settle_s=settle_s,
-            cooldown_s=cooldown_s,
-            signal=dict(signal) if isinstance(signal, Mapping) else None,
+            target=dict(target) if isinstance(target, Mapping) else None,
         )
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "flag": self.flag,
             "variant": self.variant,
-            "settle_s": self.settle_s,
-            "cooldown_s": self.cooldown_s,
         }
-        if self.signal is not None:
-            payload["signal"] = dict(self.signal)
+        if self.target is not None:
+            payload["target"] = dict(self.target)
         return payload
 
 
@@ -193,6 +184,21 @@ def validate_expected_tool_names(cases: Iterable[Any], available_tools: Iterable
     if stale:
         details = "; ".join(f"{case_id}: {', '.join(names)}" for case_id, names in sorted(stale.items()))
         raise EvalDatasetError(f"Eval dataset references tools absent from the current runtime: {details}")
+
+
+def validate_dataset_schema(cases: Iterable[Any]) -> None:
+    """Reject stale online items before they can supply obsolete eval policy."""
+
+    stale: list[str] = []
+    for item in cases:
+        metadata = item.metadata() if isinstance(item, EvalCase) else _item_metadata(item)
+        if metadata.get("dataset_schema_version") != DATASET_SCHEMA_VERSION:
+            stale.append(str(metadata.get("id") or getattr(item, "id", "<unknown>")))
+    if stale:
+        raise EvalDatasetError(
+            f"Eval dataset has stale schema for {', '.join(sorted(stale))}; "
+            "run `ops_pilot eval sync` before evaluating."
+        )
 
 
 def _iter_yaml_files(directory: Path) -> list[Path]:

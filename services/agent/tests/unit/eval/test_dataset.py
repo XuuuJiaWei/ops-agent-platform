@@ -6,6 +6,7 @@ from ops_pilot.eval.dataset import (
     DEFAULT_CASES_DIR,
     EvalDatasetError,
     load_cases_from_yaml,
+    validate_dataset_schema,
     validate_expected_tool_names,
 )
 
@@ -32,7 +33,7 @@ def test_load_cases_from_yaml_directory(tmp_path):
     assert cases[0].expected_tools == ("local_echo",)
     assert cases[0].metadata()["category"] == "smoke"
     assert cases[0].metadata()["split"] == "validation"
-    assert cases[0].metadata()["dataset_schema_version"] == 2
+    assert cases[0].metadata()["dataset_schema_version"] == 3
     assert cases[1].timeout_s == 5.0
 
 
@@ -78,12 +79,20 @@ def test_load_cases_rejects_invalid_yaml(tmp_path):
         load_cases_from_yaml(path)
 
 
-def test_ops_diagnosis_cases_allow_slow_mcp_investigations() -> None:
+def test_ops_diagnosis_cases_have_a_bounded_agent_budget() -> None:
     cases = load_cases_from_yaml(DEFAULT_CASES_DIR / "ops_scenarios.yaml")
     diagnosis_cases = [case for case in cases if case.category == "diagnosis"]
 
     assert len(diagnosis_cases) == 8
-    assert all(case.timeout_s >= 600 for case in diagnosis_cases)
+    assert all(case.timeout_s == 300 for case in diagnosis_cases)
+
+
+def test_product_catalog_fault_has_target_evaluation_context() -> None:
+    cases = load_cases_from_yaml(DEFAULT_CASES_DIR / "ops_scenarios.yaml")
+    case = next(case for case in cases if case.id == "otel-product-catalog-failure")
+
+    assert case.inject is not None
+    assert case.inject.target == {"product_id": "OLJCESPC7Z"}
 
 
 def test_expected_tool_names_are_validated_against_runtime_catalog() -> None:
@@ -108,3 +117,10 @@ def test_stale_expected_tool_name_fails_fast(tmp_path) -> None:
 
     with pytest.raises(EvalDatasetError, match="stale: old_name"):
         validate_expected_tool_names(load_cases_from_yaml(path), {"new_name"})
+
+
+def test_stale_online_dataset_schema_fails_fast() -> None:
+    items = [{"metadata": {"id": "old", "dataset_schema_version": 2}}]
+
+    with pytest.raises(EvalDatasetError, match="ops_pilot eval sync"):
+        validate_dataset_schema(items)

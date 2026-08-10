@@ -31,10 +31,14 @@ async def test_eval_timeout_cancels_and_awaits_an_isolated_invocation_task() -> 
         cleanup_task: asyncio.Task | None = None
         cleaned_up = asyncio.Event()
 
-        async def ainvoke_trace(self, *_args, **_kwargs) -> _Trace:
+        received_deadline: float | None = None
+
+        async def ainvoke_trace(self, *_args, deadline_seconds=None, **_kwargs) -> _Trace:
+            self.received_deadline = deadline_seconds
             self.invocation_task = asyncio.current_task()
             try:
-                await asyncio.sleep(10)
+                async with asyncio.timeout(deadline_seconds):
+                    await asyncio.sleep(10)
             finally:
                 self.cleanup_task = asyncio.current_task()
                 await asyncio.sleep(0)
@@ -49,6 +53,7 @@ async def test_eval_timeout_cancels_and_awaits_an_isolated_invocation_task() -> 
     assert runtime.cleaned_up.is_set()
     assert runtime.invocation_task is runtime.cleanup_task
     assert runtime.invocation_task is not caller_task
+    assert runtime.received_deadline == 0.1
 
 
 @pytest.mark.asyncio
@@ -57,9 +62,11 @@ async def test_eval_task_dispatches_runtime_work_to_its_owner_loop() -> None:
 
     class Runtime:
         invocation_loop: asyncio.AbstractEventLoop | None = None
+        received_deadline: float | None = None
 
-        async def ainvoke_trace(self, *_args, **_kwargs) -> _Trace:
+        async def ainvoke_trace(self, *_args, deadline_seconds=None, **_kwargs) -> _Trace:
             self.invocation_loop = asyncio.get_running_loop()
+            self.received_deadline = deadline_seconds
             return _Trace()
 
     runtime = Runtime()
@@ -72,6 +79,7 @@ async def test_eval_task_dispatches_runtime_work_to_its_owner_loop() -> None:
 
     assert output["final_text"] == "done"
     assert runtime.invocation_loop is owner_loop
+    assert runtime.received_deadline == 1
 
 
 @pytest.mark.asyncio

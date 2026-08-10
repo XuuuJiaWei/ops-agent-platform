@@ -15,7 +15,7 @@ def test_load_settings_defaults_with_empty_config():
     assert settings.sap_temperature == 0.0
     assert settings.sap_top_p is None
     assert settings.sap_max_tokens == 16384
-    assert settings.model_request_timeout_seconds == 300
+    assert settings.model_request_timeout_seconds == 120
     assert settings.model_reasoning_mode == "adaptive"
     assert settings.model_reasoning_effort == "medium"
     assert settings.langfuse_enabled is False
@@ -25,6 +25,9 @@ def test_load_settings_defaults_with_empty_config():
     assert settings.run_deadline_seconds == 600.0
     assert settings.tool_retry_max_attempts == 3
     assert settings.circuit_breaker_failure_threshold == 5
+    assert settings.chaos_flag_sync_timeout_seconds == 90
+    assert settings.chaos_poll_interval_seconds == 1
+    assert settings.chaos_stable_reads == 2
 
 
 def test_load_settings_reads_reliability_policy() -> None:
@@ -64,6 +67,17 @@ def test_load_settings_reads_reasoning_policy():
 
     assert settings.model_reasoning_mode == "adaptive"
     assert settings.model_reasoning_effort == "medium"
+
+
+def test_load_settings_reads_chaos_probe_policy():
+    settings = load_settings(
+        env={},
+        config={"chaos": {"flag_sync_timeout_seconds": 12, "poll_interval_seconds": 0.2, "stable_reads": 3}},
+    )
+
+    assert settings.chaos_flag_sync_timeout_seconds == 12
+    assert settings.chaos_poll_interval_seconds == 0.2
+    assert settings.chaos_stable_reads == 3
 
 
 def test_load_settings_reads_model_request_timeout():

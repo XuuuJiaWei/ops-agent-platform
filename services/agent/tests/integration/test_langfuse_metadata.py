@@ -60,6 +60,7 @@ def test_model_metadata_uses_runtime_profile_capacity():
 
     metadata = build_model_metadata(settings, model)
 
+    assert metadata["ls_model_name"] == "anthropic.claude-sonnet-4-6"
     assert metadata["model_context_window_tokens"] == 1_000_000
     assert metadata["model_reasoning_mode"] == "adaptive"
     assert metadata["model_prompt_cache_strategy"] == "deepagents_provider_middleware"

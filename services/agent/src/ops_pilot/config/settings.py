@@ -40,7 +40,7 @@ class Settings:
     sap_temperature: float = 0.0
     sap_top_p: float | None = None
     sap_max_tokens: int | None = 16384
-    model_request_timeout_seconds: int = 300
+    model_request_timeout_seconds: int = 120
     model_reasoning_mode: str = "adaptive"
     model_reasoning_effort: str = "medium"
     system_prompt: str | None = None
@@ -65,6 +65,9 @@ class Settings:
     tool_retry_jitter_ratio: float = 0.2
     circuit_breaker_failure_threshold: int = 5
     circuit_breaker_recovery_seconds: float = 30.0
+    chaos_flag_sync_timeout_seconds: float = 90.0
+    chaos_poll_interval_seconds: float = 1.0
+    chaos_stable_reads: int = 2
     open_sandbox_enabled: bool = False
     open_sandbox_domain: str | None = None
     open_sandbox_api_key: str | None = None
@@ -176,6 +179,7 @@ def load_settings(env: Mapping[str, str] | None = None, *, config: Mapping[str, 
     sandbox = _section(config_data, "open_sandbox")
     persistence = _section(config_data, "persistence")
     reliability = _section(config_data, "reliability")
+    chaos = _section(config_data, "chaos")
 
     persistence_backend = _choice(
         persistence.get("backend"),
@@ -206,7 +210,7 @@ def load_settings(env: Mapping[str, str] | None = None, *, config: Mapping[str, 
         sap_temperature=_float(model.get("temperature"), 0.0),
         sap_top_p=_optional_float(model.get("top_p")),
         sap_max_tokens=_optional_int(model.get("max_tokens")) or 16384,
-        model_request_timeout_seconds=_positive_int(model.get("request_timeout_seconds"), 300),
+        model_request_timeout_seconds=_positive_int(model.get("request_timeout_seconds"), 120),
         model_reasoning_mode=_choice(
             reasoning.get("mode"),
             default="adaptive",
@@ -241,6 +245,9 @@ def load_settings(env: Mapping[str, str] | None = None, *, config: Mapping[str, 
         tool_retry_jitter_ratio=_ratio(reliability.get("jitter_ratio"), 0.2),
         circuit_breaker_failure_threshold=_positive_int(reliability.get("failure_threshold"), 5),
         circuit_breaker_recovery_seconds=_positive_float(reliability.get("recovery_seconds"), 30.0),
+        chaos_flag_sync_timeout_seconds=_positive_float(chaos.get("flag_sync_timeout_seconds"), 90.0),
+        chaos_poll_interval_seconds=_positive_float(chaos.get("poll_interval_seconds"), 1.0),
+        chaos_stable_reads=_positive_int(chaos.get("stable_reads"), 2),
         open_sandbox_enabled=open_sandbox_enabled,
         open_sandbox_domain=open_sandbox_domain,
         open_sandbox_api_key=open_sandbox_api_key,

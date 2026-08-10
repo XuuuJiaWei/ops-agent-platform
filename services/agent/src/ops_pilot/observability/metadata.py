@@ -116,6 +116,9 @@ def build_model_metadata(settings: Settings, model: Any) -> dict[str, Any]:
         settings.model_name,
     )
     return {
+        # Langfuse's LangChain integration reads this standard metadata key to
+        # populate generation.model when a provider wrapper cannot serialize it.
+        "ls_model_name": request_model,
         "model_request_name": request_model,
         "model_context_window_tokens": profile.get("max_input_tokens"),
         "model_max_output_tokens": profile.get("max_output_tokens"),

@@ -99,6 +99,10 @@ def _create_bedrock_chat_model(settings: Settings, proxy_client: Any) -> Any:
                 read_timeout=settings.model_request_timeout_seconds,
                 retries={"mode": "standard", "total_max_attempts": 1},
             ),
+            # Langfuse records completion_start_time from LangChain's first
+            # on_llm_new_token callback; non-streaming Bedrock calls cannot
+            # provide a real TTFT measurement.
+            streaming=True,
             model_kwargs=_generation_kwargs(settings),
         )
 

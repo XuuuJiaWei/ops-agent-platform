@@ -23,6 +23,7 @@ from ops_pilot.eval.dataset import (
     langfuse_client_is_reachable,
     load_cases_from_yaml,
     sync_cases_to_langfuse,
+    validate_dataset_schema,
     validate_expected_tool_names,
 )
 from ops_pilot.eval.graders import (
@@ -34,7 +35,12 @@ from ops_pilot.eval.graders import (
     pass_rate,
     run_performance_metrics,
 )
-from ops_pilot.observability.langfuse import flush_tracing
+from ops_pilot.observability.langfuse import (
+    TracingSetup,
+    finish_observation,
+    flush_tracing,
+    observation,
+)
 
 
 @dataclass(frozen=True)
@@ -140,6 +146,7 @@ async def _run_langfuse_eval(
         dataset = langfuse.get_dataset(dataset_name)
         if not dataset.items:
             raise ValueError(f"Langfuse dataset '{dataset_name}' has no items.")
+        validate_dataset_schema(dataset.items)
         validate_expected_tool_names(dataset.items, _runtime_tool_names(runtime))
         task = _build_task(runtime, run_name=run_name)
 
@@ -244,8 +251,9 @@ def _build_task(runtime: Any, *, run_name: str) -> Any:
         metadata: Mapping[str, Any],
         timeout_s: float,
     ) -> Any:
-        # Keep deadline cancellation inside a child task. Cancelling the caller
-        # can also cancel the task that owns AnyIO's MCP session scopes.
+        # Keep runtime work in a child task so cancellation cleanup stays on the
+        # event loop that owns the persistent MCP sessions. The only deadline is
+        # enforced by RunController inside AgentRuntime.
         invocation = asyncio.create_task(
             runtime.ainvoke_trace(
                 input_text,
@@ -256,25 +264,19 @@ def _build_task(runtime: Any, *, run_name: str) -> Any:
                     "eval_case_id": case_id,
                     "eval_category": metadata.get("category"),
                     "eval_run_name": run_name,
+                    "eval_timeout_seconds": timeout_s,
                 },
+                deadline_seconds=timeout_s,
             ),
             name=f"eval-{case_id}",
         )
         try:
-            done, _ = await asyncio.wait((invocation,), timeout=timeout_s)
+            return await invocation
         except BaseException:
-            invocation.cancel()
-            await asyncio.gather(invocation, return_exceptions=True)
+            if not invocation.done():
+                invocation.cancel()
+                await asyncio.gather(invocation, return_exceptions=True)
             raise
-        if invocation in done:
-            return invocation.result()
-
-        invocation.cancel()
-        try:
-            await invocation
-        except asyncio.CancelledError:
-            pass
-        raise TimeoutError(f"Agent invocation timed out after {timeout_s:g}s.")
 
     async def task(*, item: Any, **_: Any) -> dict[str, Any]:
         input_text = _item_input(item)
@@ -282,30 +284,60 @@ def _build_task(runtime: Any, *, run_name: str) -> Any:
         case_id = _case_id(item, metadata=metadata, input_text=input_text)
         timeout_s = _timeout_s(metadata)
         started = time.perf_counter()
-        try:
-            invocation = invoke(
-                input_text=input_text,
-                case_id=case_id,
-                metadata=metadata,
-                timeout_s=timeout_s,
-            )
-            current_loop = asyncio.get_running_loop()
-            if current_loop is runtime_loop:
-                trace = await invocation
-            else:
-                trace = await _run_on_loop(invocation, runtime_loop)
-            return trace.as_output()
-        except Exception as exc:  # noqa: BLE001 - task errors are scored by no_error.
-            latency_s = time.perf_counter() - started
-            return {
-                "final_text": "",
-                "tool_calls": [],
-                "steps": 0,
-                "latency_s": latency_s,
-                "error": str(exc) or type(exc).__name__,
-                "error_type": type(exc).__name__,
-                "recursion_limit_hit": _is_recursion_limit_exception(exc),
-            }
+        tracing = getattr(runtime, "tracing", TracingSetup(enabled=False))
+        with observation(
+            tracing,
+            name="execute-agent",
+            as_type="agent",
+            input=input_text,
+            metadata={
+                "eval_case_id": case_id,
+                "eval_category": metadata.get("category"),
+                "eval_run_name": run_name,
+                "deadline_seconds": timeout_s,
+                "expected_output": _item_expected_output(item),
+            },
+        ) as current:
+            try:
+                invocation = invoke(
+                    input_text=input_text,
+                    case_id=case_id,
+                    metadata=metadata,
+                    timeout_s=timeout_s,
+                )
+                current_loop = asyncio.get_running_loop()
+                if current_loop is runtime_loop:
+                    trace = await invocation
+                else:
+                    trace = await _run_on_loop(invocation, runtime_loop)
+                output = trace.as_output()
+                finish_observation(
+                    current,
+                    output=output.get("final_text"),
+                    metadata={
+                        "latency_seconds": output.get("latency_s"),
+                        "steps": output.get("steps"),
+                    },
+                )
+                return output
+            except Exception as exc:  # noqa: BLE001 - task errors are scored by no_error.
+                latency_s = time.perf_counter() - started
+                output = {
+                    "final_text": "",
+                    "tool_calls": [],
+                    "steps": 0,
+                    "latency_s": latency_s,
+                    "error": str(exc) or type(exc).__name__,
+                    "error_type": type(exc).__name__,
+                    "recursion_limit_hit": _is_recursion_limit_exception(exc),
+                }
+                finish_observation(
+                    current,
+                    output=output,
+                    error=exc,
+                    metadata={"latency_seconds": latency_s},
+                )
+                return output
 
     return task
 
@@ -349,6 +381,10 @@ def _item_input(item: Any) -> str:
     if value is None:
         raise ValueError("Eval item is missing input.")
     return str(value)
+
+
+def _item_expected_output(item: Any) -> Any:
+    return item.get("expected_output") if isinstance(item, Mapping) else getattr(item, "expected_output", None)
 
 
 def _item_metadata(item: Any) -> dict[str, Any]:

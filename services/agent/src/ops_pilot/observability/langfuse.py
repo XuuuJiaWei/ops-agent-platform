@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -67,6 +69,53 @@ def flush_tracing(tracing: TracingSetup) -> None:
         flush = getattr(target, "flush", None)
         if callable(flush):
             flush()
+
+
+@contextmanager
+def observation(
+    tracing: TracingSetup,
+    *,
+    name: str,
+    as_type: str = "span",
+    input: Any | None = None,
+    metadata: Mapping[str, Any] | None = None,
+) -> Iterator[Any | None]:
+    """Create a current Langfuse observation or a transparent no-op context.
+
+    Framework callbacks executed inside this context inherit it through the
+    OpenTelemetry context, so LangChain generations and tools are nested under
+    the application-level agent/phase that actually owns them.
+    """
+
+    if not tracing.enabled or tracing.client is None:
+        yield None
+        return
+    with tracing.client.start_as_current_observation(
+        name=name,
+        as_type=as_type,
+        input=input,
+        metadata=dict(metadata or {}),
+    ) as current:
+        yield current
+
+
+def finish_observation(
+    current: Any | None,
+    *,
+    output: Any | None = None,
+    error: BaseException | None = None,
+    metadata: Mapping[str, Any] | None = None,
+) -> None:
+    """Update an optional observation with its terminal result."""
+
+    if current is None:
+        return
+    values: dict[str, Any] = {"output": output}
+    if metadata:
+        values["metadata"] = dict(metadata)
+    if error is not None:
+        values.update(level="ERROR", status_message=str(error) or type(error).__name__)
+    current.update(**values)
 
 
 def _missing_langfuse_keys(settings: Settings) -> tuple[str, ...]:

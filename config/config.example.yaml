@@ -18,7 +18,7 @@ model:
   top_p: null
   max_tokens: 16384
   # Per-model-call transport deadline; keep below the outer request/eval budget.
-  request_timeout_seconds: 300
+  request_timeout_seconds: 120
   reasoning:
     # Claude Sonnet 4.6 adaptive thinking; set mode: disabled for models that
     # do not expose reasoning output.
@@ -65,6 +65,8 @@ persistence:
 # or explicitly listed in a server's retry_tools.
 reliability:
   enabled: true
+  # Fallback for interactive/API runs. Eval case timeout_s overrides this value
+  # through the same RunController, so there is only one effective deadline.
   run_deadline_seconds: 600
   max_attempts: 3
   initial_backoff_seconds: 0.25
@@ -72,6 +74,13 @@ reliability:
   jitter_ratio: 0.2
   failure_threshold: 5
   recovery_seconds: 30
+
+# Chaos readiness/recovery policy. The runner polls flagd's OFREP data plane;
+# it does not use fixed fault settle/cooldown sleeps.
+chaos:
+  flag_sync_timeout_seconds: 90
+  poll_interval_seconds: 1
+  stable_reads: 2
 
 open_sandbox:
   # null = auto-enable only when domain (here) and api_key (.env) are both set.

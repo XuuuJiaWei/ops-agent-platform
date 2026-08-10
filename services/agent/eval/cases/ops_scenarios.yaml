@@ -53,7 +53,7 @@ cases:
       `paymentFailure` at a percentage variant (e.g. 50%). Fail if it blames an
       unrelated service or claims it applied a fix.
     tags: [otel, jaeger, diagnosis, paymentFailure]
-    timeout_s: 900
+    timeout_s: 300
     inject: {flag: paymentFailure, variant: "50%"}
 
   - id: otel-payment-unreachable
@@ -71,7 +71,7 @@ cases:
       failure) from a percentage error rate, and cites trace evidence. Ground
       truth: flagd flag `paymentUnreachable=on`.
     tags: [otel, jaeger, diagnosis, paymentUnreachable]
-    timeout_s: 900
+    timeout_s: 300
     inject: {flag: paymentUnreachable, variant: "on"}
 
   - id: otel-product-catalog-failure
@@ -89,8 +89,11 @@ cases:
       than a total outage, and grounds this in trace/error data. Ground truth:
       flagd flag `productCatalogFailure=on`.
     tags: [otel, jaeger, diagnosis, productCatalogFailure]
-    timeout_s: 900
-    inject: {flag: productCatalogFailure, variant: "on"}
+    timeout_s: 300
+    inject:
+      flag: productCatalogFailure
+      variant: "on"
+      target: {product_id: OLJCESPC7Z}
 
   - id: otel-cart-failure-rate
     category: diagnosis
@@ -107,7 +110,7 @@ cases:
       evidence rather than guessing. Ground truth: flagd flag `cartFailure` at a
       percentage variant.
     tags: [otel, jaeger, diagnosis, cartFailure]
-    timeout_s: 900
+    timeout_s: 300
     inject: {flag: cartFailure, variant: "50%"}
 
   - id: otel-ad-high-cpu
@@ -124,7 +127,7 @@ cases:
       flag `adHighCpu=on`. Fail if it recommends restarting/scaling without
       evidence, or ignores CPU entirely.
     tags: [otel, prometheus, diagnosis, adHighCpu]
-    timeout_s: 900
+    timeout_s: 300
     inject: {flag: adHighCpu, variant: "on"}
 
   - id: otel-image-slow-load
@@ -142,7 +145,7 @@ cases:
       delay, and separates observation from hypothesis. Ground truth: flagd flag
       `imageSlowLoad` (5sec/10sec variant).
     tags: [otel, jaeger, diagnosis, imageSlowLoad]
-    timeout_s: 900
+    timeout_s: 300
     inject: {flag: imageSlowLoad, variant: "10sec"}
 
   - id: otel-kafka-queue-problems
@@ -159,7 +162,7 @@ cases:
       side delay, references backlog/lag or elongated spans, and traces the
       impact downstream. Ground truth: flagd flag `kafkaQueueProblems=on`.
     tags: [otel, jaeger, diagnosis, kafkaQueueProblems]
-    timeout_s: 900
+    timeout_s: 300
     inject: {flag: kafkaQueueProblems, variant: "on"}
 
   - id: otel-recommendation-cache-failure
@@ -175,7 +178,7 @@ cases:
       growing memory usage, cites a memory metric trend, and avoids claiming a
       fix was applied. Ground truth: flagd flag `recommendationCacheFailure=on`.
     tags: [otel, prometheus, diagnosis, recommendationCacheFailure]
-    timeout_s: 900
+    timeout_s: 300
     inject: {flag: recommendationCacheFailure, variant: "on"}
 
   # --- status-query: read current health (no specific injected fault) --------

@@ -70,3 +70,4 @@ def test_bedrock_client_uses_explicit_request_timeout_without_retries(monkeypatc
 
     assert captured["config"].read_timeout == 180
     assert captured["config"].retries == {"mode": "standard", "total_max_attempts": 1}
+    assert captured["streaming"] is True

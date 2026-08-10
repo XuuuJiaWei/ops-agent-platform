@@ -139,6 +139,7 @@ class AgentRuntime:
         a2a_context_id: str | None = None,
         configurable: dict[str, Any] | None = None,
         extra_metadata: dict[str, Any] | None = None,
+        deadline_seconds: float | None = None,
     ) -> AgentTrace:
         """Invoke the shared DeepAgent and return structured eval trace signals."""
 
@@ -161,7 +162,17 @@ class AgentRuntime:
                 ),
             )
 
-        result = await self.run_controller.run(effective_run_id, invoke)
+        try:
+            result = await self.run_controller.run(
+                effective_run_id,
+                invoke,
+                deadline_seconds=deadline_seconds,
+            )
+        except TimeoutError as exc:
+            effective_deadline = self.settings.run_deadline_seconds if deadline_seconds is None else deadline_seconds
+            if effective_deadline is None:
+                raise
+            raise TimeoutError(f"Agent invocation timed out after {effective_deadline:g}s.") from exc
         return build_agent_trace(result, latency_s=time.perf_counter() - started)
 
     async def cancel_run(self, run_id: str, *, reason: str = "cancel requested") -> bool:
