@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from collections import defaultdict
 from collections.abc import Mapping
 from typing import Any
@@ -23,7 +24,7 @@ BOOLEAN = "BOOLEAN"
 
 
 def deterministic_evaluators() -> list[Any]:
-    return [no_error, contains, tool_called, tool_not_called]
+    return [no_error, contains, tool_called, tool_not_called, trajectory_metrics]
 
 
 def build_item_evaluators(settings: Settings, *, include_judge: bool) -> list[Any]:
@@ -116,6 +117,41 @@ def no_error(*, output: Any, **_: Any) -> Evaluation:
     )
 
 
+def trajectory_metrics(*, output: Any, metadata: Mapping[str, Any] | None = None, **_: Any) -> list[Evaluation]:
+    """Emit non-gating trajectory and performance signals for error analysis."""
+
+    expected_tools = set(_metadata_strings(metadata, "expected_tools"))
+    actual_tools = tuple(_output_tool_names(output))
+    recall = len(expected_tools & set(actual_tools)) / len(expected_tools) if expected_tools else None
+    evaluations = [
+        Evaluation(
+            name="tool_call_count",
+            value=float(len(actual_tools)),
+            metadata={"gating": False},
+        ),
+        Evaluation(
+            name="step_count",
+            value=float(_output_number(output, "steps")),
+            metadata={"gating": False},
+        ),
+        Evaluation(
+            name="latency_seconds",
+            value=float(_output_number(output, "latency_s")),
+            metadata={"gating": False},
+        ),
+    ]
+    if recall is not None:
+        evaluations.append(
+            Evaluation(
+                name="expected_tool_recall",
+                value=recall,
+                comment=f"Called {len(expected_tools & set(actual_tools))}/{len(expected_tools)} expected tools.",
+                metadata={"gating": False},
+            )
+        )
+    return evaluations
+
+
 def create_rubric_judge(settings: Settings) -> Any:
     judge_model: Any | None = None
 
@@ -190,6 +226,74 @@ def category_pass_rates(*, item_results: list[Any], **_: Any) -> list[Evaluation
     ]
 
 
+def infrastructure_completion_rate(*, item_results: list[Any], **_: Any) -> Evaluation:
+    total = len(item_results)
+    completed = sum(1 for item_result in item_results if _item_infrastructure_completed(item_result))
+    return Evaluation(
+        name="infrastructure_completion_rate",
+        value=completed / total if total else 0.0,
+        comment=f"{completed}/{total} cases completed without runtime or infrastructure errors.",
+    )
+
+
+def conditional_task_pass_rate(*, item_results: list[Any], **_: Any) -> Evaluation:
+    completed = [item_result for item_result in item_results if _item_infrastructure_completed(item_result)]
+    passed = sum(1 for item_result in completed if _item_quality_passed(item_result))
+    rate = passed / len(completed) if completed else None
+    return Evaluation(
+        name="conditional_task_pass_rate",
+        value=rate,  # type: ignore[arg-type]
+        comment=f"{passed}/{len(completed)} infrastructure-complete cases passed task-quality gates.",
+        metadata={"denominator": "infrastructure_complete_cases"},
+    )
+
+
+def run_performance_metrics(*, item_results: list[Any], **_: Any) -> list[Evaluation]:
+    completed = [item_result for item_result in item_results if _item_infrastructure_completed(item_result)]
+    latencies = [_item_metric(item_result, "latency_seconds") for item_result in completed]
+    latencies = sorted(value for value in latencies if value is not None)
+    tool_calls = [_item_metric(item_result, "tool_call_count") for item_result in completed]
+    tool_calls = [value for value in tool_calls if value is not None]
+    return [
+        Evaluation(
+            name="latency_p50_seconds",
+            value=_percentile(latencies, 0.50),  # type: ignore[arg-type]
+            metadata={"gating": False, "sample_size": len(latencies)},
+        ),
+        Evaluation(
+            name="latency_p95_seconds",
+            value=_percentile(latencies, 0.95),  # type: ignore[arg-type]
+            metadata={"gating": False, "sample_size": len(latencies)},
+        ),
+        Evaluation(
+            name="mean_tool_calls",
+            value=sum(tool_calls) / len(tool_calls) if tool_calls else None,  # type: ignore[arg-type]
+            metadata={"gating": False, "sample_size": len(tool_calls)},
+        ),
+    ]
+
+
+def infrastructure_error_rates(*, item_results: list[Any], **_: Any) -> list[Evaluation]:
+    """Break infrastructure failures down by stable exception class."""
+
+    total = len(item_results)
+    counts: dict[str, int] = defaultdict(int)
+    for item_result in item_results:
+        output = getattr(item_result, "output", None)
+        error_type = output.get("error_type") if isinstance(output, Mapping) else None
+        if error_type:
+            counts[str(error_type)] += 1
+    return [
+        Evaluation(
+            name=f"infrastructure_error_rate:{error_type}",
+            value=count / total if total else 0.0,
+            comment=f"{count}/{total} cases failed with {error_type}.",
+            metadata={"gating": False, "error_type": error_type},
+        )
+        for error_type, count in sorted(counts.items())
+    ]
+
+
 def _output_text(output: Any) -> str:
     if isinstance(output, AgentTrace):
         return output.final_text
@@ -197,6 +301,13 @@ def _output_text(output: Any) -> str:
         value = output.get("final_text") or output.get("output") or output.get("content")
         return "" if value is None else str(value)
     return str(output)
+
+
+def _output_number(output: Any, key: str) -> float:
+    value = getattr(output, key, None)
+    if isinstance(output, Mapping):
+        value = output.get(key, value)
+    return float(value) if isinstance(value, int | float) and math.isfinite(float(value)) else 0.0
 
 
 def _output_tool_names(output: Any) -> tuple[str, ...]:
@@ -317,7 +428,9 @@ def _item_passed(item_result: Any) -> bool:
 
 def _evaluation_active(evaluation: Any) -> bool:
     metadata = getattr(evaluation, "metadata", None)
-    if isinstance(metadata, Mapping) and (metadata.get("skipped") or metadata.get("evaluator_error")):
+    if isinstance(metadata, Mapping) and (
+        metadata.get("skipped") or metadata.get("evaluator_error") or metadata.get("gating") is False
+    ):
         return False
     return True
 
@@ -344,3 +457,43 @@ def _item_category(item_result: Any) -> str | None:
         if category:
             return str(category)
     return None
+
+
+def _item_infrastructure_completed(item_result: Any) -> bool:
+    evaluations = getattr(item_result, "evaluations", [])
+    no_error_evaluation = next(
+        (evaluation for evaluation in evaluations if getattr(evaluation, "name", "") == "no_error"),
+        None,
+    )
+    return no_error_evaluation is not None and _evaluation_passed(no_error_evaluation)
+
+
+def _item_quality_passed(item_result: Any) -> bool:
+    evaluations = getattr(item_result, "evaluations", [])
+    active = [
+        evaluation
+        for evaluation in evaluations
+        if getattr(evaluation, "name", "") != "no_error" and _evaluation_active(evaluation)
+    ]
+    return bool(active) and all(_evaluation_passed(evaluation) for evaluation in active)
+
+
+def _item_metric(item_result: Any, name: str) -> float | None:
+    for evaluation in getattr(item_result, "evaluations", []):
+        if getattr(evaluation, "name", "") == name:
+            value = getattr(evaluation, "value", None)
+            if isinstance(value, int | float):
+                return float(value)
+    return None
+
+
+def _percentile(values: list[float], quantile: float) -> float | None:
+    if not values:
+        return None
+    position = (len(values) - 1) * quantile
+    lower = math.floor(position)
+    upper = math.ceil(position)
+    if lower == upper:
+        return values[lower]
+    weight = position - lower
+    return values[lower] * (1 - weight) + values[upper] * weight

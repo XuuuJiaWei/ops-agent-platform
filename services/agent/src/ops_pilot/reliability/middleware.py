@@ -12,6 +12,7 @@ from langchain.tools.tool_node import ToolCallRequest
 from langchain_core.messages import ToolMessage
 from langgraph.types import Command
 
+from ops_pilot.mcp.errors import is_mcp_session_disconnect
 from ops_pilot.reliability.execution import (
     CircuitOpenError,
     IndeterminateToolError,
@@ -118,6 +119,8 @@ def _retry_safe(request: ToolCallRequest, *, explicitly_safe: bool) -> bool:
 
 
 def _classify_exception(exc: BaseException) -> TransientToolError | None:
+    if is_mcp_session_disconnect(exc):
+        return IndeterminateToolError(str(exc) or exc.__class__.__name__)
     status_code = getattr(exc, "status_code", None)
     if status_code is None:
         response = getattr(exc, "response", None)

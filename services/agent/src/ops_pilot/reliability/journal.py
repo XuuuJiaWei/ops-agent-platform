@@ -8,10 +8,9 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from contextvars import ContextVar, Token
 from typing import Any
 
-from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
-
 from ops_pilot.config.settings import Settings
 from ops_pilot.reliability.execution import ExecutionRecord, ExecutionStatus, IdempotencyConflictError, ToolCall
+from ops_pilot.reliability.serde import ExecutionValueCodec
 
 _locked_connection: ContextVar[Any | None] = ContextVar("ops_pilot_journal_connection", default=None)
 
@@ -47,9 +46,9 @@ class _PostgresAdvisoryLock:
 class PostgresExecutionJournal:
     """Persistent journal with a cross-process advisory lock per tool call."""
 
-    def __init__(self, pool: Any) -> None:
+    def __init__(self, pool: Any, *, codec: ExecutionValueCodec | None = None) -> None:
         self._pool = pool
-        self._serde = JsonPlusSerializer(pickle_fallback=False)
+        self._codec = codec or ExecutionValueCodec()
 
     async def setup(self) -> None:
         async with self._pool.connection() as connection:
@@ -115,7 +114,7 @@ class PostgresExecutionJournal:
             )
         result = None
         if row["result_type"] is not None and row["result_payload"] is not None:
-            result = self._serde.loads_typed((row["result_type"], bytes(row["result_payload"])))
+            result = self._codec.loads_typed((row["result_type"], bytes(row["result_payload"])))
         return ExecutionRecord(
             call=call,
             status=ExecutionStatus(row["status"]),
@@ -128,7 +127,7 @@ class PostgresExecutionJournal:
         result_type: str | None = None
         result_payload: bytes | None = None
         if record.result is not None:
-            result_type, result_payload = self._serde.dumps_typed(record.result)
+            result_type, result_payload = self._codec.dumps_typed(record.result)
         async with self._connection() as connection:
             await connection.execute(
                 """

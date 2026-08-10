@@ -7,12 +7,12 @@ import logging
 import os
 import re
 from collections.abc import Mapping
-from contextlib import AsyncExitStack
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from typing import Any
 
 from ops_pilot.config.mcp_schema import MCPConfig, MCPServerConfig
 from ops_pilot.config.settings import Settings
+from ops_pilot.mcp.session import PersistentMCPServer
 from ops_pilot.mcp.status import MCPLoadResult, MCPLoadStatus, MCPServerLoadStatus
 
 ENV_PATTERN = re.compile(r"\$\{([A-Z0-9_]+)\}")
@@ -30,31 +30,6 @@ class RequiredMCPServerError(MCPLoadError):
 
 class MissingMCPEnvironmentError(MCPLoadError):
     """Raised when an MCP config references an unset environment variable."""
-
-
-@dataclass
-class MCPServerOwner:
-    """Own one persistent MCP session entirely inside one asyncio task."""
-
-    _ready: asyncio.Future[list[Any]]
-    _stop: asyncio.Event
-    _task: asyncio.Task[None] | None = None
-    _closed: bool = False
-
-    async def aclose(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        self._stop.set()
-        if self._task is None:
-            return
-        try:
-            await self._task
-        except BaseException as exc:
-            if _is_stdio_shutdown_noise(exc):
-                logger.debug("Ignoring MCP stdio shutdown noise: %s", _safe_error(exc))
-                return
-            raise
 
 
 async def load_mcp_tools(settings: Settings | MCPConfig) -> MCPLoadResult:
@@ -79,7 +54,7 @@ async def _load_from_config(config: MCPConfig, *, config_path: str | None) -> MC
     hitl_tools: list[str] = []
     retry_tools: list[str] = []
     tool_servers: dict[str, str] = {}
-    session_managers: list[MCPServerOwner] = []
+    session_managers: list[PersistentMCPServer] = []
 
     async def load(server: MCPServerConfig) -> Any:
         return await _load_single_server_with_timeout(_expand_server_env(server))
@@ -190,48 +165,11 @@ def _collect_hitl_tools(server: MCPServerConfig, kept_tools: list[Any]) -> list[
     return hitl
 
 
-async def _load_single_server(server: MCPServerConfig) -> tuple[list[Any], MCPServerOwner]:
-    loop = asyncio.get_running_loop()
-    owner = MCPServerOwner(
-        _ready=loop.create_future(),
-        _stop=asyncio.Event(),
-    )
-    owner._task = asyncio.create_task(_run_server_owner(owner, server), name=f"mcp-owner:{server.name}")
-    try:
-        tools = await asyncio.shield(owner._ready)
-    except BaseException:
-        owner._closed = True
-        owner._task.cancel()
-        await asyncio.gather(owner._task, return_exceptions=True)
-        raise
-    return tools, owner
+async def _load_single_server(server: MCPServerConfig) -> tuple[list[Any], PersistentMCPServer]:
+    return await PersistentMCPServer.start(server)
 
 
-async def _run_server_owner(owner: MCPServerOwner, server: MCPServerConfig) -> None:
-    stack = AsyncExitStack()
-    try:
-        try:
-            from langchain_mcp_adapters.client import MultiServerMCPClient
-            from langchain_mcp_adapters.tools import load_mcp_tools as load_session_tools
-        except ImportError as exc:
-            raise MCPLoadError("langchain-mcp-adapters is not installed. Run 'uv sync' in services/agent.") from exc
-
-        client = MultiServerMCPClient({server.name: server.to_client_connection()})
-        session = await stack.enter_async_context(client.session(server.name))
-        tools = list(await load_session_tools(session, server_name=server.name))
-        if not owner._ready.done():
-            owner._ready.set_result(tools)
-        await owner._stop.wait()
-    except BaseException as exc:
-        if not owner._ready.done():
-            owner._ready.set_exception(exc)
-            return
-        raise
-    finally:
-        await stack.aclose()
-
-
-async def _load_single_server_with_timeout(server: MCPServerConfig) -> tuple[list[Any], MCPServerOwner]:
+async def _load_single_server_with_timeout(server: MCPServerConfig) -> tuple[list[Any], PersistentMCPServer]:
     if server.timeout is None:
         return await _load_single_server(server)
     try:
@@ -241,7 +179,7 @@ async def _load_single_server_with_timeout(server: MCPServerConfig) -> tuple[lis
         raise MCPLoadError(f"MCP server '{server.name}' timed out after {timeout}s while loading tools.") from exc
 
 
-def _unpack_server_load_result(loaded: Any) -> tuple[list[Any], MCPServerOwner | None]:
+def _unpack_server_load_result(loaded: Any) -> tuple[list[Any], PersistentMCPServer | None]:
     """Accept old test doubles while production returns tools plus session owner."""
 
     if isinstance(loaded, tuple) and len(loaded) == 2:
@@ -250,7 +188,7 @@ def _unpack_server_load_result(loaded: Any) -> tuple[list[Any], MCPServerOwner |
     return list(loaded), None
 
 
-async def _close_owners(owners: list[MCPServerOwner]) -> None:
+async def _close_owners(owners: list[PersistentMCPServer]) -> None:
     seen: set[int] = set()
     for owner in reversed(owners):
         if id(owner) in seen:
@@ -291,18 +229,6 @@ def _safe_error(exc: BaseException) -> str:
         if _looks_secret(key) and value:
             text = text.replace(value, "[redacted]")
     return text
-
-
-def _is_stdio_shutdown_noise(exc: BaseException) -> bool:
-    text = _error_text(exc)
-    return any(
-        marker in text
-        for marker in (
-            "Received SIGTERM, terminating child process",
-            "Child process terminated by signal: SIGTERM",
-            "BrokenResourceError",
-        )
-    )
 
 
 def _error_text(exc: BaseException) -> str:

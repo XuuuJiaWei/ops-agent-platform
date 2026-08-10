@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from ops_pilot.eval.dataset import DEFAULT_CASES_DIR, EvalDatasetError, load_cases_from_yaml
+from ops_pilot.eval.dataset import (
+    DEFAULT_CASES_DIR,
+    EvalDatasetError,
+    load_cases_from_yaml,
+    validate_expected_tool_names,
+)
 
 
 def test_load_cases_from_yaml_directory(tmp_path):
@@ -26,6 +31,8 @@ def test_load_cases_from_yaml_directory(tmp_path):
     assert [case.id for case in cases] == ["one", "two"]
     assert cases[0].expected_tools == ("local_echo",)
     assert cases[0].metadata()["category"] == "smoke"
+    assert cases[0].metadata()["split"] == "validation"
+    assert cases[0].metadata()["dataset_schema_version"] == 2
     assert cases[1].timeout_s == 5.0
 
 
@@ -77,3 +84,27 @@ def test_ops_diagnosis_cases_allow_slow_mcp_investigations() -> None:
 
     assert len(diagnosis_cases) == 8
     assert all(case.timeout_s >= 600 for case in diagnosis_cases)
+
+
+def test_expected_tool_names_are_validated_against_runtime_catalog() -> None:
+    cases = load_cases_from_yaml(DEFAULT_CASES_DIR / "ops_scenarios.yaml")
+    available = {
+        "search_traces",
+        "query",
+        "get_services",
+        "pods_list_in_namespace",
+        "get_trace_errors",
+    }
+
+    validate_expected_tool_names(cases, available)
+
+
+def test_stale_expected_tool_name_fails_fast(tmp_path) -> None:
+    path = tmp_path / "cases.yaml"
+    path.write_text(
+        "cases:\n  - id: stale\n    prompt: inspect\n    category: validation\n    expected_tools: [old_name]\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(EvalDatasetError, match="stale: old_name"):
+        validate_expected_tool_names(load_cases_from_yaml(path), {"new_name"})

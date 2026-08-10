@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
 import time
 from collections.abc import Iterable, Mapping
@@ -22,8 +23,17 @@ from ops_pilot.eval.dataset import (
     langfuse_client_is_reachable,
     load_cases_from_yaml,
     sync_cases_to_langfuse,
+    validate_expected_tool_names,
 )
-from ops_pilot.eval.graders import build_item_evaluators, category_pass_rates, pass_rate
+from ops_pilot.eval.graders import (
+    build_item_evaluators,
+    category_pass_rates,
+    conditional_task_pass_rate,
+    infrastructure_completion_rate,
+    infrastructure_error_rates,
+    pass_rate,
+    run_performance_metrics,
+)
 from ops_pilot.observability.langfuse import flush_tracing
 
 
@@ -130,6 +140,7 @@ async def _run_langfuse_eval(
         dataset = langfuse.get_dataset(dataset_name)
         if not dataset.items:
             raise ValueError(f"Langfuse dataset '{dataset_name}' has no items.")
+        validate_expected_tool_names(dataset.items, _runtime_tool_names(runtime))
         task = _build_task(runtime, run_name=run_name)
 
         def execute_experiment() -> ExperimentResult:
@@ -139,9 +150,16 @@ async def _run_langfuse_eval(
                 description="ops_pilot agent evaluation run",
                 task=task,
                 evaluators=build_item_evaluators(settings, include_judge=True),
-                run_evaluators=[pass_rate, category_pass_rates],
+                run_evaluators=[
+                    pass_rate,
+                    infrastructure_completion_rate,
+                    conditional_task_pass_rate,
+                    infrastructure_error_rates,
+                    category_pass_rates,
+                    run_performance_metrics,
+                ],
                 max_concurrency=concurrency,
-                metadata={"runner": "ops_pilot.eval", "dataset_name": dataset_name},
+                metadata=_run_metadata(runtime, dataset_name=dataset_name),
             )
 
         return await asyncio.to_thread(execute_experiment)
@@ -158,8 +176,10 @@ async def _run_local_eval(
     run_name: str,
     concurrency: int,
 ) -> ExperimentResult:
+    cases = tuple(cases)
     runtime = await create_agent_runtime_async(settings=settings, attach_checkpointer=False)
     try:
+        validate_expected_tool_names(cases, _runtime_tool_names(runtime))
         task = _build_task(runtime, run_name=run_name)
         evaluators = build_item_evaluators(settings, include_judge=False)
         items = [case.to_experiment_item() for case in cases]
@@ -189,7 +209,14 @@ async def _run_local_eval(
 
         item_results = await asyncio.gather(*(process_item(item) for item in items))
         run_evaluations = []
-        for run_evaluator in (pass_rate, category_pass_rates):
+        for run_evaluator in (
+            pass_rate,
+            infrastructure_completion_rate,
+            conditional_task_pass_rate,
+            infrastructure_error_rates,
+            category_pass_rates,
+            run_performance_metrics,
+        ):
             run_evaluations.extend(await _run_evaluator(run_evaluator, item_results=list(item_results)))
         return ExperimentResult(
             name="ops_pilot eval",
@@ -365,3 +392,20 @@ def _run_evaluation_value(result: ExperimentResult, name: str) -> float:
         if evaluation.name == name and isinstance(evaluation.value, int | float):
             return float(evaluation.value)
     return 0.0
+
+
+def _runtime_tool_names(runtime: Any) -> tuple[str, ...]:
+    return tuple(str(tool.name) for tool in getattr(runtime, "tools", ()) if getattr(tool, "name", None))
+
+
+def _run_metadata(runtime: Any, *, dataset_name: str) -> dict[str, Any]:
+    names = sorted(_runtime_tool_names(runtime))
+    fingerprint = hashlib.sha256("\0".join(names).encode()).hexdigest()
+    return {
+        "runner": "ops_pilot.eval",
+        "evaluator_version": 2,
+        "dataset_name": dataset_name,
+        "toolset_size": len(names),
+        "toolset_sha256": fingerprint,
+        "model": runtime.model_metadata.get("model_name"),
+    }

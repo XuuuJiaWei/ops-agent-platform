@@ -17,6 +17,7 @@ dependencies = [
   "langfuse>=4.14.2,<5",
   "langgraph>=1.2.10,<2",
   "langgraph-checkpoint-postgres>=3.1,<4",
+  "mcp>=1.29.0,<2",
   "opensandbox>=0.1.15,<0.2",
   "psycopg[binary,pool]>=3.2,<4",
   "pydantic-settings>=2.14.2,<3",

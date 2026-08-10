@@ -11,6 +11,7 @@ from ops_pilot.config.paths import SERVICE_ROOT, resolve_path
 from ops_pilot.config.settings import Settings
 
 DEFAULT_CASES_DIR = SERVICE_ROOT / "eval" / "cases"
+DATASET_SCHEMA_VERSION = 2
 
 
 class EvalDatasetError(ValueError):
@@ -78,6 +79,7 @@ class EvalCase:
     id: str
     prompt: str
     category: str
+    split: str = "validation"
     expected_output: str | None = None
     expected_tools: tuple[str, ...] = field(default_factory=tuple)
     forbidden_tools: tuple[str, ...] = field(default_factory=tuple)
@@ -91,6 +93,7 @@ class EvalCase:
         case_id = _required_string(data, "id", source)
         prompt = _required_string(data, "prompt", source)
         category = _required_string(data, "category", source)
+        split = _optional_string(data.get("split"), "split", source) or "validation"
         expected_output = _optional_string(data.get("expected_output"), "expected_output", source)
         rubric = _optional_string(data.get("rubric"), "rubric", source)
         timeout_s = _float_value(data.get("timeout_s", 60.0), "timeout_s", source)
@@ -106,6 +109,7 @@ class EvalCase:
             id=case_id,
             prompt=prompt,
             category=category,
+            split=split,
             expected_output=expected_output,
             expected_tools=_string_tuple(data.get("expected_tools", ()), "expected_tools", source),
             forbidden_tools=_string_tuple(data.get("forbidden_tools", ()), "forbidden_tools", source),
@@ -119,6 +123,8 @@ class EvalCase:
         return {
             "id": self.id,
             "category": self.category,
+            "split": self.split,
+            "dataset_schema_version": DATASET_SCHEMA_VERSION,
             "expected_tools": list(self.expected_tools),
             "forbidden_tools": list(self.forbidden_tools),
             "rubric": self.rubric,
@@ -172,8 +178,30 @@ def load_cases_from_yaml(path: str | Path = DEFAULT_CASES_DIR) -> tuple[EvalCase
     return tuple(cases)
 
 
+def validate_expected_tool_names(cases: Iterable[Any], available_tools: Iterable[str]) -> None:
+    """Fail fast when dataset expectations drift from the runtime tool catalog."""
+
+    available = {str(name) for name in available_tools}
+    stale: dict[str, list[str]] = {}
+    for item in cases:
+        metadata = item.metadata() if isinstance(item, EvalCase) else _item_metadata(item)
+        expected = metadata.get("expected_tools") or ()
+        missing = sorted({str(name) for name in expected} - available)
+        if missing:
+            case_id = str(metadata.get("id") or getattr(item, "id", "<unknown>"))
+            stale[case_id] = missing
+    if stale:
+        details = "; ".join(f"{case_id}: {', '.join(names)}" for case_id, names in sorted(stale.items()))
+        raise EvalDatasetError(f"Eval dataset references tools absent from the current runtime: {details}")
+
+
 def _iter_yaml_files(directory: Path) -> list[Path]:
     return [*directory.glob("*.yaml"), *directory.glob("*.yml")]
+
+
+def _item_metadata(item: Any) -> dict[str, Any]:
+    value = item.get("metadata") if isinstance(item, Mapping) else getattr(item, "metadata", None)
+    return dict(value) if isinstance(value, Mapping) else {}
 
 
 def _document_cases(document: Any, file_path: Path) -> list[Any]:

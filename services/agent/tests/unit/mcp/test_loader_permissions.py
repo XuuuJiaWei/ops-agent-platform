@@ -1,6 +1,9 @@
 from contextlib import asynccontextmanager
 
 import pytest
+from langchain_core.tools import StructuredTool
+from mcp.shared.exceptions import McpError
+from mcp.types import CONNECTION_CLOSED, ErrorData
 
 from ops_pilot.config.mcp_schema import MCPConfig
 from ops_pilot.mcp import loader
@@ -94,7 +97,10 @@ async def test_single_server_tools_reuse_persistent_session(monkeypatch):
                 events.append(("exit", server_name, id(session)))
 
     async def fake_load_session_tools(session, *, server_name):
-        return [_SessionBackedTool("query", session, server_name)]
+        async def query(q: str) -> str:
+            return await session.call(server_name, "query")
+
+        return [StructuredTool.from_function(coroutine=query, name="query", description="Query the server")]
 
     monkeypatch.setattr("langchain_mcp_adapters.client.MultiServerMCPClient", FakeClient)
     monkeypatch.setattr("langchain_mcp_adapters.tools.load_mcp_tools", fake_load_session_tools)
@@ -119,6 +125,85 @@ async def test_single_server_tools_reuse_persistent_session(monkeypatch):
     assert lifecycle_tasks[0] is not caller_task
 
 
+@pytest.mark.asyncio
+async def test_persistent_server_reconnects_after_session_termination(monkeypatch):
+    sessions: list[_DisconnectingSession] = []
+
+    class FakeClient:
+        def __init__(self, connections):
+            self.connections = connections
+
+        @asynccontextmanager
+        async def session(self, _server_name):
+            session = _DisconnectingSession(generation=len(sessions) + 1)
+            sessions.append(session)
+            try:
+                yield session
+            finally:
+                session.closed = True
+
+    async def fake_load_session_tools(session, *, server_name):
+        async def query(q: str) -> str:
+            return await session.call(server_name, "query", q)
+
+        return [StructuredTool.from_function(coroutine=query, name="query", description="Query the server")]
+
+    monkeypatch.setattr("langchain_mcp_adapters.client.MultiServerMCPClient", FakeClient)
+    monkeypatch.setattr("langchain_mcp_adapters.tools.load_mcp_tools", fake_load_session_tools)
+
+    tools, session_owner = await _load_single_server(_config().servers[0])
+
+    assert await tools[0].ainvoke({"q": "first"}) == "dyna:query:first:generation-1"
+    with pytest.raises(McpError, match="Connection closed"):
+        await tools[0].ainvoke({"q": "disconnect"})
+
+    assert await tools[0].ainvoke({"q": "after-reconnect"}) == "dyna:query:after-reconnect:generation-2"
+    assert len(sessions) == 2
+
+    await session_owner.aclose()
+    assert all(session.closed for session in sessions)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_disconnects_trigger_one_session_refresh(monkeypatch):
+    sessions: list[_DisconnectingSession] = []
+
+    class FakeClient:
+        def __init__(self, connections):
+            self.connections = connections
+
+        @asynccontextmanager
+        async def session(self, _server_name):
+            session = _DisconnectingSession(generation=len(sessions) + 1)
+            sessions.append(session)
+            try:
+                yield session
+            finally:
+                session.closed = True
+
+    async def fake_load_session_tools(session, *, server_name):
+        async def query(q: str) -> str:
+            return await session.call(server_name, "query", q)
+
+        return [StructuredTool.from_function(coroutine=query, name="query", description="Query the server")]
+
+    monkeypatch.setattr("langchain_mcp_adapters.client.MultiServerMCPClient", FakeClient)
+    monkeypatch.setattr("langchain_mcp_adapters.tools.load_mcp_tools", fake_load_session_tools)
+
+    tools, session_owner = await _load_single_server(_config().servers[0])
+    results = await __import__("asyncio").gather(
+        tools[0].ainvoke({"q": "disconnect-a"}),
+        tools[0].ainvoke({"q": "disconnect-b"}),
+        return_exceptions=True,
+    )
+
+    assert all(isinstance(result, McpError) for result in results)
+    assert len(sessions) == 2
+    assert await tools[0].ainvoke({"q": "healthy"}) == "dyna:query:healthy:generation-2"
+
+    await session_owner.aclose()
+
+
 class _FakeSession:
     def __init__(self) -> None:
         self.calls = 0
@@ -129,11 +214,12 @@ class _FakeSession:
         return f"{server_name}:{tool_name}:{self.calls}"
 
 
-class _SessionBackedTool:
-    def __init__(self, name: str, session: _FakeSession, server_name: str) -> None:
-        self.name = name
-        self._session = session
-        self._server_name = server_name
+class _DisconnectingSession:
+    def __init__(self, *, generation: int) -> None:
+        self.generation = generation
+        self.closed = False
 
-    async def ainvoke(self, _args):
-        return await self._session.call(self._server_name, self.name)
+    async def call(self, server_name: str, tool_name: str, query: str) -> str:
+        if self.generation == 1 and query.startswith("disconnect"):
+            raise McpError(ErrorData(code=CONNECTION_CLOSED, message="Connection closed"))
+        return f"{server_name}:{tool_name}:{query}:generation-{self.generation}"

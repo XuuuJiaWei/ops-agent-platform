@@ -6,6 +6,8 @@ import pytest
 from langchain.tools import ToolRuntime
 from langchain.tools.tool_node import ToolCallRequest
 from langchain_core.messages import ToolMessage
+from mcp.shared.exceptions import McpError
+from mcp.types import CONNECTION_CLOSED, ErrorData
 
 from ops_pilot.reliability.execution import MemoryExecutionJournal, ReliableToolExecutor, RetryPolicy
 from ops_pilot.reliability.middleware import ReliableToolMiddleware
@@ -84,4 +86,80 @@ async def test_business_error_is_returned_to_agent_and_duplicate_reuses_it() -> 
     assert isinstance(first, ToolMessage)
     assert isinstance(duplicate, ToolMessage)
     assert duplicate.content == "deployment does not exist"
+    assert attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_closed_mcp_session_is_retried_for_read_only_tool() -> None:
+    middleware = ReliableToolMiddleware(
+        executor=ReliableToolExecutor(
+            journal=MemoryExecutionJournal(),
+            retry_policy=RetryPolicy(max_attempts=2, initial_backoff_seconds=0),
+        ),
+        tool_servers={"query_metrics": "prometheus"},
+    )
+    request = ToolCallRequest(
+        tool_call={"id": "call-closed", "name": "query_metrics", "args": {"query": "up"}},
+        tool=SimpleNamespace(name="query_metrics", metadata={"readOnlyHint": True}),
+        state={},
+        runtime=ToolRuntime(
+            state={},
+            context=None,
+            config={"metadata": {"run_id": "run-closed"}},
+            stream_writer=lambda _: None,
+            tool_call_id="call-closed",
+            store=None,
+            tools=[],
+        ),
+    )
+    attempts = 0
+
+    async def handler(_: ToolCallRequest) -> ToolMessage:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise McpError(ErrorData(code=CONNECTION_CLOSED, message="Connection closed"))
+        return ToolMessage(content="up == 1", tool_call_id="call-closed")
+
+    result = await middleware.awrap_tool_call(request, handler)
+
+    assert isinstance(result, ToolMessage)
+    assert result.content == "up == 1"
+    assert attempts == 2
+
+
+@pytest.mark.asyncio
+async def test_closed_mcp_session_is_not_retried_for_unsafe_tool() -> None:
+    middleware = ReliableToolMiddleware(
+        executor=ReliableToolExecutor(
+            journal=MemoryExecutionJournal(),
+            retry_policy=RetryPolicy(max_attempts=2, initial_backoff_seconds=0),
+        ),
+        tool_servers={"restart": "kubernetes"},
+    )
+    request = ToolCallRequest(
+        tool_call={"id": "call-unsafe", "name": "restart", "args": {"deployment": "payment"}},
+        tool=SimpleNamespace(name="restart", metadata={"destructiveHint": True}),
+        state={},
+        runtime=ToolRuntime(
+            state={},
+            context=None,
+            config={"metadata": {"run_id": "run-unsafe"}},
+            stream_writer=lambda _: None,
+            tool_call_id="call-unsafe",
+            store=None,
+            tools=[],
+        ),
+    )
+    attempts = 0
+
+    async def handler(_: ToolCallRequest) -> ToolMessage:
+        nonlocal attempts
+        attempts += 1
+        raise McpError(ErrorData(code=CONNECTION_CLOSED, message="Connection closed"))
+
+    result = await middleware.awrap_tool_call(request, handler)
+
+    assert isinstance(result, ToolMessage)
+    assert "outcome is unknown" in str(result.content)
     assert attempts == 1
