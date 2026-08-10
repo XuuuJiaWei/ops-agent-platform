@@ -1,131 +1,139 @@
-# ops_pilot — 简历包装文档（秋招 · Agent 开发岗）
+# ops_pilot：面向企业运维的可恢复、可控、可评测智能体运行时
 
-> 用途：把本项目写进简历/面试话术。所有量化数字以仓库实测为准（见文末「事实核对」）。
-> 定位诚实：这是一个**个人项目 / 工程原型**，非生产系统——请勿写「已上线」「大规模使用」「效果提升 X%」等无法佐证的表述。
+> 用途：秋招智能体开发岗简历与面试展开。以下「项目亮点」只描述当前仓库已实现、可由代码或测试复核的能力；「演进方向」不得提前写成已完成成果。
+>
+> 项目性质：个人项目 / 生产导向的工程原型，不宣称已上线、大规模使用或达到生产服务等级协议。
 
----
+## 项目简介
 
-## 一句话定位
+面向 Kubernetes 与可观测性故障诊断场景，构建以统一智能体运行时为核心的对话式运维智能体；打通「多源信号查询 → 故障分析 → 高风险操作审批 → 受控工具执行 → 结果追踪 → 故障注入评测」链路，并以持久化状态、幂等去重、分类重试、熔断和沙箱隔离约束智能体在真实工具环境中的执行风险。
 
-面向企业运维（AIOps）场景的**对话式 Agent 工程原型**：以协议无关的统一 Agent Runtime 为核心，通过 MCP 动态接入可观测性工具，具备持久化状态、可靠工具执行、HITL 安全审批、远程沙箱、可观测与「故障注入 → 评测」闭环。
+**技术栈：** Python 3.12、DeepAgents、LangGraph、FastAPI、MCP、Google A2A、PostgreSQL、Langfuse、OpenSandbox、React 19、TypeScript、CopilotKit / AG-UI。
 
-技术栈：Python（DeepAgents / LangGraph / FastAPI）+ React 19 / TypeScript（CopilotKit / AG-UI）。
+## 项目亮点
 
----
+1. **统一智能体运行框架**：以单一智能体工厂管理模型、提示词、技能、MCP 工具、检查点、执行生命周期与链路追踪，同时适配 CopilotKit / AG-UI 流式会话和 Google A2A JSON-RPC；协议层仅负责转换与投影，避免两套智能体逻辑重复演进。
 
-## 招聘方在 Agent 开发岗最看重的能力信号
+2. **MCP 动态工具编排**：支持 `stdio` 本地传输与带认证的 `streamable_http` 远程传输，接入 Kubernetes、Prometheus、Jaeger、OpenSearch 4 类运维工具；实现并发加载、服务器级超时、持久会话、工具白名单，以及 `required`（必选）/ `optional`（可选）启动降级，使单个可选依赖故障不阻断运行时。
 
-写简历/准备面试时，围绕这 6 条组织材料（本项目均可对应）：
+3. **可靠工具执行语义**：以 `(run_id, tool_call_id)` 持久化执行账本和 PostgreSQL 咨询锁抑制并发重复调用并复用终态结果；仅对只读或显式幂等工具执行有限次数重试、指数退避与随机抖动，按 MCP 服务器隔离关闭、开启、半开启三种熔断状态；非幂等写操作遇到“副作用可能成功但响应丢失”时记为 `unknown`，停止盲目重放。
 
-1. **端到端落地**：不是只调 LLM API，而是可运行、可维护、有错误处理/监控/容错的系统。
-2. **Agent 框架与编排**：LangGraph/DeepAgents 的原理 + 工程实现，而非「调包」。
-3. **工具调用与协议集成**：MCP、Function Calling、A2A 是高频关键词。
-4. **可靠性与安全**：HITL、危险操作审批、超时、降级、沙箱、故障兜底——Agent 接生产的核心不是「会不会答」而是「会不会失控」。
-5. **评测与可观测**：dataset、trace、LLM-as-judge、线上回放与问题定位。
-6. **工程化与协作**：前后端、测试、模块边界、协议兼容。
+4. **可恢复状态与安全边界**：使用 PostgreSQL 分层保存 LangGraph 检查点、A2A 任务、AG-UI 事件、智能体空间与工具执行记录，使图执行、协议任务和浏览器会话可跨进程重启恢复；通过运行截止时间、协作式取消与停止信号传播控制生命周期，并以人工介入审批和带租约续期的 OpenSandbox 隔离高风险命令及文件操作。
 
----
+5. **端到端故障评测**：搭建基于 Langfuse 数据集的评测框架，组合确定性评分与大语言模型裁判；维护 **18 条评测用例**（14 条运维场景、4 条冒烟用例）和 **13 类 OpenTelemetry Demo 故障开关**，按用例串行完成「重置 → 注入 → 信号沉淀 → 智能体诊断 → 评分 → 回收」，并以外层 `finally` 保证崩溃或 Ctrl-C 后不遗留集群故障状态。
 
-## 五大亮点（按「业务价值 > 系统复杂度 > 关键机制」排序）
-
-### 1. 协议无关的统一 Agent Runtime
-- 单一 `agent factory` 同时对接 **CopilotKit/AG-UI（浏览器流式聊天）** 与 **Google A2A（Agent2Agent JSON-RPC，程序化调用）**，两条协议复用同一套模型、工具、Prompt、可观测配置。
-- 体现「Agent 核心层」抽象能力，而非单一前端 demo。
-
-### 2. MCP 动态工具编排
-- 支持 **stdio 本地** 与 **streamable_http 远程（带认证）** 两类 MCP 传输。
-- 并发加载、per-server 超时、`required`/`optional` 降级（可选服务加载失败不阻断启动）。
-- 已接入 Kubernetes / Prometheus / Jaeger / OpenSearch 等可观测性工具。
-
-### 3. 可靠执行与安全边界
-- **持久化状态分层**：PostgreSQL 分别保存 LangGraph checkpoint、A2A task、CopilotKit AG-UI event 与 Agent Spaces，支持进程重启后恢复执行状态和浏览器历史。
-- **可靠工具执行**：以 `(run_id, tool_call_id)` 建立持久化 journal，通过 PostgreSQL advisory lock 去重并发/重复调用；仅对只读或显式幂等工具执行 bounded retry + exponential backoff + jitter，并记录 attempt。
-- **不确定结果治理**：非幂等写操作在“副作用可能成功但响应丢失”时进入 `unknown`，禁止 Agent 盲目重试；按 MCP Server 隔离熔断，避免单一依赖拖垮全部工具。
-- **生命周期控制**：run deadline、协作式取消与 Stop 传播，确保取消后不再调度后续危险工具。
-- **HITL + 沙箱**：危险工具调用走人工审批（`interrupt_on`）；文件系统与命令执行可隔离到 OpenSandbox，并通过租约续期保障长任务。
-
-### 4. 评测闭环（最强差异化）
-- 基于 **Langfuse dataset** 的评测，集成 **LLM-as-judge** 评分器（rubric judge）+ 确定性布尔评分。
-- **Chaos eval**：对每个测试用例自动开启对应的 OpenTelemetry Demo 故障 flag（`kubectl patch` flagd ConfigMap）→ 等信号沉淀 → 跑 Agent（带 trace）→ 自动关闭 flag → 冷却。**串行执行**（flag 是集群级全局状态），且外层 `finally` 全程兜底 reset，崩溃/Ctrl-C 也不会留脏状态。
-
-### 5. 可观测
-- Langfuse tracing 贯穿 `/chat` 与 `/a2a` 两条协议链路，凭证缺失时自动降级为无操作，不阻断本地启动。
+6. **可观测与工程化验证**：在 `/chat` 与 `/a2a` 链路接入 Langfuse 链路追踪，凭证缺失时自动降级且不影响本地启动；通过最小权限、无模型密钥的 GitHub Actions 执行 Ruff、Pytest、Node.js 测试、TypeScript 类型检查、ESLint 检查与 Vite 构建。当前仓库约 **7800 行 Python、2700 行 TypeScript / JavaScript，包含 126 个 Python 测试与 4 个 Node.js 测试**。
 
 ---
 
-## 简历 Bullet（可直接粘贴 · 中文）
+## 简历压缩版（版面有限时直接粘贴）
 
-- **基于 DeepAgents / LangGraph 构建协议无关的统一 Agent Runtime 与 agent factory**，让同一后端同时对接 CopilotKit/AG-UI 流式聊天与 Google A2A JSON-RPC，两协议复用同一套模型/工具/Prompt/可观测配置，消除重复实现。
-- **实现 MCP（Model Context Protocol）动态工具加载框架**，支持 stdio 本地与 streamable_http 认证远程两类传输，接入 Kubernetes/Prometheus/Jaeger/OpenSearch 等可观测工具；实现并发加载、per-server 超时与 required/optional 降级，提升工具接入的稳定性与可扩展性。
-- **实现持久化可靠执行层**：以 `(run_id, tool_call_id)` journal + PostgreSQL advisory lock 去重工具调用，按工具幂等属性实施 bounded retry/backoff/jitter，按 MCP Server 熔断；对非幂等写入的模糊失败标记 `unknown` 而非盲目重试，并支持 deadline、取消与 Stop 传播。
-- **为高风险工具调用设计 HITL 审批链路**，对命令执行、集群操作等危险动作强制人工确认；结合远程沙箱隔离与租约续期，降低 Agent 失控风险。
-- **搭建基于 Langfuse dataset 的评测体系**，集成 LLM-as-judge 评分器；设计 chaos eval 流程——按用例自动注入 OpenTelemetry Demo 故障、等待信号稳定、运行 Agent、自动回收故障开关并全程兜底 reset，实现故障场景的可复现回归验证。
-- **构建覆盖前后端的工程化验证链路**，通过 GitHub Actions 执行 Ruff、Pytest、Node test、TypeScript、ESLint 与 Vite build；仓库约 7.8k 行 Python、2.7k 行 TypeScript/JavaScript，包含 130 个测试函数。
+**ops_pilot｜面向企业运维的可恢复、可控、可评测智能体运行时｜个人项目**
 
-## Resume Bullets (English)
+- 基于 DeepAgents / LangGraph 构建统一智能体运行时，以单一智能体工厂复用模型、提示词、技能、MCP 工具、检查点与链路追踪，同时适配 CopilotKit / AG-UI 流式会话和 Google A2A JSON-RPC。
+- 实现 MCP 动态工具编排，接入 Kubernetes、Prometheus、Jaeger、OpenSearch，支持本地与远程两种传输方式、并发加载、持久会话、超时、工具白名单与必选 / 可选依赖降级。
+- 设计可靠工具执行层，以持久化执行账本和 PostgreSQL 咨询锁去重调用，按幂等语义实施分类重试与服务器级熔断；对非幂等写入的模糊失败标记 `unknown`，并以运行截止时间、取消传播、人工介入审批和远程沙箱约束高风险操作。
+- 搭建 Langfuse 数据集、大语言模型裁判与故障注入评测闭环，覆盖 18 条用例与 13 类故障注入；以 PostgreSQL 分层持久化执行态、任务态和会话事件，配套 130 个自动化测试及 GitHub Actions 验证链路。
 
-- **Built a protocol-agnostic agent runtime on DeepAgents/LangGraph** with a single agent factory that serves both CopilotKit/AG-UI streaming chat and Google A2A (Agent2Agent) JSON-RPC, reusing one model/tool/prompt/observability config across both surfaces.
-- **Implemented a dynamic MCP (Model Context Protocol) tool-loading framework** supporting local `stdio` and authenticated remote `streamable_http` transports (Kubernetes, Prometheus, Jaeger, OpenSearch); added concurrent loading, per-server timeouts, and required/optional degradation.
-- **Built a durable tool-execution layer** using a `(run_id, tool_call_id)` journal and PostgreSQL advisory locks for deduplication; applied bounded retry/backoff/jitter only to retry-safe tools, isolated circuit breakers per MCP server, and surfaced ambiguous non-idempotent writes as `unknown` instead of retrying blindly.
-- **Designed lifecycle and safety controls** including run deadlines, cooperative cancellation/Stop propagation, HITL approval for high-risk tools, and leased remote sandbox isolation.
-- **Created a Langfuse-dataset evaluation suite with an LLM-as-judge grader**, plus a *chaos eval* loop that injects one OpenTelemetry-Demo fault flag per case (`kubectl patch` on the flagd ConfigMap), lets signals settle, runs the traced agent, and always resets flags in a `finally` guard for reproducible regression testing.
-- **Added secret-free GitHub Actions CI** for Ruff, Pytest, Node tests, TypeScript, ESLint, and Vite builds; the repository contains ~7.8k lines of Python, ~2.7k lines of TypeScript/JavaScript, and 130 test functions.
+> 推荐在一页简历中使用上面 4 条；完整 6 条用于项目主页、网申长文本或面试展开。
 
 ---
 
-## STAR 面试话术（口头展开）
+## 下一步项目演进方向（按简历收益排序）
 
-- **S**：企业运维中，Agent 要接多种可观测工具、还要保证安全可控——直接让模型执行 kubectl / 查日志风险极高。
-- **T**：构建一个可扩展、可评测、可安全上线的对话式 Agent 平台。
-- **A**：用 LangGraph/DeepAgents 抽象统一 runtime；MCP 动态接工具；以持久化 journal、幂等分类、重试/熔断/deadline/取消约束工具执行；危险调用加 HITL；文件/命令进远程沙箱；Langfuse + chaos eval 建回归闭环。
-- **R**：一套后端复用两种协议，关键状态可跨重启恢复，重复 tool call 复用结果，非幂等模糊失败不会盲目重放；130 个测试函数与 CI 覆盖关键链路。
+### 优先级 0：先把“有评测框架”升级为“有可信结果”
+
+这是当前最重要、也最能拉开简历差距的一步。图片中的百分比之所以有说服力，不是因为数字大，而是因为它说明了固定数据集、基线、对照实验和结果口径。
+
+- 将现有 18 条用例扩充为 **50–100 条版本化样本**，覆盖正常诊断、依赖故障、危险操作、模糊失败与无故障样本。
+- 按故障类型、服务和难度固定划分验证集与留出集，避免同类场景同时进入调参与测试集合。
+- 建立至少两个基线：**无可靠执行中间件的智能体**、**当前完整运行时**；每条样本重复运行，降低模型随机性对结果的干扰。
+- 固定输出任务成功率、根因识别率、工具选择准确率、禁用工具违规率、`unknown` 正确处置率、故障恢复率、P50 / P95 延迟、词元消耗与成本等指标。
+- 将留出集阈值接入持续集成评测门禁，保存数据集、提示词、模型、工具与代码版本，使结果可复现、可回归。
+
+**完成后才能写：**“在若干条受控场景上，相比基线将某项指标由原值提升至新值”。在真实实验完成前，不写任何提升百分比。
+
+### 优先级 1：从“运维聊天智能体”深化为“可验证的事件处置闭环”
+
+当前系统的运行时深度强于业务闭环。下一阶段应沉淀明确的运维领域对象，而不是继续横向堆框架名词。
+
+```
+事件
+  → 证据（指标 / 日志 / 链路追踪 / 集群状态）
+  → 发现（候选根因 + 证据引用 + 置信度）
+  → 行动计划（影响范围 + 风险 + 回滚方案）
+  → 人工介入审批
+  → 执行
+  → 验证 / 对账 / 回滚
+```
+
+- 设计统一的事件、证据、发现、行动计划与验证报告数据结构。
+- 强制结论引用证据，区分“观察事实、模型推断、待验证假设”，降低无证据诊断。
+- 写操作执行后必须查询期望状态并验证；失败进入补偿 / 回滚，模糊结果进入对账流程。
+- 前端围绕证据时间线、变更差异、审批、执行状态和回滚入口构建智能体原生界面，而不是只展示聊天消息。
+
+### 优先级 2：补齐 `unknown` 的下游闭环与可靠性可观测
+
+- 为写工具定义统一幂等键与操作标识契约，并增加 `get_status` / `reconcile` 能力。
+- 将 `unknown` 记录进入待核对队列，支持自动查询、人工处置和审计，不让状态停留在文档语义。
+- 输出重试次数、熔断状态、取消延迟、运行超时、未知状态比例、对账成功率等指标。
+- 扩展故障适配器，覆盖模型超时、MCP 断连、沙箱失败及“下游成功、响应丢失”等半执行故障。
+
+### 优先级 3：有真实部署需求后再做企业化
+
+- JWT / OIDC、RBAC、租户级数据与工具隔离、审计日志。
+- 受控数据库迁移、工作进程与接口服务分离、持久队列、死信队列、多副本共享韧性状态。
+- 灰度 / 影子发布、提示词 + 模型 + 工具 + 技能版本化与一键回滚。
+- 服务等级目标、容量测试、备份恢复与故障演练。
+
+### 优先级 4：多智能体是可选增强，不是近期主线
+
+只有当固定评测证明单智能体在上下文干扰、工具选择或并行取证上遇到瓶颈时，再拆分指标、日志、链路追踪、Kubernetes 与变更安全智能体；多智能体必须共享证据与发现协议，并具备去重、冲突仲裁和置信度校准。否则只会增加调用成本、延迟和调试复杂度，不能自然形成简历亮点。
 
 ---
 
-## 深挖问题预案（面试大概率会问）
+## 面试展开话术
 
-- **为什么用 MCP 而不是自己写 tool schema？** → 标准协议、工具与 Agent 解耦、可复用社区 server；再讲你做的并发加载/超时/降级增强。
-- **chaos eval 为什么串行 / max_concurrency=1？** → flag 是集群级全局状态（patch 同一个 ConfigMap），并发会互相踩；串行 + 两层 finally reset 保证隔离与不留脏。
-- **HITL 怎么实现的？** → LangGraph `interrupt_on`，对配置为 hitl 的工具名在执行前中断、等前端审批。
-- **两协议怎么共享一个 agent？** → factory 只产出 graph/runtime，AG-UI 与 A2A 各自是 adapter，不复制业务逻辑。
-- **LLM-as-judge 的可信度？** → 诚实说明：rubric judge 是辅助信号，配合确定性布尔评分；没有人工标注基线时不宣称「提升 X%」。
-- **是否实现 Exactly Once？** → 没有夸大。系统实现调用去重、持久化结果和按幂等性分类的重试；跨外部副作用系统无法靠本地 journal 保证数学意义的 Exactly Once，模糊失败进入 `unknown`，生产闭环还需要外部 idempotency key 与 reconciliation。
+### 面试主线
 
----
+- **背景**：运维智能体要同时访问指标、日志、链路追踪和集群工具；直接让模型执行 `kubectl` 或写操作，会遇到重复副作用、响应丢失、越权执行与依赖故障扩散。
+- **目标**：构建一套可恢复、可约束、可评测的智能体运行时，而不是只完成一次大语言模型工具调用演示。
+- **行动**：用统一智能体工厂隔离智能体核心与 AG-UI / A2A 协议；通过 MCP 动态接入工具；以持久执行账本、幂等分类、重试、熔断、运行截止时间与取消控制执行；以人工介入审批和沙箱限制危险动作；用 Langfuse 与故障注入评测建立回归链路。
+- **结果**：同一运行时支撑两种协议，关键状态可跨重启恢复，重复工具调用可复用结果，非幂等模糊失败不会被盲目重放；已形成 18 条用例、13 类故障注入和 130 个自动化测试的可验证工程基线。
 
-## ⚠️ 必须避免的踩坑 / 夸大
+### 高频追问
 
-- ❌ 「设计了生产级平台」——本项目无真实用户/权限/灰度/SLA/租户审计，写「生产导向的工程原型 / 个人项目」。
-- ❌ 「实现 Exactly Once」——写「幂等去重 + 分类重试 + 不确定结果治理」，并明确外部系统仍需幂等键和对账。
-- ❌ 「效果提升 XX%」——没有固定基线 + 人工标注 + 对照实验，不要写百分比。
-- ❌ 只讲模型能力不讲工程约束——Agent 岗更看重可靠性/降级/超时/HITL/评测。
-- ❌ 技术名词堆砌（LangGraph/MCP/A2A/Langfuse/OTel…）——每个都要能说清「为什么用、解决什么」。
-- ❌ 把「集成/封装」写成「从零设计」——诚实用词。
-- ❌ 过度强调前端——Agent 岗核心是 runtime/工具/可靠性/评测/协议。
+- **为什么用 MCP，而不是直接写函数调用？** 标准化工具发现与调用协议，使工具服务和智能体运行时解耦；项目额外补充了并发加载、超时、持久会话、权限过滤和启动降级。
+- **检查点为什么还不够？** 检查点记录图执行位置，不知道外部副作用是否完成；因此另建工具执行账本，记录调用身份、参数哈希、状态、尝试次数与结果。
+- **是否实现严格一次执行？** 没有。当前实现是稳定调用身份、重复抑制、持久结果复用和按幂等语义分类重试；下游完成写入但本地记账前崩溃时仍需幂等键或对账机制。
+- **故障注入评测为什么串行？** 故障开关位于同一个集群级 ConfigMap，并发用例会互相污染；串行执行和两层重置保证用例隔离。
+- **大语言模型裁判是否可信？** 它只作为辅助信号，并与确定性工具调用、禁用工具、无错误等评分组合；下一步还需人工标注集、基线与留出集验证其一致性。
+- **为什么不马上拆多智能体？** 先用评测定位单智能体的明确瓶颈；只有当角色拆分能量化提高效果或并行取证效率时才值得承担额外延迟、成本和协调复杂度。
 
----
+## 事实核对
 
-## 事实核对（写简历时的可佐证数字）
+| 指标 | 当前仓库快照 | 可复核来源 |
+| --- | ---: | --- |
+| 后端代码量 | 7,798 行 Python | `services/agent/src` |
+| 前端 / 运行时代码量 | 2,668 行 TypeScript / JavaScript | `apps/web/src`、`apps/copilot-runtime/src` |
+| 自动化测试 | 126 个 Python 测试 + 4 个 Node.js 测试 | `services/agent/tests`、`apps/**/*.test.mjs` |
+| 测试文件 | 29 个 | `services/agent/tests`、`apps/**/*.test.mjs` |
+| MCP 服务器 | 4 类 | `config/config.example.yaml` |
+| 故障注入 | 13 个故障开关 | `services/agent/src/ops_pilot/eval/chaos.py` |
+| 评测用例 | 18 条（14 运维 + 4 冒烟） | `services/agent/eval/cases/*.yaml` |
+| 协议入口 | CopilotKit / AG-UI + Google A2A | `ops_pilot/agui/`、`ops_pilot/a2a/` |
 
-| 指标 | 数值 | 来源 |
-| --- | --- | --- |
-| 后端代码量 | ~7,800 行 Python | `services/agent/src` |
-| 前端/Runtime 代码量 | ~2,700 行 TypeScript / JavaScript | `apps/web/src`、`apps/copilot-runtime/src` |
-| 测试用例 | 130 个测试函数 / 29 个测试文件 | `services/agent/tests`、`apps/**/**.test.mjs` |
-| 已接入 MCP Server | 4 类（Kubernetes / Prometheus / Jaeger / OpenSearch） | `config/config.example.yaml` |
-| 故障注入 flag | 13 个 fault flags | `eval/chaos.py: FAULT_FLAGS` |
-| 评测用例 | 18 条（14 运维场景 + 4 冒烟） | `services/agent/eval/cases/*.yaml` |
-| 双协议 | CopilotKit/AG-UI + Google A2A | `backend.py` / `a2a/` |
+## 表述边界
 
-> 面试可如实说明规模：一个持续迭代、50+ commit 的个人项目，覆盖 Agent 平台从 runtime、状态持久化、可靠工具执行、安全、沙箱到评测的完整工程链路。计数是仓库快照，不要把代码量本身当作质量指标。
-
----
+- 写“生产导向的工程原型”，不写“已上线的生产级平台”。
+- 写“持久化去重 + 分类重试 + 不确定结果治理”，不写“严格一次执行”。
+- 没有固定基线、人工标注和留出集实验前，不写效果提升百分比。
+- 代码量只用于说明项目规模，不作为质量结果；简历优先写机制、场景和验证。
+- “多智能体、自进化、长期记忆”只有真正实现并经过评测后，才能进入项目亮点。
 
 ## 上简历前最后检查
 
-当前已经具备可写入秋招简历的工程深度，但公开展示时还应满足：
-
-- GitHub CI 全绿，README 中明确个人项目边界和 Exactly Once 语义边界。
-- 仓库不得包含真实凭证、内部域名、员工邮箱或公司业务数据；发布前扫描当前树和完整 Git 历史。
-- 最好再补一张架构图和一个 60–90 秒演示 GIF/视频，展示“发起会话 → MCP 调用 → 失败重试/熔断 → 重启后恢复”。这是当前最值得补的展示材料，不是继续堆功能。
-- 面试时能够现场解释一次 `unknown` 状态为什么比自动重试更安全，以及 localStorage、Copilot event log、LangGraph checkpoint 各自保存什么。
+- 持续集成检查保持全绿；README 清楚说明个人项目、数据边界和可靠性语义边界。
+- 发布前扫描当前工作树和完整 Git 历史，确保没有真实凭证、内部域名、员工邮箱或公司数据。
+- 补一张架构图和一个 60–90 秒演示视频，完整展示“故障注入 → 智能体取证 → 人工介入审批 → 执行 / 取消 → 状态恢复 → 评测结果”。
+- 面试前实际跑出第一版基线表；这是下一项最值得投入的工作，优先级高于继续增加框架或页面。
