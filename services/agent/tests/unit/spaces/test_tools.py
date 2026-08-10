@@ -84,3 +84,59 @@ async def test_tool_domain_errors_are_model_visible_results() -> None:
             "message": "Space 'missing' was not found.",
         },
     }
+
+
+def _live_card_payload() -> dict:
+    return {
+        "type": "kpi",
+        "title": "Live doc count",
+        "size": "small",
+        "content": {"metrics": []},  # empty until first refresh
+        "binding": {
+            "source_tool": "CountTool",
+            "source_params": {"index": "logs-*"},
+            "mapping": {"metrics": "[{label: 'Docs', value: to_string(count)}]"},
+            "refresh_mode": "interval",
+            "interval_ms": 30000,
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_add_live_card_allows_empty_initial_content() -> None:
+    tools = _tool_map()
+    created = await tools["create_space"].ainvoke({"name": "Observability"})
+    space_id = created["space"]["id"]
+
+    added = await tools["add_card_to_space"].ainvoke({"space_id": space_id, "card": _live_card_payload()})
+
+    card = added["space"]["cards"][0]
+    assert added["ok"] is True
+    assert card["binding"]["source_tool"] == "CountTool"
+    assert card["content"]["metrics"] == []  # empty content accepted for live card
+
+
+@pytest.mark.asyncio
+async def test_update_card_can_attach_binding_to_static_card() -> None:
+    tools = _tool_map()
+    created = await tools["create_space"].ainvoke({"name": "Observability"})
+    space_id = created["space"]["id"]
+    added = await tools["add_card_to_space"].ainvoke({"space_id": space_id, "card": _card_payload()})
+    card_id = added["space"]["cards"][0]["id"]
+
+    updated = await tools["update_card_in_space"].ainvoke(
+        {
+            "space_id": space_id,
+            "card_id": card_id,
+            "content": {"metrics": [{"label": "Incidents", "value": 7}]},
+            "binding": {
+                "source_tool": "CountTool",
+                "refresh_mode": "interval",
+                "interval_ms": 30000,
+            },
+        }
+    )
+
+    card = updated["space"]["cards"][0]
+    assert card["binding"]["source_tool"] == "CountTool"
+

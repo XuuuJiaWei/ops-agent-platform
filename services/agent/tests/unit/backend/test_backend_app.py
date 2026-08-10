@@ -9,7 +9,7 @@ from ops_pilot.spaces import MemorySpaceRepository
 
 class DummyRuntime:
     graph = object()
-    mcp = type("MCP", (), {"status": MCPLoadStatus()})()
+    mcp = type("MCP", (), {"status": MCPLoadStatus(), "tools": (), "hitl_tools": ()})()
     tools = ()
     spaces = MemorySpaceRepository()
 

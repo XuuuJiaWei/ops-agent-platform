@@ -55,18 +55,37 @@ export const cardContentSchema = z.object({
   markdown: z.string().nullish(),
 });
 
+export const cardBindingSchema = z.object({
+  source_tool: z.string(),
+  source_params: z.record(z.string(), z.unknown()).default({}),
+  mapping: z.record(z.string(), z.string()).nullish(),
+  refresh_mode: z.enum(["manual", "interval"]).default("manual"),
+  interval_ms: z.number().int().nullish(),
+});
+
+export const refreshStatusSchema = z.enum([
+  "fresh",
+  "stale",
+  "refreshing",
+  "error",
+]);
+
 export const cardDraftSchema = z.object({
   type: cardTypeSchema,
   title: z.string(),
   subtitle: z.string().nullish(),
   size: cardSizeSchema.default("medium"),
   content: cardContentSchema,
+  binding: cardBindingSchema.nullish(),
 });
 
 export const spaceCardSchema = cardDraftSchema.extend({
   id: z.string(),
   created_at: z.string(),
   updated_at: z.string(),
+  refresh_status: refreshStatusSchema.default("fresh"),
+  last_refreshed_at: z.string().nullish(),
+  last_error: z.string().nullish(),
 });
 
 export const spaceSchema = z.object({
@@ -93,6 +112,8 @@ export const spaceToolResultSchema = z.object({
 });
 
 export type CardDraft = z.infer<typeof cardDraftSchema>;
+export type CardBinding = z.infer<typeof cardBindingSchema>;
+export type RefreshStatus = z.infer<typeof refreshStatusSchema>;
 export type CardSize = z.infer<typeof cardSizeSchema>;
 export type Space = z.infer<typeof spaceSchema>;
 export type SpaceCard = z.infer<typeof spaceCardSchema>;

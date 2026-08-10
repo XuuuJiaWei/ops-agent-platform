@@ -1,5 +1,6 @@
 import {
   Activity,
+  AlertCircle,
   ArrowDownRight,
   ArrowRight,
   ArrowUpRight,
@@ -7,6 +8,7 @@ import {
   FileText,
   Gauge,
   ListTree,
+  RefreshCw,
   Table2,
 } from "lucide-react";
 import {
@@ -42,12 +44,62 @@ export function SpaceCardView({ card, compact = false }: SpaceCardViewProps) {
           <h3 className="truncate text-sm font-semibold text-slate-950">{card.title}</h3>
           {card.subtitle ? <p className="mt-0.5 line-clamp-2 text-xs leading-5 text-slate-500">{card.subtitle}</p> : null}
         </div>
+        <FreshnessBadge card={card} />
       </header>
       <div className="min-h-0 flex-1 overflow-auto p-4">
         <CardContent card={card} compact={compact} />
       </div>
     </article>
   );
+}
+
+function isLiveCard(card: CardDraft | SpaceCard): card is SpaceCard {
+  return "binding" in card && card.binding != null;
+}
+
+function FreshnessBadge({ card }: { card: CardDraft | SpaceCard }) {
+  if (!isLiveCard(card)) return null;
+  const status = card.refresh_status ?? "fresh";
+  if (status === "error") {
+    return (
+      <span
+        className="ml-auto mt-0.5 flex shrink-0 items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-medium text-red-700"
+        title={card.last_error ?? "Refresh failed"}
+      >
+        <AlertCircle aria-hidden="true" className="size-3" />
+        error
+      </span>
+    );
+  }
+  if (status === "refreshing") {
+    return (
+      <span className="ml-auto mt-0.5 flex shrink-0 items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700">
+        <RefreshCw aria-hidden="true" className="size-3 animate-spin" />
+        refreshing
+      </span>
+    );
+  }
+  return (
+    <span
+      className="ml-auto mt-0.5 flex shrink-0 items-center gap-1 rounded-full bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-500"
+      title={card.last_refreshed_at ? `Last updated ${new Date(card.last_refreshed_at).toLocaleString()}` : undefined}
+    >
+      <RefreshCw aria-hidden="true" className="size-3" />
+      {relativeTime(card.last_refreshed_at)}
+    </span>
+  );
+}
+
+function relativeTime(iso: string | null | undefined): string {
+  if (!iso) return "live";
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "live";
+  const seconds = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  return `${hours}h ago`;
 }
 
 function CardIcon({ type }: { type: CardDraft["type"] }) {

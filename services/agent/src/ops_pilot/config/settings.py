@@ -57,6 +57,8 @@ class Settings:
     persistence_backend: str = "memory"
     persistence_database_url: str | None = None
     persistence_setup_on_start: bool = True
+    spaces_resolver_enabled: bool = True
+    spaces_resolver_poll_seconds: float = 30.0
     reliability_enabled: bool = True
     run_deadline_seconds: float | None = 600.0
     tool_retry_max_attempts: int = 3
@@ -180,6 +182,7 @@ def load_settings(env: Mapping[str, str] | None = None, *, config: Mapping[str, 
     persistence = _section(config_data, "persistence")
     reliability = _section(config_data, "reliability")
     chaos = _section(config_data, "chaos")
+    spaces = _section(config_data, "spaces")
 
     persistence_backend = _choice(
         persistence.get("backend"),
@@ -237,6 +240,8 @@ def load_settings(env: Mapping[str, str] | None = None, *, config: Mapping[str, 
         persistence_backend=persistence_backend,
         persistence_database_url=persistence_database_url,
         persistence_setup_on_start=_bool(persistence.get("setup_on_start"), True),
+        spaces_resolver_enabled=_bool(spaces.get("resolver_enabled"), True),
+        spaces_resolver_poll_seconds=_positive_float(spaces.get("resolver_poll_seconds"), 30.0),
         reliability_enabled=_bool(reliability.get("enabled"), True),
         run_deadline_seconds=_optional_positive_float(reliability.get("run_deadline_seconds"), 600.0),
         tool_retry_max_attempts=_positive_int(reliability.get("max_attempts"), 3),

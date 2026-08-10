@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import Any
@@ -18,6 +19,7 @@ from ops_pilot.api.errors import register_exception_handlers
 from ops_pilot.config.settings import Settings, get_settings
 from ops_pilot.health.app import router as health_router
 from ops_pilot.spaces.api import create_spaces_router
+from ops_pilot.spaces.resolver import CardResolver
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -99,8 +101,26 @@ async def create_backend_app(
                 app.state.a2a_task_store_closer = task_store_closer
                 _mount_protocol_routes(app, runtime_manager.current, task_store)
                 app.state.protocol_routes_mounted = True
+            if resolved_settings.spaces_resolver_enabled and not getattr(app.state, "resolver_task", None):
+                rt = runtime_manager.current
+                resolver = CardResolver(
+                    repository=rt.spaces,
+                    tools_by_name={tool.name: tool for tool in rt.mcp.tools},
+                    hitl_tools=frozenset(rt.mcp.hitl_tools),
+                    poll_interval_s=resolved_settings.spaces_resolver_poll_seconds,
+                )
+                app.state.resolver_task = asyncio.create_task(resolver.run_forever())
+                logger.info("Card resolver started (poll=%ss)", resolved_settings.spaces_resolver_poll_seconds)
             yield
         finally:
+            resolver_task = getattr(app.state, "resolver_task", None)
+            if resolver_task is not None:
+                resolver_task.cancel()
+                try:
+                    await resolver_task
+                except asyncio.CancelledError:
+                    pass
+                app.state.resolver_task = None
             # Read owners from state at shutdown so test-swapped fakes are honored.
             store_closer = getattr(app.state, "a2a_task_store_closer", None)
             if store_closer is not None:

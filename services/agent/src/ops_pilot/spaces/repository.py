@@ -8,7 +8,18 @@ from datetime import datetime
 from typing import Protocol
 from uuid import uuid4
 
-from ops_pilot.spaces.models import CardContent, CardDraft, CardSize, CardType, Space, SpaceCard, SpaceSummary, utc_now
+from ops_pilot.spaces.models import (
+    CardBinding,
+    CardContent,
+    CardDraft,
+    CardSize,
+    CardType,
+    RefreshStatus,
+    Space,
+    SpaceCard,
+    SpaceSummary,
+    utc_now,
+)
 
 
 class SpaceError(RuntimeError):
@@ -44,6 +55,7 @@ class SpaceRepository(Protocol):
         content: CardContent,
         card_type: CardType | None = None,
         subtitle: str | None = None,
+        binding: CardBinding | None = None,
     ) -> Space: ...
 
     async def rename_card(self, space_id: str, card_id: str, title: str) -> Space: ...
@@ -53,6 +65,19 @@ class SpaceRepository(Protocol):
     async def remove_card(self, space_id: str, card_id: str) -> Space: ...
 
     async def reorder_cards(self, space_id: str, ordered_card_ids: list[str]) -> Space: ...
+
+    async def list_live_cards(self) -> list[tuple[str, SpaceCard]]: ...
+
+    async def apply_refresh(
+        self,
+        space_id: str,
+        card_id: str,
+        *,
+        content: CardContent | None,
+        status: RefreshStatus,
+        last_error: str | None,
+        last_refreshed_at: datetime | None,
+    ) -> None: ...
 
 
 SpaceMutation = Callable[[Space], Space]
@@ -100,6 +125,7 @@ class MemorySpaceRepository:
         content: CardContent,
         card_type: CardType | None = None,
         subtitle: str | None = None,
+        binding: CardBinding | None = None,
     ) -> Space:
         return await self._mutate(
             space_id,
@@ -109,6 +135,7 @@ class MemorySpaceRepository:
                 content=content,
                 card_type=card_type,
                 subtitle=subtitle,
+                binding=binding,
             ),
         )
 
@@ -123,6 +150,37 @@ class MemorySpaceRepository:
 
     async def reorder_cards(self, space_id: str, ordered_card_ids: list[str]) -> Space:
         return await self._mutate(space_id, lambda space: reorder_cards(space, ordered_card_ids))
+
+    async def list_live_cards(self) -> list[tuple[str, SpaceCard]]:
+        async with self._lock:
+            return [
+                (space.id, card.model_copy(deep=True))
+                for space in self._spaces.values()
+                for card in space.cards
+                if card.binding is not None
+            ]
+
+    async def apply_refresh(
+        self,
+        space_id: str,
+        card_id: str,
+        *,
+        content: CardContent | None,
+        status: RefreshStatus,
+        last_error: str | None,
+        last_refreshed_at: datetime | None,
+    ) -> None:
+        await self._mutate(
+            space_id,
+            lambda space: apply_card_refresh(
+                space,
+                card_id,
+                content=content,
+                status=status,
+                last_error=last_error,
+                last_refreshed_at=last_refreshed_at,
+            ),
+        )
 
     async def _mutate(self, space_id: str, mutation: SpaceMutation) -> Space:
         async with self._lock:
@@ -150,6 +208,7 @@ def update_card(
     content: CardContent,
     card_type: CardType | None,
     subtitle: str | None,
+    binding: CardBinding | None = None,
 ) -> Space:
     current = _find_card(space, card_id)
     now = utc_now()
@@ -159,14 +218,49 @@ def update_card(
         subtitle=current.subtitle if subtitle is None else subtitle,
         size=current.size,
         content=content,
+        binding=current.binding if binding is None else binding,
     )
     replacement = SpaceCard(
         **draft.model_dump(),
         id=current.id,
         created_at=current.created_at,
         updated_at=now,
+        refresh_status=current.refresh_status,
+        last_refreshed_at=current.last_refreshed_at,
+        last_error=current.last_error,
     )
     return _updated_space(space, cards=_replace_card(space.cards, replacement), now=now)
+
+
+def apply_card_refresh(
+    space: Space,
+    card_id: str,
+    *,
+    content: CardContent | None,
+    status: RefreshStatus,
+    last_error: str | None,
+    last_refreshed_at: datetime | None,
+) -> Space:
+    """Write resolver output back onto a single card without bumping version.
+
+    Unlike ``update_card`` this deliberately does NOT go through
+    ``_updated_space`` — high-frequency refreshes must not inflate the space
+    version or change its semantic ``updated_at``. Only the target card's
+    content and refresh-status fields are touched. ``content=None`` preserves
+    the last-good content (used on error).
+    """
+
+    current = _find_card(space, card_id)
+    updates: dict[str, object] = {
+        "refresh_status": status,
+        "last_error": last_error,
+        "last_refreshed_at": last_refreshed_at,
+        "updated_at": last_refreshed_at or utc_now(),
+    }
+    if content is not None:
+        updates["content"] = content
+    replacement = current.model_copy(update=updates)
+    return space.model_copy(update={"cards": _replace_card(space.cards, replacement)}, deep=True)
 
 
 def rename_card(space: Space, card_id: str, title: str) -> Space:

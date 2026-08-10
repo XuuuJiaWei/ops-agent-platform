@@ -10,6 +10,7 @@ from langchain_core.tools import BaseTool, tool
 from pydantic import BaseModel, ConfigDict, Field
 
 from ops_pilot.spaces.models import (
+    CardBinding,
     CardContent,
     CardDraft,
     CardSize,
@@ -48,6 +49,7 @@ class UpdateCardArgs(SpaceIdArgs):
     content: CardContent
     card_type: CardType | None = None
     subtitle: str | None = Field(default=None, max_length=240)
+    binding: CardBinding | None = None
 
 
 class RenameCardArgs(SpaceIdArgs):
@@ -92,7 +94,16 @@ def build_space_tools(repository: SpaceRepository) -> tuple[BaseTool, ...]:
 
     @tool("add_card_to_space", args_schema=AddCardArgs)
     async def add_card_to_space(space_id: str, card: CardDraft) -> dict[str, Any]:
-        """Add a visualization card to an existing Space."""
+        """Add a visualization card to an existing Space.
+
+        For a live (auto-refreshing) card, set ``card.binding``: pick a
+        read-only ``source_tool`` you can already call, supply ``source_params``,
+        and set ``refresh_mode='interval'`` with ``interval_ms``. First call the
+        tool once yourself to see its real response shape, then write ``mapping``
+        (JMESPath per content field) accordingly. A live card may start with
+        empty ``content`` — the resolver fills it. Never bind a tool that
+        requires human approval.
+        """
 
         return await _run(lambda: repository.add_card(space_id, card))
 
@@ -103,8 +114,14 @@ def build_space_tools(repository: SpaceRepository) -> tuple[BaseTool, ...]:
         content: CardContent,
         card_type: CardType | None = None,
         subtitle: str | None = None,
+        binding: CardBinding | None = None,
     ) -> dict[str, Any]:
-        """Update the content and optional type or subtitle of an existing Space card."""
+        """Update an existing Space card's content, type, subtitle, or data binding.
+
+        Pass ``binding`` to convert a static card into a live one (or change its
+        binding); the same authoring rules as ``add_card_to_space`` apply. Omit
+        ``binding`` to leave the existing binding untouched.
+        """
 
         return await _run(
             lambda: repository.update_card(
@@ -113,6 +130,7 @@ def build_space_tools(repository: SpaceRepository) -> tuple[BaseTool, ...]:
                 content=content,
                 card_type=card_type,
                 subtitle=subtitle,
+                binding=binding,
             )
         )
 

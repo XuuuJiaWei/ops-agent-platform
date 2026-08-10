@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -88,6 +88,47 @@ class CardContent(BaseModel):
     markdown: str | None = Field(default=None, max_length=12_000)
 
 
+# Primary content field each card type must populate to render meaningfully.
+# Shared by the draft validator and the resolver's post-mapping validation.
+REQUIRED_CONTENT_FIELD: dict[CardType, str] = {
+    CardType.KPI: "metrics",
+    CardType.TABLE: "columns",
+    CardType.LINE_CHART: "series",
+    CardType.BAR_CHART: "series",
+    CardType.DETAILS: "fields",
+    CardType.OBJECT_LIST: "items",
+    CardType.MARKDOWN: "markdown",
+}
+
+
+class RefreshStatus(StrEnum):
+    FRESH = "fresh"
+    STALE = "stale"
+    REFRESHING = "refreshing"
+    ERROR = "error"
+
+
+class CardBinding(BaseModel):
+    """Declarative data-binding spec authored by the agent.
+
+    Stores *how to fetch* a card's data (which registered read-only tool to
+    call, with what params, and how to map the response) rather than the data
+    itself. A backend resolver replays the binding on a schedule without
+    re-invoking the LLM.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_tool: str = Field(min_length=1, max_length=200)
+    source_params: dict[str, Any] = Field(default_factory=dict)
+    mapping: dict[str, str] | None = Field(
+        default=None,
+        description="Optional per-content-field JMESPath expressions applied to the tool response.",
+    )
+    refresh_mode: Literal["manual", "interval"] = "manual"
+    interval_ms: int | None = Field(default=None, ge=15_000)
+
+
 class CardDraft(BaseModel):
     """Agent-authored card definition before identity and timestamps are assigned."""
 
@@ -98,18 +139,16 @@ class CardDraft(BaseModel):
     subtitle: str | None = Field(default=None, max_length=240)
     size: CardSize = CardSize.MEDIUM
     content: CardContent
+    binding: CardBinding | None = None
 
     @model_validator(mode="after")
     def validate_content_for_type(self) -> CardDraft:
-        required_field = {
-            CardType.KPI: "metrics",
-            CardType.TABLE: "columns",
-            CardType.LINE_CHART: "series",
-            CardType.BAR_CHART: "series",
-            CardType.DETAILS: "fields",
-            CardType.OBJECT_LIST: "items",
-            CardType.MARKDOWN: "markdown",
-        }[self.type]
+        # Live cards (with a binding) may start with empty content before the
+        # first resolver refresh populates it; only static cards must be
+        # non-empty at authoring time.
+        if self.binding is not None:
+            return self
+        required_field = REQUIRED_CONTENT_FIELD[self.type]
         if not getattr(self.content, required_field):
             raise ValueError(f"Card type '{self.type}' requires non-empty content.{required_field}.")
         if self.type == CardType.TABLE and not self.content.rows:
@@ -127,6 +166,9 @@ class SpaceCard(CardDraft):
     id: str
     created_at: datetime
     updated_at: datetime
+    refresh_status: RefreshStatus = RefreshStatus.FRESH
+    last_refreshed_at: datetime | None = None
+    last_error: str | None = None
 
 
 class Space(BaseModel):

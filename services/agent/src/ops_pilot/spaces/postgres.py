@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
@@ -11,11 +12,14 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from ops_pilot.spaces.models import (
+    CardBinding,
     CardContent,
     CardDraft,
     CardSize,
     CardType,
+    RefreshStatus,
     Space,
+    SpaceCard,
     SpaceSummary,
     utc_now,
 )
@@ -23,6 +27,7 @@ from ops_pilot.spaces.repository import (
     SpaceNotFoundError,
     SpaceRepository,
     add_card,
+    apply_card_refresh,
     remove_card,
     rename_card,
     reorder_cards,
@@ -176,6 +181,7 @@ class PostgresSpaceRepository(SpaceRepository):
         content: CardContent,
         card_type: CardType | None = None,
         subtitle: str | None = None,
+        binding: CardBinding | None = None,
     ) -> Space:
         return await self._mutate(
             space_id,
@@ -185,6 +191,7 @@ class PostgresSpaceRepository(SpaceRepository):
                 content=content,
                 card_type=card_type,
                 subtitle=subtitle,
+                binding=binding,
             ),
         )
 
@@ -199,6 +206,45 @@ class PostgresSpaceRepository(SpaceRepository):
 
     async def reorder_cards(self, space_id: str, card_ids: list[str]) -> Space:
         return await self._mutate(space_id, lambda space: reorder_cards(space, card_ids))
+
+    async def list_live_cards(self) -> list[tuple[str, SpaceCard]]:
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                """
+                SELECT id, name, description, cards, version, created_at, updated_at
+                FROM ops_pilot_spaces
+                WHERE namespace = %s AND cards @> '[{"binding": {}}]'::jsonb
+                """,
+                (self._namespace,),
+            )
+            rows = await cursor.fetchall()
+        result: list[tuple[str, SpaceCard]] = []
+        for row in rows:
+            space = _row_to_space(row)
+            result.extend((space.id, card) for card in space.cards if card.binding is not None)
+        return result
+
+    async def apply_refresh(
+        self,
+        space_id: str,
+        card_id: str,
+        *,
+        content: CardContent | None,
+        status: RefreshStatus,
+        last_error: str | None,
+        last_refreshed_at: datetime | None,
+    ) -> None:
+        await self._mutate(
+            space_id,
+            lambda space: apply_card_refresh(
+                space,
+                card_id,
+                content=content,
+                status=status,
+                last_error=last_error,
+                last_refreshed_at=last_refreshed_at,
+            ),
+        )
 
     async def _mutate(self, space_id: str, mutation: Callable[[Space], Space]) -> Space:
         async with self._pool.connection() as connection, connection.transaction():

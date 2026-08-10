@@ -19,7 +19,15 @@ export function AgentNativeAppView({ activeThreadId, env, onViewChange }: AgentN
   const summariesQuery = useSWR(["spaces", env.backendUrl], () => listSpaces(env));
   const summaries = summariesQuery.data ?? [];
   const effectiveSpaceId = selectedSpaceId && summaries.some((item) => item.id === selectedSpaceId) ? selectedSpaceId : summaries[0]?.id;
-  const spaceQuery = useSWR(effectiveSpaceId ? ["space", env.backendUrl, effectiveSpaceId] : null, () => getSpace(env, effectiveSpaceId!));
+  const spaceQuery = useSWR(
+    effectiveSpaceId ? ["space", env.backendUrl, effectiveSpaceId] : null,
+    () => getSpace(env, effectiveSpaceId!),
+    {
+      // Poll while the open space has any live (data-bound) cards so resolver
+      // refreshes surface without a manual reload; static-only spaces don't poll.
+      refreshInterval: (latest) => (latest?.cards.some((card) => card.binding != null) ? 15_000 : 0),
+    },
+  );
   const space = spaceQuery.data;
   const mutateSpaces = summariesQuery.mutate;
   const mutateSpace = spaceQuery.mutate;
