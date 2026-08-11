@@ -331,15 +331,18 @@ During `pnpm dev`, the backend host/port, `/chat` base path, and assistant id ar
 
 MCP servers are declared inline under `mcpServers` in `config/config.yaml`
 (copied from `config.example.yaml`). Each server sets a `transport` (`stdio`,
-`sse`, or `streamable_http`) and may declare `allow_tools`/`hitl_tools`. Secrets
-are environment references only, resolved from `.env` at load time:
+`sse`, or `streamable_http`) and may declare `allow_tools`/`hitl_tools`.
+`${VAR}` references are resolved from `.env` at load time across MCP server
+`url`/`headers`/`env` values and `open_sandbox.domain`; `$$` escapes a literal
+`$`, and an unset variable fails fast. A single `OTEL_SHOOT_DOMAIN` drives every
+otel-demo endpoint:
 
 ```yaml
 mcpServers:
   prometheus:
     required: false
     transport: streamable_http
-    url: https://prometheus-otel.example.com/mcp
+    url: https://prometheus-otel.${OTEL_SHOOT_DOMAIN}/mcp
     timeout: 30
     headers:
       Authorization: ${MCP_BASIC_AUTH_HEADER}

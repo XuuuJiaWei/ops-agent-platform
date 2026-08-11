@@ -9,6 +9,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from ops_pilot.config.interpolation import expand_optional
 from ops_pilot.config.mcp_schema import MCPConfig
 from ops_pilot.config.paths import REPO_ROOT, resolve_path
 
@@ -197,7 +198,7 @@ def load_settings(env: Mapping[str, str] | None = None, *, config: Mapping[str, 
             "Add DATABASE_URL to .env or set persistence.backend: memory."
         )
 
-    open_sandbox_domain = _optional_str(sandbox.get("domain"))
+    open_sandbox_domain = _optional_str(expand_optional(sandbox.get("domain"), secret_source))
     open_sandbox_api_key = _optional_str(secret_source.get("OPEN_SANDBOX_API_KEY"))
     open_sandbox_enabled = _optional_bool(sandbox.get("enabled"))
     if open_sandbox_enabled is None:
@@ -227,7 +228,7 @@ def load_settings(env: Mapping[str, str] | None = None, *, config: Mapping[str, 
             field_name="model.reasoning.effort",
         ),
         system_prompt=_optional_str(config_data.get("system_prompt")),
-        mcp=MCPConfig.from_mapping(config_data),
+        mcp=MCPConfig.from_mapping(config_data, env=secret_source),
         skills_paths=tuple(resolve_path(path) for path in _str_list(config_data.get("skills_paths"))),
         enable_smoke_tools=_bool(config_data.get("enable_smoke_tools"), True),
         langfuse_public_key=_optional_str(secret_source.get("LANGFUSE_PUBLIC_KEY")),

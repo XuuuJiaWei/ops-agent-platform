@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ops_pilot.config.interpolation import expand_mapping, expand_optional
 from ops_pilot.config.paths import REPO_ROOT, resolve_repo_path
 
 SUPPORTED_TRANSPORTS = {"stdio", "http", "streamable_http", "sse"}
@@ -34,7 +36,7 @@ class MCPServerConfig:
     retry_tools: tuple[str, ...] = field(default_factory=tuple)
 
     @classmethod
-    def from_mapping(cls, name: str, data: Mapping[str, Any]) -> MCPServerConfig:
+    def from_mapping(cls, name: str, data: Mapping[str, Any], env: Mapping[str, str]) -> MCPServerConfig:
         transport = str(data.get("transport", "stdio")).strip()
         if transport not in SUPPORTED_TRANSPORTS:
             raise MCPConfigError(
@@ -50,6 +52,8 @@ class MCPServerConfig:
 
         timeout = data.get("timeout")
         parsed_timeout = float(timeout) if timeout not in (None, "") else None
+        # Whitelist: only data/endpoint fields are interpolated. command/args/cwd
+        # are process-spec fields and are left verbatim by construction.
         config = cls(
             name=name,
             transport=transport,
@@ -57,9 +61,9 @@ class MCPServerConfig:
             command=_optional_string(data.get("command")),
             args=tuple(args),
             cwd=_optional_string(data.get("cwd")),
-            url=_optional_string(data.get("url")),
-            headers=_string_mapping(name, "headers", data.get("headers", {})),
-            env=_string_mapping(name, "env", data.get("env", {})),
+            url=expand_optional(_optional_string(data.get("url")), env),
+            headers=expand_mapping(_string_mapping(name, "headers", data.get("headers", {})), env),
+            env=expand_mapping(_string_mapping(name, "env", data.get("env", {})), env),
             timeout=parsed_timeout,
             allow_tools=_string_list(name, "allow_tools", data.get("allow_tools", ())),
             hitl_tools=_string_list(name, "hitl_tools", data.get("hitl_tools", ())),
@@ -99,13 +103,16 @@ class MCPConfig:
     servers: tuple[MCPServerConfig, ...] = field(default_factory=tuple)
 
     @classmethod
-    def from_mapping(cls, data: Mapping[str, Any]) -> MCPConfig:
+    def from_mapping(cls, data: Mapping[str, Any], env: Mapping[str, str] | None = None) -> MCPConfig:
+        if env is None:
+            env = os.environ
         raw_servers = data.get("mcpServers", data.get("servers", {}))
         if not isinstance(raw_servers, Mapping):
             raise MCPConfigError("MCP config field 'mcpServers' must be an object.")
         return cls(
             servers=tuple(
-                MCPServerConfig.from_mapping(str(name), server_data) for name, server_data in raw_servers.items()
+                MCPServerConfig.from_mapping(str(name), server_data, env)
+                for name, server_data in raw_servers.items()
             )
         )
 

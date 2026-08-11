@@ -1,8 +1,8 @@
 import asyncio
-import logging
 
 import pytest
 
+from ops_pilot.config.interpolation import MissingEnvironmentError
 from ops_pilot.config.mcp_schema import MCPConfig
 from ops_pilot.mcp import loader
 from ops_pilot.mcp.loader import RequiredMCPServerError, _safe_error, load_mcp_tools
@@ -17,48 +17,55 @@ def test_safe_error_unwraps_exception_groups() -> None:
     assert _safe_error(error) == "MCP server 'kubernetes' is not connected."
 
 
-@pytest.mark.asyncio
-async def test_required_server_reports_missing_env_reference(monkeypatch) -> None:
+def test_missing_env_reference_fails_fast_at_config_build(monkeypatch) -> None:
+    # New architecture: interpolation happens once at config construction and a
+    # missing var fails fast for ANY server (required or optional), rather than
+    # degrading per-server at load time.
     monkeypatch.delenv("DT_MISSING_TOKEN", raising=False)
+
+    with pytest.raises(MissingEnvironmentError, match="DT_MISSING_TOKEN"):
+        MCPConfig.from_mapping(
+            {
+                "mcpServers": {
+                    "dyna": {
+                        "transport": "stdio",
+                        "command": "npx",
+                        "env": {"DT_MISSING_TOKEN": "${DT_MISSING_TOKEN}"},
+                    }
+                }
+            }
+        )
+
+
+def test_url_interpolates_from_injected_env() -> None:
     config = MCPConfig.from_mapping(
         {
             "mcpServers": {
-                "dyna": {
-                    "required": True,
-                    "transport": "stdio",
-                    "command": "npx",
-                    "env": {"DT_MISSING_TOKEN": "${DT_MISSING_TOKEN}"},
+                "prometheus": {
+                    "transport": "streamable_http",
+                    "url": "https://prometheus-otel.${OTEL_SHOOT_DOMAIN}/mcp",
                 }
             }
-        }
+        },
+        env={"OTEL_SHOOT_DOMAIN": "abc.shoot.test"},
     )
 
-    with pytest.raises(RequiredMCPServerError, match="DT_MISSING_TOKEN"):
-        await load_mcp_tools(config)
+    assert config.servers[0].url == "https://prometheus-otel.abc.shoot.test/mcp"
 
 
-@pytest.mark.asyncio
-async def test_optional_server_records_and_logs_missing_env_reference(monkeypatch, caplog) -> None:
-    monkeypatch.delenv("DT_MISSING_TOKEN", raising=False)
-    config = MCPConfig.from_mapping(
-        {
-            "mcpServers": {
-                "dyna": {
-                    "transport": "stdio",
-                    "command": "npx",
-                    "env": {"DT_MISSING_TOKEN": "${DT_MISSING_TOKEN}"},
+def test_missing_url_var_fails_fast() -> None:
+    with pytest.raises(MissingEnvironmentError, match="OTEL_SHOOT_DOMAIN"):
+        MCPConfig.from_mapping(
+            {
+                "mcpServers": {
+                    "prometheus": {
+                        "transport": "streamable_http",
+                        "url": "https://prometheus-otel.${OTEL_SHOOT_DOMAIN}/mcp",
+                    }
                 }
-            }
-        }
-    )
-
-    with caplog.at_level(logging.WARNING, logger="ops_pilot.mcp.loader"):
-        result = await load_mcp_tools(config)
-
-    assert result.tools == []
-    assert result.status.servers[0].ok is False
-    assert "DT_MISSING_TOKEN" in result.status.servers[0].error
-    assert "Optional MCP server 'dyna' failed to load" in caplog.text
+            },
+            env={},
+        )
 
 
 @pytest.mark.asyncio

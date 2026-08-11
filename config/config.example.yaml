@@ -1,7 +1,9 @@
 # ops_pilot regular (non-secret) configuration.
 #
 # Copy to config/config.yaml and adjust as needed. Secrets stay in .env and are
-# referenced from this file with ${VAR} only inside MCP server env blocks.
+# referenced here with ${VAR} in MCP server url/headers/env values and
+# open_sandbox.domain. Use $$ for a literal $. OTEL_SHOOT_DOMAIN is the single
+# Gardener shoot identity that all otel-demo endpoints interpolate.
 
 app_env: local
 assistant_id: agent
@@ -85,7 +87,7 @@ chaos:
 open_sandbox:
   # null = auto-enable only when domain (here) and api_key (.env) are both set.
   enabled: null
-  domain: opensandbox.example.com
+  domain: opensandbox.${OTEL_SHOOT_DOMAIN}
   protocol: https
   use_server_proxy: true
   disable_metrics: true
@@ -137,7 +139,7 @@ mcpServers:
   jaeger:
     required: false
     transport: streamable_http
-    url: https://jaeger-otel.example.com/mcp
+    url: https://jaeger-otel.${OTEL_SHOOT_DOMAIN}/mcp
     timeout: 30
     headers:
       Authorization: ${MCP_BASIC_AUTH_HEADER}
@@ -149,7 +151,7 @@ mcpServers:
   prometheus:
     required: false
     transport: streamable_http
-    url: https://prometheus-otel.example.com/mcp
+    url: https://prometheus-otel.${OTEL_SHOOT_DOMAIN}/mcp
     timeout: 30
     headers:
       Authorization: ${MCP_BASIC_AUTH_HEADER}
@@ -187,7 +189,7 @@ mcpServers:
       - MsearchTool
       - PPLQueryTool
     env:
-      OPENSEARCH_URL: http://opensearch-otel.example.com
+      OPENSEARCH_URL: https://opensearch-otel.${OTEL_SHOOT_DOMAIN}
       OPENSEARCH_USERNAME: ${OTEL_BASIC_AUTH_USER}
       OPENSEARCH_PASSWORD: ${OTEL_BASIC_AUTH_PASSWORD}
       OPENSEARCH_ENABLED_CATEGORIES: core_tools,observability

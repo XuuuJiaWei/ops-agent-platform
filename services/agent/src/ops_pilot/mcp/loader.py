@@ -5,17 +5,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import re
-from collections.abc import Mapping
-from dataclasses import replace
 from typing import Any
 
 from ops_pilot.config.mcp_schema import MCPConfig, MCPServerConfig
 from ops_pilot.config.settings import Settings
 from ops_pilot.mcp.session import PersistentMCPServer
 from ops_pilot.mcp.status import MCPLoadResult, MCPLoadStatus, MCPServerLoadStatus
-
-ENV_PATTERN = re.compile(r"\$\{([A-Z0-9_]+)\}")
 
 logger = logging.getLogger(__name__)
 
@@ -26,10 +21,6 @@ class MCPLoadError(RuntimeError):
 
 class RequiredMCPServerError(MCPLoadError):
     """Raised when a required MCP server fails to load."""
-
-
-class MissingMCPEnvironmentError(MCPLoadError):
-    """Raised when an MCP config references an unset environment variable."""
 
 
 async def load_mcp_tools(settings: Settings | MCPConfig) -> MCPLoadResult:
@@ -57,7 +48,7 @@ async def _load_from_config(config: MCPConfig, *, config_path: str | None) -> MC
     session_managers: list[PersistentMCPServer] = []
 
     async def load(server: MCPServerConfig) -> Any:
-        return await _load_single_server_with_timeout(_expand_server_env(server))
+        return await _load_single_server_with_timeout(server)
 
     results = await asyncio.gather(*(load(server) for server in config.servers), return_exceptions=True)
     all_owners = [
@@ -195,32 +186,6 @@ async def _close_owners(owners: list[PersistentMCPServer]) -> None:
             continue
         seen.add(id(owner))
         await owner.aclose()
-
-
-def _expand_server_env(server: MCPServerConfig) -> MCPServerConfig:
-    return replace(server, headers=_expand_mapping(server.headers), env=_expand_mapping(server.env))
-
-
-def _expand_mapping(values: Mapping[str, str]) -> dict[str, str]:
-    return {key: _expand_env_value(value) for key, value in values.items()}
-
-
-def _expand_env_value(value: str) -> str:
-    missing: set[str] = set()
-
-    def replace_match(match: re.Match[str]) -> str:
-        name = match.group(1)
-        resolved = os.environ.get(name)
-        if resolved in (None, ""):
-            missing.add(name)
-            return match.group(0)
-        return resolved
-
-    expanded = ENV_PATTERN.sub(replace_match, value)
-    if missing:
-        variables = ", ".join(sorted(missing))
-        raise MissingMCPEnvironmentError(f"Missing environment variable(s) referenced by MCP config: {variables}")
-    return expanded
 
 
 def _safe_error(exc: BaseException) -> str:

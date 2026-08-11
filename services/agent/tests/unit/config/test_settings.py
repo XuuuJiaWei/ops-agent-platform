@@ -1,5 +1,6 @@
 import pytest
 
+from ops_pilot.config.interpolation import MissingEnvironmentError
 from ops_pilot.config.settings import SettingsError, load_settings
 
 
@@ -249,6 +250,83 @@ def test_load_settings_defaults_to_memory_persistence():
     assert settings.persistence_backend == "memory"
     assert settings.persistence_enabled is False
     assert settings.persistence_setup_on_start is True
+
+
+def test_open_sandbox_domain_interpolates_shoot_domain():
+    settings = load_settings(
+        env={"OPEN_SANDBOX_API_KEY": "secret", "OTEL_SHOOT_DOMAIN": "abc.shoot.test"},
+        config={"open_sandbox": {"domain": "opensandbox.${OTEL_SHOOT_DOMAIN}"}},
+    )
+
+    assert settings.open_sandbox_domain == "opensandbox.abc.shoot.test"
+
+
+def test_open_sandbox_domain_missing_var_fails_fast():
+    with pytest.raises(MissingEnvironmentError, match="OTEL_SHOOT_DOMAIN"):
+        load_settings(
+            env={"OPEN_SANDBOX_API_KEY": "secret"},
+            config={"open_sandbox": {"domain": "opensandbox.${OTEL_SHOOT_DOMAIN}"}},
+        )
+
+
+def test_absent_open_sandbox_domain_does_not_raise_without_var():
+    settings = load_settings(env={}, config={"open_sandbox": {"enabled": False}})
+
+    assert settings.open_sandbox_domain is None
+
+
+def test_mcp_url_interpolates_shoot_domain():
+    settings = load_settings(
+        env={"OTEL_SHOOT_DOMAIN": "abc.shoot.test"},
+        config={
+            "mcpServers": {
+                "prometheus": {
+                    "transport": "streamable_http",
+                    "url": "https://prometheus-otel.${OTEL_SHOOT_DOMAIN}/mcp",
+                }
+            }
+        },
+    )
+
+    assert settings.mcp.servers[0].url == "https://prometheus-otel.abc.shoot.test/mcp"
+
+
+def test_mcp_missing_var_fails_fast_at_settings_load():
+    with pytest.raises(MissingEnvironmentError, match="OTEL_SHOOT_DOMAIN"):
+        load_settings(
+            env={},
+            config={
+                "mcpServers": {
+                    "prometheus": {
+                        "transport": "streamable_http",
+                        "url": "https://prometheus-otel.${OTEL_SHOOT_DOMAIN}/mcp",
+                    }
+                }
+            },
+        )
+
+
+def test_process_spec_fields_are_not_interpolated():
+    # command/args/cwd are process-spec fields excluded from the whitelist:
+    # a literal ${...} must survive verbatim and never trigger a missing-var error.
+    settings = load_settings(
+        env={},
+        config={
+            "mcpServers": {
+                "local": {
+                    "transport": "stdio",
+                    "command": "${NOT_EXPANDED}",
+                    "args": ["--path", "${ALSO_NOT_EXPANDED}"],
+                    "cwd": "${CWD_NOT_EXPANDED}",
+                }
+            }
+        },
+    )
+
+    server = settings.mcp.servers[0]
+    assert server.command == "${NOT_EXPANDED}"
+    assert server.args == ("--path", "${ALSO_NOT_EXPANDED}")
+    assert server.cwd == "${CWD_NOT_EXPANDED}"
     assert settings.persistence_database_url is None
     assert settings.sqlalchemy_database_url() is None
     assert settings.psycopg_database_url() is None

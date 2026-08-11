@@ -17,10 +17,10 @@ The standard backend exposes AG-UI under `/chat`, A2A JSON-RPC at `/a2a/jsonrpc`
 
 ## DeepAgents Sandbox
 
-Set the OpenSandbox Gardener endpoint values in the root `.env` to run DeepAgents filesystem and command execution in the remote sandbox backend:
+Set the OpenSandbox Gardener endpoint in the root `.env` to run DeepAgents filesystem and command execution in the remote sandbox backend. The domain in `config/config.yaml` (`open_sandbox.domain: opensandbox.${OTEL_SHOOT_DOMAIN}`) interpolates the shoot identity; only the API key is a raw secret:
 
 ```bash
-OPEN_SANDBOX_DOMAIN=opensandbox.example.com
+OTEL_SHOOT_DOMAIN=abc123.cloud.shoot.canary.k8s-hana.ondemand.com
 OPEN_SANDBOX_API_KEY=...
 ```
 
