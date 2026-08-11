@@ -229,7 +229,7 @@ class PostgresSpaceRepository(SpaceRepository):
         space_id: str,
         card_id: str,
         *,
-        content: CardContent | None,
+        raw_snapshot: Any | None,
         status: RefreshStatus,
         last_error: str | None,
         last_refreshed_at: datetime | None,
@@ -239,7 +239,7 @@ class PostgresSpaceRepository(SpaceRepository):
             lambda space: apply_card_refresh(
                 space,
                 card_id,
-                content=content,
+                raw_snapshot=raw_snapshot,
                 status=status,
                 last_error=last_error,
                 last_refreshed_at=last_refreshed_at,

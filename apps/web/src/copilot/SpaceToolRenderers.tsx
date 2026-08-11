@@ -1,7 +1,8 @@
 import { Check, CircleAlert, LoaderCircle, Layers3 } from "lucide-react";
 import { lazy, Suspense, useEffect } from "react";
-import { useRenderTool } from "@copilotkit/react-core/v2";
+import { useFrontendTool, useRenderTool } from "@copilotkit/react-core/v2";
 import { z } from "zod";
+import { validateTransform } from "@/lib/cardTransform/validateTransform";
 import { notifySpacesChanged } from "@/spaces/events";
 import {
   cardContentSchema,
@@ -29,8 +30,33 @@ const renameCardParameters = spaceIdParameters.extend({ card_id: z.string(), tit
 const resizeCardParameters = spaceIdParameters.extend({ card_id: z.string(), size: cardSizeSchema });
 const removeCardParameters = spaceIdParameters.extend({ card_id: z.string() });
 const reorderCardsParameters = spaceIdParameters.extend({ card_ids: z.array(z.string()) });
+const validateTransformParameters = z.object({
+  code: z.string(),
+  raw: z.unknown(),
+  card_type: cardTypeSchema.nullish(),
+});
 
 export function SpaceToolRenderers() {
+  useFrontendTool(
+    {
+      name: "validate_card_transform",
+      description:
+        "Dry-run a live card's binding.transform JS in the frontend QuickJS sandbox against a raw sample. Returns whether it runs and yields non-empty content for the card type. Call this before add_card_to_space / update_card_in_space whenever the card has a transform.",
+      parameters: validateTransformParameters,
+      handler: async ({ code, raw, card_type }) =>
+        validateTransform({ code, raw, cardType: card_type ?? undefined }),
+      render: ({ result, status }) => (
+        <ToolActivity
+          detail={validationDetail(result, status)}
+          failed={status === "complete" && !isValidationOk(result)}
+          label="Validating transform"
+          status={status}
+        />
+      ),
+    },
+    [],
+  );
+
   useRenderTool({
     name: "render_ui",
     parameters: z.object({ card: cardDraftSchema }),
@@ -147,4 +173,37 @@ function parseToolResult(result: string): SpaceToolResult | undefined {
   } catch {
     return undefined;
   }
+}
+
+// The validate_card_transform handler returns a { ok, code?, message? } object,
+// but the render boundary may hand it back as that object or its JSON string —
+// normalize both defensively.
+function normalizeValidation(result: unknown): { ok: boolean; message?: string } | undefined {
+  let value: unknown = result;
+  if (typeof value === "string") {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return undefined;
+    }
+  }
+  if (value && typeof value === "object" && "ok" in value) {
+    const record = value as { ok?: unknown; message?: unknown };
+    return {
+      ok: record.ok === true,
+      message: typeof record.message === "string" ? record.message : undefined,
+    };
+  }
+  return undefined;
+}
+
+function isValidationOk(result: unknown): boolean {
+  return normalizeValidation(result)?.ok ?? true;
+}
+
+function validationDetail(result: unknown, status: "inProgress" | "executing" | "complete"): string | undefined {
+  if (status !== "complete") return undefined;
+  const parsed = normalizeValidation(result);
+  if (!parsed) return undefined;
+  return parsed.ok ? "Transform is valid" : parsed.message;
 }

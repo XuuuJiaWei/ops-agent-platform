@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from datetime import datetime
-from typing import Protocol
+from typing import Any, Protocol
 from uuid import uuid4
 
 from ops_pilot.spaces.models import (
@@ -73,7 +73,7 @@ class SpaceRepository(Protocol):
         space_id: str,
         card_id: str,
         *,
-        content: CardContent | None,
+        raw_snapshot: Any | None,
         status: RefreshStatus,
         last_error: str | None,
         last_refreshed_at: datetime | None,
@@ -165,7 +165,7 @@ class MemorySpaceRepository:
         space_id: str,
         card_id: str,
         *,
-        content: CardContent | None,
+        raw_snapshot: Any | None,
         status: RefreshStatus,
         last_error: str | None,
         last_refreshed_at: datetime | None,
@@ -175,7 +175,7 @@ class MemorySpaceRepository:
             lambda space: apply_card_refresh(
                 space,
                 card_id,
-                content=content,
+                raw_snapshot=raw_snapshot,
                 status=status,
                 last_error=last_error,
                 last_refreshed_at=last_refreshed_at,
@@ -228,6 +228,7 @@ def update_card(
         refresh_status=current.refresh_status,
         last_refreshed_at=current.last_refreshed_at,
         last_error=current.last_error,
+        raw_snapshot=current.raw_snapshot,
     )
     return _updated_space(space, cards=_replace_card(space.cards, replacement), now=now)
 
@@ -236,7 +237,7 @@ def apply_card_refresh(
     space: Space,
     card_id: str,
     *,
-    content: CardContent | None,
+    raw_snapshot: Any | None,
     status: RefreshStatus,
     last_error: str | None,
     last_refreshed_at: datetime | None,
@@ -245,9 +246,9 @@ def apply_card_refresh(
 
     Unlike ``update_card`` this deliberately does NOT go through
     ``_updated_space`` — high-frequency refreshes must not inflate the space
-    version or change its semantic ``updated_at``. Only the target card's
-    content and refresh-status fields are touched. ``content=None`` preserves
-    the last-good content (used on error).
+    version or change its semantic ``updated_at``. Only the target card's raw
+    snapshot and refresh-status fields are touched. ``raw_snapshot=None``
+    preserves the last-good snapshot (used on error).
     """
 
     current = _find_card(space, card_id)
@@ -257,8 +258,8 @@ def apply_card_refresh(
         "last_refreshed_at": last_refreshed_at,
         "updated_at": last_refreshed_at or utc_now(),
     }
-    if content is not None:
-        updates["content"] = content
+    if raw_snapshot is not None:
+        updates["raw_snapshot"] = raw_snapshot
     replacement = current.model_copy(update=updates)
     return space.model_copy(update={"cards": _replace_card(space.cards, replacement)}, deep=True)
 

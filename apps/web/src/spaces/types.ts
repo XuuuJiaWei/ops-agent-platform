@@ -55,10 +55,15 @@ export const cardContentSchema = z.object({
   markdown: z.string().nullish(),
 });
 
+export const cardTransformSchema = z.object({
+  kind: z.literal("js").default("js"),
+  code: z.string(),
+});
+
 export const cardBindingSchema = z.object({
   source_tool: z.string(),
   source_params: z.record(z.string(), z.unknown()).default({}),
-  mapping: z.record(z.string(), z.string()).nullish(),
+  transform: cardTransformSchema.nullish(),
   refresh_mode: z.enum(["manual", "interval"]).default("manual"),
   interval_ms: z.number().int().nullish(),
 });
@@ -86,6 +91,7 @@ export const spaceCardSchema = cardDraftSchema.extend({
   refresh_status: refreshStatusSchema.default("fresh"),
   last_refreshed_at: z.string().nullish(),
   last_error: z.string().nullish(),
+  raw_snapshot: z.unknown().nullish(),
 });
 
 export const spaceSchema = z.object({
@@ -113,6 +119,8 @@ export const spaceToolResultSchema = z.object({
 
 export type CardDraft = z.infer<typeof cardDraftSchema>;
 export type CardBinding = z.infer<typeof cardBindingSchema>;
+export type CardTransform = z.infer<typeof cardTransformSchema>;
+export type CardContent = z.infer<typeof cardContentSchema>;
 export type RefreshStatus = z.infer<typeof refreshStatusSchema>;
 export type CardSize = z.infer<typeof cardSizeSchema>;
 export type Space = z.infer<typeof spaceSchema>;

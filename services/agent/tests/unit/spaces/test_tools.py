@@ -95,7 +95,10 @@ def _live_card_payload() -> dict:
         "binding": {
             "source_tool": "CountTool",
             "source_params": {"index": "logs-*"},
-            "mapping": {"metrics": "[{label: 'Docs', value: to_string(count)}]"},
+            "transform": {
+                "kind": "js",
+                "code": "function transform(raw){return {metrics:[{label:'Docs',value:String(raw.count)}]};}",
+            },
             "refresh_mode": "interval",
             "interval_ms": 30000,
         },

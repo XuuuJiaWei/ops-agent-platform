@@ -98,11 +98,45 @@ def build_space_tools(repository: SpaceRepository) -> tuple[BaseTool, ...]:
 
         For a live (auto-refreshing) card, set ``card.binding``: pick a
         read-only ``source_tool`` you can already call, supply ``source_params``,
-        and set ``refresh_mode='interval'`` with ``interval_ms``. First call the
-        tool once yourself to see its real response shape, then write ``mapping``
-        (JMESPath per content field) accordingly. A live card may start with
-        empty ``content`` — the resolver fills it. Never bind a tool that
-        requires human approval.
+        and set ``refresh_mode='interval'`` with ``interval_ms`` (>= 15000).
+        Never bind a tool that requires human approval. A live card may start
+        with empty ``content`` — the frontend fills it from the binding.
+
+        The backend only fetches and stores the tool's RAW response; it never
+        shapes the data. To turn that raw output into card content, author
+        ``binding.transform``, a small JavaScript snippet that the frontend
+        replays deterministically in an isolated sandbox on every refresh (the
+        model is never re-invoked):
+
+            binding.transform = {
+              'kind': 'js',
+              'code': 'function transform(raw) { return { /* content */ }; }',
+            }
+
+        Rules for the JS:
+        - It MUST define ``function transform(raw)`` and return an object shaped
+          like the card's content: kpi -> {metrics: [...]}, table ->
+          {columns: [...], rows: [...]}, line-chart/bar-chart -> {categories:
+          [...], series: [...]}, details -> {fields: [...]}, object-list ->
+          {items: [...]}, markdown -> {markdown: '...'}.
+        - ``raw`` is exactly what the source tool returned (structured JSON, or
+          a string of free-form text such as a Prometheus query result like
+          ``metric{labels} => value @[ts]``). Parse whatever shape it is — one
+          JS transform is the single normalization layer for every source, so
+          there is no per-source query language or decoder to maintain.
+        - It must be a PURE function of ``raw``: no ``fetch``, no DOM, no
+          ``Date.now()``/``Math.random()`` (the sandbox has no host APIs and
+          freezes the clock/RNG, so those yield fixed values).
+
+        ALWAYS call the source tool once yourself first to see the real response
+        shape, then write ``transform`` against it. After writing it, call
+        ``validate_card_transform`` (pass the ``code``, the ``raw`` you just
+        observed, and the ``card_type``) and only add the card once it returns
+        ``ok``; if it fails, fix the JS per the returned message and re-validate
+        before persisting. The frontend replays the SAME ``source_params`` each
+        cycle, so those params (PromQL query, time range, step, limit, ...) are
+        your control surface for what the card shows. Omit ``transform`` only
+        when the source already returns a content-shaped payload.
         """
 
         return await _run(lambda: repository.add_card(space_id, card))
@@ -119,8 +153,11 @@ def build_space_tools(repository: SpaceRepository) -> tuple[BaseTool, ...]:
         """Update an existing Space card's content, type, subtitle, or data binding.
 
         Pass ``binding`` to convert a static card into a live one (or change its
-        binding); the same authoring rules as ``add_card_to_space`` apply. Omit
-        ``binding`` to leave the existing binding untouched.
+        binding); the same authoring rules as ``add_card_to_space`` apply —
+        including authoring ``binding.transform`` (frontend JS) to normalize the
+        raw source snapshot and validating it with ``validate_card_transform``
+        before persisting. Omit ``binding`` to leave the existing binding
+        untouched.
         """
 
         return await _run(

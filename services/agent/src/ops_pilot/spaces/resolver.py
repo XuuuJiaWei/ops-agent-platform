@@ -13,17 +13,14 @@ worker. Multi-worker safety is deferred to a later phase.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections.abc import Mapping
 from typing import Any
 
-import jmespath
-from jmespath.exceptions import JMESPathError
+from langchain_core.messages import ToolMessage
 
 from ops_pilot.spaces.models import (
-    REQUIRED_CONTENT_FIELD,
-    CardContent,
-    CardType,
     RefreshStatus,
     SpaceCard,
     utc_now,
@@ -31,6 +28,11 @@ from ops_pilot.spaces.models import (
 from ops_pilot.spaces.repository import SpaceError, SpaceRepository
 
 logger = logging.getLogger("uvicorn.error")
+
+# Upper bound on a stored raw snapshot's JSON size. Snapshots ride inside the
+# space's ``cards`` JSONB column and are re-serialized on every refresh, so a
+# runaway source (e.g. an unbounded Prometheus query) must not bloat the row.
+MAX_RAW_SNAPSHOT_BYTES = 256 * 1024
 
 
 class BindingError(RuntimeError):
@@ -95,13 +97,18 @@ class CardResolver:
                 logger.exception("Unexpected error resolving card %s in space %s", card.id, space_id)
 
     async def resolve_card(self, space_id: str, card: SpaceCard) -> None:
-        """Resolve one live card's binding and persist the outcome."""
+        """Resolve one live card's binding and persist the raw snapshot.
+
+        The resolver never shapes the data: it fetches from the read-only
+        source tool and stores the raw response. The frontend replays the
+        card's authored transform to produce displayed content.
+        """
 
         assert card.binding is not None  # callers pre-filter on binding
         binding = card.binding
         try:
             raw = await self._invoke_source(binding.source_tool, binding.source_params)
-            content = _build_content(card.type, raw, binding.mapping)
+            _guard_snapshot_size(raw)
         except BindingError as exc:
             await self._write_error(space_id, card.id, exc.code, str(exc))
             return
@@ -111,7 +118,7 @@ class CardResolver:
         await self._repository.apply_refresh(
             space_id,
             card.id,
-            content=content,
+            raw_snapshot=raw,
             status=RefreshStatus.FRESH,
             last_error=None,
             last_refreshed_at=utc_now(),
@@ -126,14 +133,19 @@ class CardResolver:
         tool = self._tools_by_name.get(source_tool)
         if tool is None:
             raise BindingError("binding_unknown_tool", f"Tool '{source_tool}' is not available.")
-        return await asyncio.wait_for(tool.ainvoke(params), timeout=self._invoke_timeout_s)
+        # Invoke as a tool call (not a plain-dict invoke) so the langchain-mcp
+        # adapter returns a ToolMessage carrying the MCP ``structuredContent``
+        # artifact; a plain-dict invoke yields only the content and discards it.
+        tool_call = {"type": "tool_call", "name": source_tool, "args": params, "id": "card-resolver"}
+        result = await asyncio.wait_for(tool.ainvoke(tool_call), timeout=self._invoke_timeout_s)
+        return _coerce_raw(result)
 
     async def _write_error(self, space_id: str, card_id: str, code: str, message: str) -> None:
         try:
             await self._repository.apply_refresh(
                 space_id,
                 card_id,
-                content=None,  # keep last-good content
+                raw_snapshot=None,  # keep last-good snapshot
                 status=RefreshStatus.ERROR,
                 last_error=f"{code}: {message}"[:2000],
                 last_refreshed_at=utc_now(),
@@ -152,26 +164,79 @@ def _is_due(card: SpaceCard, now: Any) -> bool:
     return elapsed_ms >= binding.interval_ms
 
 
-def _build_content(card_type: CardType, raw: Any, mapping: dict[str, str] | None) -> CardContent:
-    """Map a raw tool response into a validated CardContent for the card type."""
+def _coerce_raw(result: Any) -> Any:
+    """Reduce a tool invocation result to a plain object for mapping.
 
-    if mapping is None:
-        payload = raw if isinstance(raw, dict) else {}
-    else:
-        payload = {}
-        for field, expression in mapping.items():
-            try:
-                payload[field] = jmespath.search(expression, raw)
-            except JMESPathError as exc:
-                raise BindingError("binding_invalid", f"Invalid JMESPath for '{field}': {exc}") from exc
+    Layered to match MCP consumer norms (prefer structured, then text, then raw):
+
+    1. ``ToolMessage`` with ``status='error'`` -> raise (the source failed).
+    2. ``structuredContent`` artifact (machine-readable) -> use it verbatim.
+    3. text content block(s) -> join, then JSON-decode when it looks like JSON.
+    4. bare ``str`` -> JSON-decode when it looks like JSON, else keep the string.
+    5. anything else (dict/list already) -> use as-is.
+    """
+
+    if isinstance(result, ToolMessage):
+        if result.status == "error":
+            raise BindingError(
+                "binding_source_error",
+                _content_text(result.content) or "Source tool reported an error.",
+            )
+        artifact = result.artifact
+        if isinstance(artifact, dict) and artifact.get("structured_content") is not None:
+            return artifact["structured_content"]
+        result = result.content
+    if isinstance(result, list) and result and all(isinstance(block, dict) and block.get("type") for block in result):
+        text = _content_text(result)
+        return _maybe_json(text) if text is not None else result
+    if isinstance(result, str):
+        return _maybe_json(result)
+    return result
+
+
+def _content_text(content: Any) -> str | None:
+    """Join the text of any LangChain text content blocks (or return a bare str)."""
+
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = [
+            block["text"]
+            for block in content
+            if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str)
+        ]
+        if parts:
+            return "\n".join(parts)
+    return None
+
+
+def _maybe_json(text: str) -> Any:
+    """Decode ``text`` as JSON only when it plausibly is JSON; else keep the string.
+
+    Guards against turning free-form prose (or a bare number/quote) into a
+    surprising type: only object/array-shaped payloads are decoded.
+    """
+
+    stripped = text.strip()
+    if not stripped or stripped[0] not in "[{":
+        return text
     try:
-        content = CardContent.model_validate(payload)
-    except Exception as exc:
-        raise BindingError("binding_invalid", f"Mapped content is not valid: {exc}") from exc
-    required_field = REQUIRED_CONTENT_FIELD[card_type]
-    if not getattr(content, required_field):
+        return json.loads(stripped)
+    except (ValueError, TypeError):
+        return text
+
+
+def _guard_snapshot_size(raw: Any) -> None:
+    """Reject a snapshot whose JSON form would bloat the persisted space row."""
+
+    try:
+        size = len(json.dumps(raw, default=str).encode("utf-8"))
+    except (TypeError, ValueError):
+        return  # non-serializable payloads fail later; don't block here
+    if size > MAX_RAW_SNAPSHOT_BYTES:
         raise BindingError(
-            "binding_invalid",
-            f"Card type '{card_type}' requires non-empty content.{required_field} after mapping.",
+            "binding_snapshot_too_large",
+            f"Raw source snapshot is {size} bytes, over the {MAX_RAW_SNAPSHOT_BYTES}-byte limit; "
+            "narrow the query or add a source-side limit.",
         )
-    return content
+

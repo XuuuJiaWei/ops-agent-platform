@@ -4,6 +4,7 @@ import useSWR from "swr";
 import { getSpace, listSpaces } from "@/spaces/api";
 import { SPACES_CHANGED_EVENT } from "@/spaces/events";
 import { SpaceGrid } from "@/spaces/SpaceGrid";
+import { useResolvedCards } from "@/spaces/useResolvedCards";
 import type { BrowserEnv } from "@/lib/env";
 import { WorkspaceNavigation, type MainView } from "./WorkspaceNavigation";
 
@@ -29,6 +30,7 @@ export function AgentNativeAppView({ activeThreadId, env, onViewChange }: AgentN
     },
   );
   const space = spaceQuery.data;
+  const resolvedCards = useResolvedCards(space);
   const mutateSpaces = summariesQuery.mutate;
   const mutateSpace = spaceQuery.mutate;
   const loading = summariesQuery.isLoading || spaceQuery.isLoading;
@@ -121,7 +123,7 @@ export function AgentNativeAppView({ activeThreadId, env, onViewChange }: AgentN
           {!error && loading && !space ? <LoadingState /> : null}
           {!error && !loading && summaries.length === 0 ? <EmptyState activeThreadId={activeThreadId} /> : null}
           {!error && space && space.cards.length === 0 ? <EmptySpaceState /> : null}
-          {!error && space && space.cards.length > 0 ? <SpaceGrid cards={space.cards} /> : null}
+          {!error && space && space.cards.length > 0 ? <SpaceGrid cards={resolvedCards} /> : null}
         </div>
       </section>
     </div>

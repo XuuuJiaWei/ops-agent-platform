@@ -24,6 +24,7 @@ import {
   YAxis,
 } from "recharts";
 import type { ReactNode } from "react";
+import { CopilotChatAssistantMessage } from "@copilotkit/react-core/v2";
 import type { CardDraft, SpaceCard } from "@/spaces/types";
 
 const chartColors = ["#2563eb", "#7c3aed", "#0891b2", "#16a34a", "#ea580c", "#dc2626"];
@@ -118,7 +119,17 @@ function CardContent({ card, compact }: { card: CardDraft | SpaceCard; compact: 
   if (card.type === "line-chart" || card.type === "bar-chart") return <ChartContent card={card} compact={compact} />;
   if (card.type === "details") return <DetailsContent card={card} />;
   if (card.type === "object-list") return <ObjectListContent card={card} />;
-  return <p className="whitespace-pre-wrap text-sm leading-6 text-slate-700">{card.content.markdown}</p>;
+  return <MarkdownContent markdown={card.content.markdown} />;
+}
+
+function MarkdownContent({ markdown }: { markdown: string | null | undefined }) {
+  const body = markdown ?? "";
+  if (!body.trim()) return <p className="text-sm text-slate-400">No content yet.</p>;
+  return (
+    <div className="prose prose-sm max-w-none text-slate-700 prose-pre:overflow-auto prose-pre:text-xs">
+      <CopilotChatAssistantMessage.MarkdownRenderer content={body} />
+    </div>
+  );
 }
 
 function KpiContent({ card }: { card: CardDraft | SpaceCard }) {

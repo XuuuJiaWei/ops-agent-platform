@@ -79,7 +79,7 @@ def _live_kpi() -> CardDraft:
 
 
 @pytest.mark.asyncio
-async def test_apply_refresh_updates_content_without_bumping_version() -> None:
+async def test_apply_refresh_stores_snapshot_without_bumping_version() -> None:
     repository = MemorySpaceRepository()
     space = await repository.create_space("Operations")
     space = await repository.add_card(space.id, _live_kpi())
@@ -89,7 +89,7 @@ async def test_apply_refresh_updates_content_without_bumping_version() -> None:
     await repository.apply_refresh(
         space.id,
         card_id,
-        content=CardContent(metrics=[KpiMetric(label="Count", value=99)]),
+        raw_snapshot={"count": 99},
         status=RefreshStatus.FRESH,
         last_error=None,
         last_refreshed_at=None,
@@ -97,7 +97,7 @@ async def test_apply_refresh_updates_content_without_bumping_version() -> None:
 
     refreshed = await repository.get_space(space.id)
     assert refreshed.version == version_before  # refresh must not inflate version
-    assert refreshed.cards[0].content.metrics[0].value == 99
+    assert refreshed.cards[0].raw_snapshot == {"count": 99}
     assert refreshed.cards[0].refresh_status == RefreshStatus.FRESH
 
 

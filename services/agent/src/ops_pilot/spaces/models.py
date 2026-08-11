@@ -108,22 +108,50 @@ class RefreshStatus(StrEnum):
     ERROR = "error"
 
 
+class CardTransform(BaseModel):
+    """A source-agnostic normalization step authored once by the agent.
+
+    Holds a snippet of JavaScript that the *frontend* runs in an isolated
+    QuickJS-WASM sandbox to turn a card's raw source snapshot into a
+    :class:`CardContent`. The LLM writes it once at authoring time; the browser
+    replays it deterministically on every refresh — the model is never in the
+    refresh loop, and the untrusted code never touches the backend process.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["js"] = "js"
+    code: str = Field(
+        min_length=1,
+        max_length=20_000,
+        description=(
+            "A JS function `transform(raw)` returning a CardContent-shaped "
+            "object. Pure over `raw`; no fetch/DOM/Date.now/Math.random."
+        ),
+    )
+
+
 class CardBinding(BaseModel):
     """Declarative data-binding spec authored by the agent.
 
     Stores *how to fetch* a card's data (which registered read-only tool to
-    call, with what params, and how to map the response) rather than the data
-    itself. A backend resolver replays the binding on a schedule without
-    re-invoking the LLM.
+    call, with what params) plus an optional frontend ``transform`` that
+    normalizes the raw response into card content. A backend resolver replays
+    the fetch on a schedule and stores the raw snapshot without re-invoking the
+    LLM; the transform runs client-side.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     source_tool: str = Field(min_length=1, max_length=200)
     source_params: dict[str, Any] = Field(default_factory=dict)
-    mapping: dict[str, str] | None = Field(
+    transform: CardTransform | None = Field(
         default=None,
-        description="Optional per-content-field JMESPath expressions applied to the tool response.",
+        description=(
+            "Optional frontend JS transform normalizing the raw source snapshot "
+            "into card content. Omit only when the source already returns a "
+            "CardContent-shaped payload."
+        ),
     )
     refresh_mode: Literal["manual", "interval"] = "manual"
     interval_ms: int | None = Field(default=None, ge=15_000)
@@ -169,6 +197,14 @@ class SpaceCard(CardDraft):
     refresh_status: RefreshStatus = RefreshStatus.FRESH
     last_refreshed_at: datetime | None = None
     last_error: str | None = None
+    raw_snapshot: Any | None = Field(
+        default=None,
+        description=(
+            "Raw source snapshot from the last successful refresh (resolver-"
+            "written, not agent-authored). The frontend transform maps this "
+            "into displayed content."
+        ),
+    )
 
 
 class Space(BaseModel):
