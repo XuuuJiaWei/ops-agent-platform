@@ -5,6 +5,8 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { pipeBackendStderr } from "./dev-output.mjs";
+
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const agentDir = join(rootDir, "services", "agent");
 const mode = process.argv[2] ?? "all";
@@ -46,7 +48,11 @@ if (mode === "all") {
   process.exitCode = await run(
     "uv",
     ["run", "ops_pilot", "serve", "--host", devEnv.BACKEND_HOST, "--port", devEnv.BACKEND_PORT],
-    { cwd: agentDir, env: devEnv },
+    {
+      cwd: agentDir,
+      env: devEnv,
+      formatBackendStderr: true,
+    },
   );
 } else if (mode === "copilot") {
   process.exitCode = await run("pnpm", ["--filter", "./apps/copilot-runtime", "dev"], {
@@ -172,7 +178,16 @@ function isEnabled(value) {
 
 function run(command, args, options) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { ...options, stdio: "inherit" });
+    const { formatBackendStderr = false, ...spawnOptions } = options;
+    const child = spawn(command, args, {
+      ...spawnOptions,
+      stdio: formatBackendStderr ? ["inherit", "inherit", "pipe"] : "inherit",
+    });
+    if (formatBackendStderr && child.stderr !== null) {
+      pipeBackendStderr(child.stderr, process.stderr, {
+        verboseMcp: isEnabled(spawnOptions.env.OPS_PILOT_DEV_VERBOSE_MCP ?? "false"),
+      });
+    }
     let forwardedSignal;
     const forward = (signal) => {
       forwardedSignal = signal;

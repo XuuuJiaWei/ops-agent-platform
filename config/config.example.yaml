@@ -162,7 +162,7 @@ mcpServers:
     required: false
     transport: stdio
     command: uvx
-    args: ["opensearch-mcp-server-py"]
+    args: ["opensearch-mcp-server-py", "--log-format", "json"]
     cwd: .
     timeout: 90
     allow_tools:
