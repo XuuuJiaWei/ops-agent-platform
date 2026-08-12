@@ -72,7 +72,10 @@ function extractActions(eventValue: unknown, interrupts: unknown[]): PendingActi
   if (!Array.isArray(requests)) {
     const configs = request?.review_configs ?? request?.reviewConfigs;
     return Array.isArray(configs)
-      ? configs.map((config) => ({ name: String(readField(config, "action_name") ?? readField(config, "actionName") ?? "unknown tool"), args: {} }))
+      ? configs.map((config) => ({
+          name: String(readField(config, "action_name") ?? readField(config, "actionName") ?? "unknown tool"),
+          args: {},
+        }))
       : fallbackActionsFromInterrupts(interrupts, eventValue);
   }
   return requests.map((request) => ({
@@ -83,10 +86,7 @@ function extractActions(eventValue: unknown, interrupts: unknown[]): PendingActi
 }
 
 export function ApprovalDialog({ event, interrupt, interrupts, resolve, cancel }: InterruptRenderProps) {
-  const actions = useMemo(
-    () => extractActions(event?.value, interrupts),
-    [event, interrupts],
-  );
+  const actions = useMemo(() => extractActions(event?.value, interrupts), [event, interrupts]);
   const canDecide = actions.length > 0;
 
   // First-run aid: the exact payload shape can vary by CopilotKit/DeepAgents
@@ -120,10 +120,20 @@ export function ApprovalDialog({ event, interrupt, interrupts, resolve, cancel }
         ))}
       </ul>
       <div className="approval-dialog__buttons">
-        <button type="button" className="approval-dialog__approve" onClick={() => decide("approve")} disabled={!canDecide}>
+        <button
+          type="button"
+          className="approval-dialog__approve"
+          onClick={() => decide("approve")}
+          disabled={!canDecide}
+        >
           Approve
         </button>
-        <button type="button" className="approval-dialog__reject" onClick={() => decide("reject")} disabled={!canDecide}>
+        <button
+          type="button"
+          className="approval-dialog__reject"
+          onClick={() => decide("reject")}
+          disabled={!canDecide}
+        >
           Reject
         </button>
         <button type="button" className="approval-dialog__cancel" onClick={() => void cancel()}>

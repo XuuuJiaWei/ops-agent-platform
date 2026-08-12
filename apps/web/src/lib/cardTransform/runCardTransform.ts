@@ -11,8 +11,7 @@ const DEADLINE_MS = 100;
 export type TransformFailureCode = "js_error" | "timeout" | "invalid_shape" | "no_transform";
 
 export type TransformResult =
-  | { ok: true; content: CardContent }
-  | { ok: false; code: TransformFailureCode; message: string };
+  { ok: true; content: CardContent } | { ok: false; code: TransformFailureCode; message: string };
 
 type RunInput = {
   /** LLM-authored JS defining `function transform(raw)`. */

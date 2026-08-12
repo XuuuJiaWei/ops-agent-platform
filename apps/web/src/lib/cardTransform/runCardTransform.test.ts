@@ -84,8 +84,7 @@ describe("runCardTransform", () => {
 
   it("has no host escape hatches (fetch/globalThis.process are absent)", async () => {
     const result = await runCardTransform({
-      code:
-        "function transform(){return {markdown: (typeof fetch)+':'+(typeof globalThis.process)};}",
+      code: "function transform(){return {markdown: (typeof fetch)+':'+(typeof globalThis.process)};}",
       raw: {},
       seed: SEED,
     });
@@ -94,8 +93,7 @@ describe("runCardTransform", () => {
   });
 
   it("freezes Date.now and Math.random for deterministic replay", async () => {
-    const code =
-      "function transform(){return {markdown: Date.now()+':'+Math.random()};}";
+    const code = "function transform(){return {markdown: Date.now()+':'+Math.random()};}";
     const a = await runCardTransform({ code, raw: {}, seed: SEED });
     const b = await runCardTransform({ code, raw: {}, seed: SEED });
 
@@ -109,10 +107,10 @@ describe("runCardTransform", () => {
   it("passes the raw snapshot through unchanged, including tricky strings", async () => {
     const result = await runCardTransform({
       code: "function transform(raw){return {markdown: raw.text};}",
-      raw: { text: "line sep end \"quote\"" },
+      raw: { text: 'line sep end "quote"' },
       seed: SEED,
     });
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.content.markdown).toBe("line sep end \"quote\"");
+    if (result.ok) expect(result.content.markdown).toBe('line sep end "quote"');
   });
 });

@@ -41,7 +41,10 @@ const chatMessageView = {
 };
 
 export function AppShell({ env }: AppShellProps) {
-  const initialConfig = useMemo(() => normalizeInitialAppConfig(readPersistedAppConfig(env.assistantId)), [env.assistantId]);
+  const initialConfig = useMemo(
+    () => normalizeInitialAppConfig(readPersistedAppConfig(env.assistantId)),
+    [env.assistantId],
+  );
   const [activeThreadId, setActiveThreadId] = useState<string>(initialConfig.activeThreadId);
   const [activeThreadSource, setActiveThreadSource] = useState<PersistedThreadSource>(initialConfig.activeThreadSource);
   const [hasExplicitThreadId, setHasExplicitThreadId] = useState(initialConfig.hasExplicitThreadId);
@@ -190,7 +193,9 @@ export function AppShell({ env }: AppShellProps) {
               <p className="truncate text-sm font-semibold tracking-[-0.01em] text-slate-950">
                 {mainView === "chat" ? activeThread?.name || "New chat" : "Spaces"}
               </p>
-              <p className="truncate text-[11px] text-slate-500">{mainView === "chat" ? "Conversation" : "Persistent visual workspaces"}</p>
+              <p className="truncate text-[11px] text-slate-500">
+                {mainView === "chat" ? "Conversation" : "Persistent visual workspaces"}
+              </p>
             </div>
             <div className="ml-2 lg:hidden">
               <ViewSwitcher compact value={mainView} onChange={changeMainView} />
@@ -203,7 +208,11 @@ export function AppShell({ env }: AppShellProps) {
                 in-progress conversation/input, and the Spaces view keeps its live
                 agent-state subscription. Unmounting either (e.g. conditional
                 render) discards that state. */}
-            <div aria-hidden={mainView !== "chat"} className={mainView === "chat" ? "h-full" : "invisible absolute inset-0 h-full"} inert={mainView !== "chat"}>
+            <div
+              aria-hidden={mainView !== "chat"}
+              className={mainView === "chat" ? "h-full" : "invisible absolute inset-0 h-full"}
+              inert={mainView !== "chat"}
+            >
               <CopilotChat
                 className="ops-chat h-full bg-[var(--surface-chat)]"
                 input="!bg-transparent"
@@ -217,7 +226,11 @@ export function AppShell({ env }: AppShellProps) {
               threadId={activeThreadId}
             />
             {spacesMounted ? (
-              <div aria-hidden={mainView !== "spaces"} className={mainView === "spaces" ? "h-full" : "invisible absolute inset-0 h-full"} inert={mainView !== "spaces"}>
+              <div
+                aria-hidden={mainView !== "spaces"}
+                className={mainView === "spaces" ? "h-full" : "invisible absolute inset-0 h-full"}
+                inert={mainView !== "spaces"}
+              >
                 <Suspense fallback={<div className="h-full animate-pulse bg-slate-50" />}>
                   <AgentNativeAppView activeThreadId={activeThreadId} env={env} onViewChange={changeMainView} />
                 </Suspense>
@@ -251,20 +264,52 @@ function isTerminalVisibleAssistantMessage({ message, messages }: CopilotChatAss
   return false;
 }
 
-function ViewSwitcher({ compact = false, onChange, value }: { compact?: boolean; onChange: (view: MainView) => void; value: MainView }) {
+function ViewSwitcher({
+  compact = false,
+  onChange,
+  value,
+}: {
+  compact?: boolean;
+  onChange: (view: MainView) => void;
+  value: MainView;
+}) {
   return (
     <div
       aria-label="Main view"
       className="inline-grid h-9 grid-cols-2 rounded-lg border border-slate-200 bg-slate-100 p-0.5"
       role="tablist"
     >
-      <ViewSwitchButton active={value === "chat"} compact={compact} icon={<MessageSquareText aria-hidden="true" className="size-4" />} label="Chat" onClick={() => onChange("chat")} />
-      <ViewSwitchButton active={value === "spaces"} compact={compact} icon={<Layers3 aria-hidden="true" className="size-4" />} label="Spaces" onClick={() => onChange("spaces")} />
+      <ViewSwitchButton
+        active={value === "chat"}
+        compact={compact}
+        icon={<MessageSquareText aria-hidden="true" className="size-4" />}
+        label="Chat"
+        onClick={() => onChange("chat")}
+      />
+      <ViewSwitchButton
+        active={value === "spaces"}
+        compact={compact}
+        icon={<Layers3 aria-hidden="true" className="size-4" />}
+        label="Spaces"
+        onClick={() => onChange("spaces")}
+      />
     </div>
   );
 }
 
-function ViewSwitchButton({ active, compact, icon, label, onClick }: { active: boolean; compact: boolean; icon: React.ReactNode; label: string; onClick: () => void }) {
+function ViewSwitchButton({
+  active,
+  compact,
+  icon,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  compact: boolean;
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+}) {
   return (
     <button
       aria-selected={active}

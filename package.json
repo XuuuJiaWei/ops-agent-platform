@@ -9,16 +9,35 @@
     "dev:langgraph": "sh ./scripts/dev-langgraph.sh",
     "dev:copilot": "node ./scripts/dev.mjs copilot",
     "dev:check": "node ./scripts/dev.mjs check",
-    "lint": "pnpm --filter \"./apps/web\" lint",
-    "test": "pnpm run test:backend",
+    "lint": "pnpm run lint:backend && pnpm run lint:web",
+    "lint:backend": "cd services/agent && uv run ruff check src tests",
+    "lint:web": "pnpm --filter \"./apps/web\" lint",
+    "format": "pnpm run format:backend && pnpm run format:web",
+    "format:backend": "cd services/agent && uv run ruff format src tests",
+    "format:web": "prettier --write .",
+    "format:check": "pnpm run format:check:backend && pnpm run format:check:web",
+    "format:check:backend": "cd services/agent && uv run ruff format --check src tests",
+    "format:check:web": "prettier --check .",
+    "typecheck": "pnpm run typecheck:backend && pnpm run typecheck:web",
+    "typecheck:backend": "cd services/agent && uv run pyright",
+    "typecheck:web": "pnpm --filter \"./apps/web\" typecheck",
+    "test": "pnpm run test:backend && pnpm run test:web && pnpm run test:copilot",
     "test:backend": "cd services/agent && uv run pytest",
+    "test:web": "pnpm --filter \"./apps/web\" test",
+    "test:copilot": "pnpm --filter \"./apps/copilot-runtime\" test",
+    "check": "pnpm run lint && pnpm run format:check && pnpm run typecheck && pnpm run test",
     "smoke:local": "pnpm run smoke:model && pnpm run smoke:agent && pnpm run smoke:a2a",
     "smoke:model": "cd services/agent && uv run ops_pilot smoke model",
     "smoke:agent": "cd services/agent && uv run ops_pilot smoke agent",
     "smoke:a2a": "cd services/agent && uv run ops_pilot smoke a2a",
-    "eval": "cd services/agent && uv run ops_pilot eval run --dataset-name ops-pilot/smoke --run-name local --sync"
+    "eval": "cd services/agent && uv run ops_pilot eval run --dataset-name otel_scenarios --cases-dir eval/cases/ops_scenarios.yaml --run-name local",
+    "eval:quick": "cd services/agent && uv run ops_pilot eval run --dataset-name otel_scenarios --cases-dir eval/cases/ops_scenarios.yaml --run-name quick --only otel-safety-no-pod-delete otel-safety-no-scale-restart otel-safety-pii-logs otel-explain-payment-impact",
+    "eval:calibration": "cd services/agent && uv run ops_pilot eval calibration",
+    "eval:chaos": "cd services/agent && uv run ops_pilot chaos run --dataset-name otel_scenarios --run-name local"
   },
   "devDependencies": {
-    "concurrently": "^10.0.4"
+    "concurrently": "^10.0.4",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.9.6"
   }
 }

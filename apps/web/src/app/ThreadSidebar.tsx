@@ -103,8 +103,23 @@ type ConversationPanelProps = {
   threadsState: ConversationThreadsState;
 };
 
-function ConversationPanel({ activeThreadId, onDeleteThread, onNewThread, onSelectThread, threadsState }: ConversationPanelProps) {
-  const { archiveThread, error, fetchMoreThreads, hasMoreThreads, isFetchingMoreThreads, isLoading, refetchThreads, threads } = threadsState;
+function ConversationPanel({
+  activeThreadId,
+  onDeleteThread,
+  onNewThread,
+  onSelectThread,
+  threadsState,
+}: ConversationPanelProps) {
+  const {
+    archiveThread,
+    error,
+    fetchMoreThreads,
+    hasMoreThreads,
+    isFetchingMoreThreads,
+    isLoading,
+    refetchThreads,
+    threads,
+  } = threadsState;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -137,7 +152,11 @@ function ConversationPanel({ activeThreadId, onDeleteThread, onNewThread, onSele
         {!isLoading && error ? (
           <div className="mx-1 rounded-lg border border-red-200 bg-white p-3 text-sm text-slate-600">
             <p className="mb-2 text-red-700">Chats are temporarily unavailable.</p>
-            <button className="inline-flex h-8 items-center gap-2 rounded-md border border-slate-200 px-2 text-xs font-medium" onClick={refetchThreads} type="button">
+            <button
+              className="inline-flex h-8 items-center gap-2 rounded-md border border-slate-200 px-2 text-xs font-medium"
+              onClick={refetchThreads}
+              type="button"
+            >
               <RefreshCw aria-hidden="true" className="size-3" />
               Try again
             </button>
@@ -187,11 +206,19 @@ function ThreadRow({ active, onArchive, onDelete, onSelect, thread }: ThreadRowP
   const name = thread.name || "Untitled chat";
 
   return (
-    <li className={`group relative rounded-lg transition-colors ${active ? "bg-white shadow-sm ring-1 ring-slate-200/80" : "hover:bg-white/70"}`}>
+    <li
+      className={`group relative rounded-lg transition-colors ${active ? "bg-white shadow-sm ring-1 ring-slate-200/80" : "hover:bg-white/70"}`}
+    >
       {active ? <span aria-hidden="true" className="absolute inset-y-2 left-0 w-0.5 rounded-r bg-blue-600" /> : null}
-      <button className="flex min-h-12 w-full min-w-0 items-center gap-2 px-3 pr-10 text-left" onClick={onSelect} type="button">
+      <button
+        className="flex min-h-12 w-full min-w-0 items-center gap-2 px-3 pr-10 text-left"
+        onClick={onSelect}
+        type="button"
+      >
         <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-slate-800">{name}</span>
-        <time className="shrink-0 text-[11px] tabular-nums text-slate-400">{formatRelativeTime(thread.lastRunAt ?? thread.updatedAt)}</time>
+        <time className="shrink-0 text-[11px] tabular-nums text-slate-400">
+          {formatRelativeTime(thread.lastRunAt ?? thread.updatedAt)}
+        </time>
       </button>
       <ThreadActions name={name} onArchive={onArchive} onDelete={onDelete} />
     </li>
@@ -217,12 +244,18 @@ function ThreadActions({ name, onArchive, onDelete }: { name: string; onArchive:
           side="right"
           sideOffset={6}
         >
-          <DropdownMenu.Item className="flex cursor-default select-none items-center gap-2 rounded-md px-2.5 py-2 outline-none data-[highlighted]:bg-slate-100 data-[highlighted]:text-slate-950" onSelect={onArchive}>
+          <DropdownMenu.Item
+            className="flex cursor-default select-none items-center gap-2 rounded-md px-2.5 py-2 outline-none data-[highlighted]:bg-slate-100 data-[highlighted]:text-slate-950"
+            onSelect={onArchive}
+          >
             <Archive aria-hidden="true" className="size-4" />
             Archive
           </DropdownMenu.Item>
           <DropdownMenu.Separator className="my-1 h-px bg-slate-100" />
-          <DropdownMenu.Item className="flex cursor-default select-none items-center gap-2 rounded-md px-2.5 py-2 text-red-700 outline-none data-[highlighted]:bg-red-50" onSelect={onDelete}>
+          <DropdownMenu.Item
+            className="flex cursor-default select-none items-center gap-2 rounded-md px-2.5 py-2 text-red-700 outline-none data-[highlighted]:bg-red-50"
+            onSelect={onDelete}
+          >
             <Trash2 aria-hidden="true" className="size-4" />
             Delete
           </DropdownMenu.Item>
@@ -233,7 +266,11 @@ function ThreadActions({ name, onArchive, onDelete }: { name: string; onArchive:
 }
 
 function EmptyRow({ label }: { label: string }) {
-  return <p className="mx-1 rounded-lg border border-dashed border-slate-200 bg-white/60 px-3 py-3 text-xs leading-5 text-slate-500">{label}</p>;
+  return (
+    <p className="mx-1 rounded-lg border border-dashed border-slate-200 bg-white/60 px-3 py-3 text-xs leading-5 text-slate-500">
+      {label}
+    </p>
+  );
 }
 
 function formatRelativeTime(value: Date | number | string | null | undefined): string {

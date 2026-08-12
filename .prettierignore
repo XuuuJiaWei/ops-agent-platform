@@ -1,0 +1,22 @@
+# Prettier owns the JS/TS frontend workspace only (apps/**).
+# The backend (services/agent) is formatted by ruff; docs, deploy manifests,
+# and agent/tooling dotfiles are intentionally left as authored.
+node_modules
+dist
+.vite
+.next
+*.tsbuildinfo
+archives
+pnpm-lock.yaml
+
+# Non-frontend trees — not Prettier's concern.
+services
+docs
+deploy
+.agents
+.claude
+.github
+config
+skills
+scripts
+*.md

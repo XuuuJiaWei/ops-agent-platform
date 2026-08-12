@@ -31,6 +31,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+  "pyright>=1.1.411,<2",
   "pytest>=9.0.2,<10",
   "pytest-asyncio>=1.3.0,<2",
   "ruff>=0.14.8,<1",
@@ -52,6 +53,14 @@ packages = ["src/ops_pilot"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.pyright]
+include = ["src", "tests"]
+pythonVersion = "3.12"
+# Resolve imports against the uv-managed virtualenv.
+venvPath = "."
+venv = ".venv"
+typeCheckingMode = "standard"
 
 [tool.ruff]
 line-length = 120

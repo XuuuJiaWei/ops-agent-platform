@@ -24,19 +24,41 @@ export function WorkspaceNavigation({ endAction, onChange, value }: WorkspaceNav
       </div>
 
       <nav aria-label="Workspace" className="mt-3 grid gap-1">
-        <NavigationItem active={value === "chat"} icon={<MessageSquareText aria-hidden="true" className="size-4" />} label="Chat" onClick={() => onChange("chat")} />
-        <NavigationItem active={value === "spaces"} icon={<Layers3 aria-hidden="true" className="size-4" />} label="Spaces" onClick={() => onChange("spaces")} />
+        <NavigationItem
+          active={value === "chat"}
+          icon={<MessageSquareText aria-hidden="true" className="size-4" />}
+          label="Chat"
+          onClick={() => onChange("chat")}
+        />
+        <NavigationItem
+          active={value === "spaces"}
+          icon={<Layers3 aria-hidden="true" className="size-4" />}
+          label="Spaces"
+          onClick={() => onChange("spaces")}
+        />
       </nav>
     </div>
   );
 }
 
-function NavigationItem({ active, icon, label, onClick }: { active: boolean; icon: ReactNode; label: string; onClick: () => void }) {
+function NavigationItem({
+  active,
+  icon,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+}) {
   return (
     <button
       aria-current={active ? "page" : undefined}
       className={`flex h-9 w-full items-center gap-3 rounded-lg px-3 text-sm font-medium transition-colors ${
-        active ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-200/80" : "text-slate-600 hover:bg-white/70 hover:text-slate-950"
+        active
+          ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-200/80"
+          : "text-slate-600 hover:bg-white/70 hover:text-slate-950"
       }`}
       onClick={onClick}
       type="button"

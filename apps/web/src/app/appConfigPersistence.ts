@@ -56,7 +56,10 @@ export function writePersistedAppConfig(agentId: string, config: PersistedAppCon
   }
 
   try {
-    window.localStorage.setItem(appConfigStorageKey(agentId), JSON.stringify({ version: STORAGE_VERSION, config } satisfies StoredAppConfigPayload));
+    window.localStorage.setItem(
+      appConfigStorageKey(agentId),
+      JSON.stringify({ version: STORAGE_VERSION, config } satisfies StoredAppConfigPayload),
+    );
   } catch {
     // Local persistence is best effort only.
   }

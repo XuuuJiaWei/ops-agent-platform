@@ -36,7 +36,10 @@ export class PostgresAgentRunner extends AgentRunner {
     await this.#pool.query("SELECT 1");
     await this.#finalizeInterruptedRuns();
     this.#sweepTimer = setInterval(
-      () => void this.#finalizeInterruptedRuns().catch((error) => console.error("Failed to finalize stale CopilotKit runs", error)),
+      () =>
+        void this.#finalizeInterruptedRuns().catch((error) =>
+          console.error("Failed to finalize stale CopilotKit runs", error),
+        ),
       INTERRUPTED_RUN_SWEEP_SECONDS * 1000,
     );
     this.#sweepTimer.unref?.();
@@ -158,7 +161,10 @@ export class PostgresAgentRunner extends AgentRunner {
         [threadId, runId, agent.agentId ?? "default", JSON.stringify(input)],
       );
       heartbeat = setInterval(
-        () => void this.#refreshLock(threadId, runId).catch((error) => console.error("Failed to refresh CopilotKit thread lock", error)),
+        () =>
+          void this.#refreshLock(threadId, runId).catch((error) =>
+            console.error("Failed to refresh CopilotKit thread lock", error),
+          ),
         LOCK_HEARTBEAT_SECONDS * 1000,
       );
       heartbeat.unref?.();
@@ -207,7 +213,9 @@ export class PostgresAgentRunner extends AgentRunner {
       if (activeRun.flushTimer) {
         clearTimeout(activeRun.flushTimer);
       }
-      await this.#releaseLock(threadId, runId).catch((error) => console.error("Failed to release CopilotKit thread lock", error));
+      await this.#releaseLock(threadId, runId).catch((error) =>
+        console.error("Failed to release CopilotKit thread lock", error),
+      );
       this.#activeRuns.delete(threadId);
       activeRun.resolveFinished();
     }
@@ -311,7 +319,10 @@ export class PostgresAgentRunner extends AgentRunner {
   }
 
   async #releaseLock(threadId, runId) {
-    await this.#pool.query("DELETE FROM copilotkit_thread_locks WHERE thread_id = $1 AND run_id = $2", [threadId, runId]);
+    await this.#pool.query("DELETE FROM copilotkit_thread_locks WHERE thread_id = $1 AND run_id = $2", [
+      threadId,
+      runId,
+    ]);
   }
 
   async #setup() {
@@ -373,7 +384,8 @@ export class PostgresAgentRunner extends AgentRunner {
           sequence,
           JSON.stringify({
             type: EventType.RUN_ERROR,
-            message: "Copilot Runtime restarted before this run completed. Continue on the same thread to resume from the durable agent checkpoint.",
+            message:
+              "Copilot Runtime restarted before this run completed. Continue on the same thread to resume from the durable agent checkpoint.",
             code: "runtime_restarted",
           }),
           JSON.stringify({ type: EventType.RUN_FINISHED, threadId: row.thread_id, runId: row.run_id }),

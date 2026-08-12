@@ -43,7 +43,9 @@ export function SpaceCardView({ card, compact = false }: SpaceCardViewProps) {
         </span>
         <div className="min-w-0">
           <h3 className="truncate text-sm font-semibold text-slate-950">{card.title}</h3>
-          {card.subtitle ? <p className="mt-0.5 line-clamp-2 text-xs leading-5 text-slate-500">{card.subtitle}</p> : null}
+          {card.subtitle ? (
+            <p className="mt-0.5 line-clamp-2 text-xs leading-5 text-slate-500">{card.subtitle}</p>
+          ) : null}
         </div>
         <FreshnessBadge card={card} />
       </header>
@@ -174,7 +176,11 @@ function TableContent({ card }: { card: CardDraft | SpaceCard }) {
         <thead className="sticky top-0 bg-white text-slate-500">
           <tr>
             {card.content.columns.map((column) => (
-              <th className="border-b border-slate-200 px-3 py-2 font-medium" key={column.key} style={{ textAlign: column.align }}>
+              <th
+                className="border-b border-slate-200 px-3 py-2 font-medium"
+                key={column.key}
+                style={{ textAlign: column.align }}
+              >
                 {column.label}
               </th>
             ))}
@@ -184,7 +190,11 @@ function TableContent({ card }: { card: CardDraft | SpaceCard }) {
           {card.content.rows.map((row, index) => (
             <tr key={index}>
               {card.content.columns.map((column) => (
-                <td className="border-b border-slate-100 px-3 py-2.5" key={column.key} style={{ textAlign: column.align }}>
+                <td
+                  className="border-b border-slate-100 px-3 py-2.5"
+                  key={column.key}
+                  style={{ textAlign: column.align }}
+                >
                   {displayValue(row[column.key])}
                 </td>
               ))}
@@ -259,7 +269,11 @@ function ObjectListContent({ card }: { card: CardDraft | SpaceCard }) {
             <p className="truncate text-sm font-medium text-slate-800">{item.title}</p>
             {item.subtitle ? <p className="mt-0.5 truncate text-xs text-slate-500">{item.subtitle}</p> : null}
           </div>
-          {item.value !== undefined ? <span className={`shrink-0 text-sm font-semibold ${statusClass(item.status)}`}>{displayValue(item.value)}</span> : null}
+          {item.value !== undefined ? (
+            <span className={`shrink-0 text-sm font-semibold ${statusClass(item.status)}`}>
+              {displayValue(item.value)}
+            </span>
+          ) : null}
         </li>
       ))}
     </ul>

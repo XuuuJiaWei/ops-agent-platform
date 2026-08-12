@@ -6,9 +6,7 @@ type CardType = z.infer<typeof cardTypeSchema>;
 
 export type ValidateFailureCode = TransformFailureCode | "empty_content" | "raw_too_large";
 
-export type ValidateResult =
-  | { ok: true }
-  | { ok: false; code: ValidateFailureCode; message: string };
+export type ValidateResult = { ok: true } | { ok: false; code: ValidateFailureCode; message: string };
 
 type ValidateInput = {
   /** LLM-authored JS defining `function transform(raw)`. */

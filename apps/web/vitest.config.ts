@@ -1,8 +1,8 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
-// Separate channel from the legacy `node --test src/app/*.test.mjs` suite:
-// vitest can load TS + the QuickJS-WASM sandbox, which node:test cannot.
+// Single test channel for the web app. Vitest loads TS + the QuickJS-WASM
+// sandbox, so all unit tests live here as `*.test.ts`.
 export default defineConfig({
   resolve: {
     alias: {
@@ -11,6 +11,6 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["src/lib/**/*.test.ts", "src/spaces/**/*.test.ts"],
+    include: ["src/**/*.test.ts"],
   },
 });

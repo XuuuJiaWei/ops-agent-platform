@@ -75,7 +75,9 @@ export function useConversationThreads({ agentId }: UseConversationThreadsInput)
         if (!existing) {
           return [createLocalThread(agentId, threadId, now), ...current];
         }
-        return current.map((thread) => (thread.id === threadId ? { ...thread, updatedAt: now, lastRunAt: now } : thread));
+        return current.map((thread) =>
+          thread.id === threadId ? { ...thread, updatedAt: now, lastRunAt: now } : thread,
+        );
       });
     },
     [agentId, updateLocalThreads],
@@ -86,7 +88,9 @@ export function useConversationThreads({ agentId }: UseConversationThreadsInput)
   const archiveThread = useCallback(
     async (threadId: string) => {
       updateLocalThreads((current) =>
-        current.map((thread) => (thread.id === threadId ? { ...thread, archived: true, updatedAt: new Date().toISOString() } : thread)),
+        current.map((thread) =>
+          thread.id === threadId ? { ...thread, archived: true, updatedAt: new Date().toISOString() } : thread,
+        ),
       );
     },
     [updateLocalThreads],
@@ -155,7 +159,11 @@ function normalizeThreadTitle(title: string): string {
   return `${normalized.slice(0, 77).trimEnd()}...`;
 }
 
-function createLocalThread(agentId: string, threadId = createConversationThreadId(), now = new Date().toISOString()): ConversationThread {
+function createLocalThread(
+  agentId: string,
+  threadId = createConversationThreadId(),
+  now = new Date().toISOString(),
+): ConversationThread {
   return {
     id: threadId,
     agentId,
@@ -194,7 +202,10 @@ function writeLocalThreads(storageKey: string, threads: ConversationThread[]) {
     return;
   }
 
-  window.localStorage.setItem(storageKey, JSON.stringify({ version: STORAGE_VERSION, threads } satisfies StoredThreadPayload));
+  window.localStorage.setItem(
+    storageKey,
+    JSON.stringify({ version: STORAGE_VERSION, threads } satisfies StoredThreadPayload),
+  );
 }
 
 function sortThreads(threads: ConversationThread[]): ConversationThread[] {

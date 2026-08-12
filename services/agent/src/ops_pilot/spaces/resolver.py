@@ -239,4 +239,3 @@ def _guard_snapshot_size(raw: Any) -> None:
             f"Raw source snapshot is {size} bytes, over the {MAX_RAW_SNAPSHOT_BYTES}-byte limit; "
             "narrow the query or add a source-side limit.",
         )
-

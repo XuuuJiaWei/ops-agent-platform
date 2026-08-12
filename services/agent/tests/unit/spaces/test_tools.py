@@ -142,4 +142,3 @@ async def test_update_card_can_attach_binding_to_static_card() -> None:
 
     card = updated["space"]["cards"][0]
     assert card["binding"]["source_tool"] == "CountTool"
-

@@ -43,8 +43,7 @@ export function SpaceToolRenderers() {
       description:
         "Dry-run a live card's binding.transform JS in the frontend QuickJS sandbox against a raw sample. Returns whether it runs and yields non-empty content for the card type. Call this before add_card_to_space / update_card_in_space whenever the card has a transform.",
       parameters: validateTransformParameters,
-      handler: async ({ code, raw, card_type }) =>
-        validateTransform({ code, raw, cardType: card_type ?? undefined }),
+      handler: async ({ code, raw, card_type }) => validateTransform({ code, raw, cardType: card_type ?? undefined }),
       render: ({ result, status }) => (
         <ToolActivity
           detail={validationDetail(result, status)}
@@ -87,12 +86,7 @@ export function SpaceToolRenderers() {
   return null;
 }
 
-function useSpaceToolRenderer(
-  name: string,
-  parameters: z.ZodType,
-  label: string,
-  invalidatesSpaces: boolean,
-) {
+function useSpaceToolRenderer(name: string, parameters: z.ZodType, label: string, invalidatesSpaces: boolean) {
   useRenderTool(
     {
       name,
@@ -152,9 +146,19 @@ function ToolActivity({
 }) {
   const complete = status === "complete";
   return (
-    <div className={`my-2 flex max-w-xl items-center gap-3 rounded-xl border px-4 py-3 text-sm ${failed ? "border-red-200 bg-red-50 text-red-800" : "border-slate-200 bg-white text-slate-700"}`}>
-      <span className={`grid size-8 shrink-0 place-items-center rounded-lg ${failed ? "bg-red-100" : complete ? "bg-emerald-50 text-emerald-700" : "bg-blue-50 text-blue-700"}`}>
-        {failed ? <CircleAlert aria-hidden="true" className="size-4" /> : complete ? <Check aria-hidden="true" className="size-4" /> : <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />}
+    <div
+      className={`my-2 flex max-w-xl items-center gap-3 rounded-xl border px-4 py-3 text-sm ${failed ? "border-red-200 bg-red-50 text-red-800" : "border-slate-200 bg-white text-slate-700"}`}
+    >
+      <span
+        className={`grid size-8 shrink-0 place-items-center rounded-lg ${failed ? "bg-red-100" : complete ? "bg-emerald-50 text-emerald-700" : "bg-blue-50 text-blue-700"}`}
+      >
+        {failed ? (
+          <CircleAlert aria-hidden="true" className="size-4" />
+        ) : complete ? (
+          <Check aria-hidden="true" className="size-4" />
+        ) : (
+          <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />
+        )}
       </span>
       <div className="min-w-0 flex-1">
         <p className="font-medium">{label}</p>

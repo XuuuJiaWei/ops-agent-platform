@@ -19,7 +19,8 @@ export function AgentNativeAppView({ activeThreadId, env, onViewChange }: AgentN
   const [selectedSpaceId, setSelectedSpaceId] = useState<string | undefined>(() => readSelectedSpace(storageKey));
   const summariesQuery = useSWR(["spaces", env.backendUrl], () => listSpaces(env));
   const summaries = summariesQuery.data ?? [];
-  const effectiveSpaceId = selectedSpaceId && summaries.some((item) => item.id === selectedSpaceId) ? selectedSpaceId : summaries[0]?.id;
+  const effectiveSpaceId =
+    selectedSpaceId && summaries.some((item) => item.id === selectedSpaceId) ? selectedSpaceId : summaries[0]?.id;
   const spaceQuery = useSWR(
     effectiveSpaceId ? ["space", env.backendUrl, effectiveSpaceId] : null,
     () => getSpace(env, effectiveSpaceId!),
@@ -66,22 +67,30 @@ export function AgentNativeAppView({ activeThreadId, env, onViewChange }: AgentN
           {summaries.map((summary) => (
             <button
               className={`relative flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition ${
-                effectiveSpaceId === summary.id ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-200/80" : "text-slate-600 hover:bg-white/70 hover:text-slate-950"
+                effectiveSpaceId === summary.id
+                  ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-200/80"
+                  : "text-slate-600 hover:bg-white/70 hover:text-slate-950"
               }`}
               key={summary.id}
               onClick={() => selectSpace(summary.id)}
               type="button"
             >
-              {effectiveSpaceId === summary.id ? <span aria-hidden="true" className="absolute inset-y-2 left-0 w-0.5 rounded-r bg-blue-600" /> : null}
+              {effectiveSpaceId === summary.id ? (
+                <span aria-hidden="true" className="absolute inset-y-2 left-0 w-0.5 rounded-r bg-blue-600" />
+              ) : null}
               <LayoutGrid aria-hidden="true" className="size-4 shrink-0 text-slate-400" />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-sm font-medium">{summary.name}</span>
-                <span className="block text-[11px] text-slate-400">{summary.card_count} {summary.card_count === 1 ? "card" : "cards"}</span>
+                <span className="block text-[11px] text-slate-400">
+                  {summary.card_count} {summary.card_count === 1 ? "card" : "cards"}
+                </span>
               </span>
             </button>
           ))}
         </nav>
-        <div className="border-t border-slate-200 px-4 py-3 text-[11px] leading-5 text-slate-400">The agent keeps Spaces up to date as it works.</div>
+        <div className="border-t border-slate-200 px-4 py-3 text-[11px] leading-5 text-slate-400">
+          The agent keeps Spaces up to date as it works.
+        </div>
       </aside>
 
       <section className="min-w-0 flex-1 overflow-y-auto">
@@ -92,7 +101,9 @@ export function AgentNativeAppView({ activeThreadId, env, onViewChange }: AgentN
                 {summaries.map((summary) => (
                   <button
                     className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium ${
-                      effectiveSpaceId === summary.id ? "border-blue-200 bg-blue-50 text-blue-800" : "border-slate-200 bg-white text-slate-600"
+                      effectiveSpaceId === summary.id
+                        ? "border-blue-200 bg-blue-50 text-blue-800"
+                        : "border-slate-200 bg-white text-slate-600"
                     }`}
                     key={summary.id}
                     onClick={() => selectSpace(summary.id)}
@@ -102,11 +113,20 @@ export function AgentNativeAppView({ activeThreadId, env, onViewChange }: AgentN
                   </button>
                 ))}
               </div>
-              <h1 className="truncate text-xl font-semibold tracking-[-0.02em] text-slate-950 sm:text-2xl">{space?.name ?? "Spaces"}</h1>
+              <h1 className="truncate text-xl font-semibold tracking-[-0.02em] text-slate-950 sm:text-2xl">
+                {space?.name ?? "Spaces"}
+              </h1>
               <p className="mt-1 text-sm text-slate-500">
-                {space?.description ?? (summaries.length ? "Select a visual workspace" : "Create your first visual workspace with the agent")}
+                {space?.description ??
+                  (summaries.length
+                    ? "Select a visual workspace"
+                    : "Create your first visual workspace with the agent")}
               </p>
-              {space ? <p className="mt-2 text-xs text-slate-400">Updated {formatUpdatedAt(space.updated_at)} · version {space.version}</p> : null}
+              {space ? (
+                <p className="mt-2 text-xs text-slate-400">
+                  Updated {formatUpdatedAt(space.updated_at)} · version {space.version}
+                </p>
+              ) : null}
             </div>
             <button
               aria-label="Refresh Spaces"
@@ -134,9 +154,13 @@ function EmptyState({ activeThreadId }: { activeThreadId: string | undefined }) 
   return (
     <div className="grid min-h-[420px] place-items-center rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center">
       <div className="max-w-md">
-        <span className="mx-auto grid size-12 place-items-center rounded-xl bg-blue-50 text-blue-700"><LayoutGrid aria-hidden="true" className="size-5" /></span>
+        <span className="mx-auto grid size-12 place-items-center rounded-xl bg-blue-50 text-blue-700">
+          <LayoutGrid aria-hidden="true" className="size-5" />
+        </span>
         <h2 className="mt-4 text-base font-semibold text-slate-950">No Spaces yet</h2>
-        <p className="mt-2 text-sm leading-6 text-slate-500">Open Chat and ask the agent to create a Space, then add KPI, chart, table, detail, or list cards.</p>
+        <p className="mt-2 text-sm leading-6 text-slate-500">
+          Open Chat and ask the agent to create a Space, then add KPI, chart, table, detail, or list cards.
+        </p>
         <div className="mt-5 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-500">
           <MessageSquareText aria-hidden="true" className="size-3.5" />
           {activeThreadId ? "Current conversation is ready" : "Start a conversation"}
@@ -163,7 +187,9 @@ function ErrorState({ message, onRetry }: { message: string; onRetry: () => void
   return (
     <div className="rounded-xl border border-red-200 bg-red-50 p-5 text-sm text-red-800">
       <p>{message}</p>
-      <button className="mt-3 font-medium underline underline-offset-4" onClick={onRetry} type="button">Try again</button>
+      <button className="mt-3 font-medium underline underline-offset-4" onClick={onRetry} type="button">
+        Try again
+      </button>
     </div>
   );
 }

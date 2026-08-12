@@ -1,14 +1,6 @@
 import { z } from "zod";
 
-export const cardTypeSchema = z.enum([
-  "kpi",
-  "table",
-  "line-chart",
-  "bar-chart",
-  "details",
-  "object-list",
-  "markdown",
-]);
+export const cardTypeSchema = z.enum(["kpi", "table", "line-chart", "bar-chart", "details", "object-list", "markdown"]);
 export const cardSizeSchema = z.enum(["small", "medium", "large", "full"]);
 
 const kpiMetricSchema = z.object({
@@ -68,12 +60,7 @@ export const cardBindingSchema = z.object({
   interval_ms: z.number().int().nullish(),
 });
 
-export const refreshStatusSchema = z.enum([
-  "fresh",
-  "stale",
-  "refreshing",
-  "error",
-]);
+export const refreshStatusSchema = z.enum(["fresh", "stale", "refreshing", "error"]);
 
 export const cardDraftSchema = z.object({
   type: cardTypeSchema,

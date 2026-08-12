@@ -1,10 +1,9 @@
-import assert from "node:assert/strict";
-import test from "node:test";
-import { normalizeInitialAppConfig } from "./appConfigPersistence.ts";
-import { ThreadActivityGate } from "./threadActivityGate.ts";
+import { expect, test } from "vitest";
+import { type PersistedAppConfig, normalizeInitialAppConfig } from "./appConfigPersistence";
+import { ThreadActivityGate } from "./threadActivityGate";
 
 test("a locally generated thread id is always explicit", () => {
-  const legacyConfig = {
+  const legacyConfig: PersistedAppConfig = {
     activeThreadId: "ui-thread-id",
     activeThreadSource: "local",
     desktopSidebarOpen: true,
@@ -14,12 +13,12 @@ test("a locally generated thread id is always explicit", () => {
 
   const normalized = normalizeInitialAppConfig(legacyConfig);
 
-  assert.equal(normalized.activeThreadId, "ui-thread-id");
-  assert.equal(normalized.hasExplicitThreadId, true);
+  expect(normalized.activeThreadId).toBe("ui-thread-id");
+  expect(normalized.hasExplicitThreadId).toBe(true);
 });
 
 test("a new thread id is generated once and marked explicit", () => {
-  const emptyConfig = {
+  const emptyConfig: PersistedAppConfig = {
     activeThreadId: undefined,
     activeThreadSource: "local",
     desktopSidebarOpen: true,
@@ -29,29 +28,26 @@ test("a new thread id is generated once and marked explicit", () => {
 
   const normalized = normalizeInitialAppConfig(emptyConfig, () => "new-ui-thread-id");
 
-  assert.equal(normalized.activeThreadId, "new-ui-thread-id");
-  assert.equal(normalized.hasExplicitThreadId, true);
+  expect(normalized.activeThreadId).toBe("new-ui-thread-id");
+  expect(normalized.hasExplicitThreadId).toBe(true);
 });
 
 test("messages retained during a thread switch do not create a ghost conversation", () => {
   const gate = new ThreadActivityGate();
   const oldMessages = [{ id: "old-user", role: "user" }];
 
-  assert.equal(
+  expect(
     gate.shouldReport({ agentThreadId: "old-thread", messages: oldMessages, selectedThreadId: "old-thread" }),
-    false,
-  );
-  assert.equal(
+  ).toBe(false);
+  expect(
     gate.shouldReport({ agentThreadId: "new-thread", messages: oldMessages, selectedThreadId: "new-thread" }),
-    false,
-  );
-  assert.equal(gate.shouldReport({ agentThreadId: "new-thread", messages: [], selectedThreadId: "new-thread" }), false);
-  assert.equal(
+  ).toBe(false);
+  expect(gate.shouldReport({ agentThreadId: "new-thread", messages: [], selectedThreadId: "new-thread" })).toBe(false);
+  expect(
     gate.shouldReport({
       agentThreadId: "new-thread",
       messages: [{ id: "new-user", role: "user" }],
       selectedThreadId: "new-thread",
     }),
-    true,
-  );
+  ).toBe(true);
 });
