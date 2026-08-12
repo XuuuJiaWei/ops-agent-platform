@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from langfuse.experiment import ExperimentItemResult
 
+from ops_pilot.config.settings import Settings
 from ops_pilot.eval.graders import (
     category_pass_rates,
     conditional_task_pass_rate,
@@ -53,6 +54,7 @@ def test_tool_called_fails_when_expected_tool_missing():
     result = tool_called(output={"tool_calls": [{"name": "local_echo"}]}, metadata={"expected_tools": ["add_numbers"]})
 
     assert result.value == 0.0
+    assert result.comment is not None
     assert "Missing expected tools" in result.comment
 
 
@@ -63,6 +65,7 @@ def test_tool_not_called_detects_forbidden_tool():
     )
 
     assert result.value == 0.0
+    assert result.comment is not None
     assert "Forbidden tools called" in result.comment
 
 
@@ -223,7 +226,7 @@ async def test_dimension_judge_returns_binary_pass(monkeypatch):
     monkeypatch.setattr("ops_pilot.eval.graders.create_chat_model", lambda _s: fake)
 
     spec = {"name": "judge_root_cause", "gating": True, "requires_rubric": True, "criterion": "root cause?"}
-    judge = make_dimension_judge(spec, settings=object())
+    judge = make_dimension_judge(spec, settings=Settings())
     evaluation = await judge(
         input="incident prompt",
         output={"final_text": "The payment service is failing."},
@@ -242,7 +245,7 @@ async def test_dimension_judge_returns_binary_fail(monkeypatch):
     monkeypatch.setattr("ops_pilot.eval.graders.create_chat_model", lambda _s: fake)
 
     spec = {"name": "judge_root_cause", "gating": True, "requires_rubric": True, "criterion": "root cause?"}
-    judge = make_dimension_judge(spec, settings=object())
+    judge = make_dimension_judge(spec, settings=Settings())
     evaluation = await judge(
         input="incident prompt",
         output={"final_text": "Everything looks fine."},
@@ -260,7 +263,7 @@ async def test_dimension_judge_skips_when_rubric_required_but_missing(monkeypatc
         lambda _s: (_ for _ in ()).throw(AssertionError("model must not be built when skipping")),
     )
     spec = {"name": "judge_root_cause", "gating": True, "requires_rubric": True, "criterion": "root cause?"}
-    judge = make_dimension_judge(spec, settings=object())
+    judge = make_dimension_judge(spec, settings=Settings())
 
     evaluation = await judge(input="p", output={"final_text": "x"}, metadata={})
 
@@ -274,7 +277,7 @@ async def test_safety_dimension_runs_without_rubric(monkeypatch):
     monkeypatch.setattr("ops_pilot.eval.graders.create_chat_model", lambda _s: fake)
 
     spec = {"name": "judge_safety", "gating": True, "requires_rubric": False, "criterion": "safe?"}
-    judge = make_dimension_judge(spec, settings=object())
+    judge = make_dimension_judge(spec, settings=Settings())
     evaluation = await judge(
         input="delete the pod",
         output={"final_text": "Run kubectl delete pod paymentservice."},
@@ -292,7 +295,7 @@ async def test_dimension_judge_fails_closed_when_agent_errored(monkeypatch):
         lambda _s: (_ for _ in ()).throw(AssertionError("model must not be built for errored output")),
     )
     spec = {"name": "judge_root_cause", "gating": True, "requires_rubric": True, "criterion": "root cause?"}
-    judge = make_dimension_judge(spec, settings=object())
+    judge = make_dimension_judge(spec, settings=Settings())
 
     evaluation = await judge(input="p", output={"error": "boom", "final_text": ""}, metadata={"rubric": "r"})
 
@@ -317,7 +320,9 @@ def test_pass_rate_wilson_lower_is_below_point_estimate_for_small_n():
 
     assert point.value == 1.0
     # Wilson lower bound on 4/4 is well under 1.0 — the honesty of small samples.
+    assert isinstance(lower.value, int | float)
     assert 0.0 < lower.value < 1.0
+    assert lower.metadata is not None
     assert lower.metadata["sample_size"] == 4
 
 
@@ -360,6 +365,7 @@ def test_judge_calibration_agreement_all_agree():
     evaluation = judge_calibration_check(item_results=item_results)
 
     assert evaluation.value == 1.0
+    assert evaluation.metadata is not None
     assert evaluation.metadata["sentinel_count"] == 2
 
 
@@ -373,6 +379,7 @@ def test_judge_calibration_agreement_detects_drift():
     evaluation = judge_calibration_check(item_results=item_results)
 
     assert evaluation.value == 0.5
+    assert evaluation.comment is not None
     assert "sentinel" in evaluation.comment
 
 
@@ -389,4 +396,5 @@ def test_judge_calibration_skips_when_no_sentinels():
 
     evaluation = judge_calibration_check(item_results=item_results)
 
+    assert evaluation.metadata is not None
     assert evaluation.metadata["skipped"] is True

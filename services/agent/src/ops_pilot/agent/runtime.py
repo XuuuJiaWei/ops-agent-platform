@@ -8,6 +8,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from langchain_core.runnables import RunnableConfig
+
 from ops_pilot.agent.middleware import NormalizeSystemMessagesMiddleware
 from ops_pilot.config.settings import Settings, load_settings
 from ops_pilot.mcp.registry import MCPRegistry, create_mcp_registry
@@ -80,7 +82,7 @@ class AgentRuntime:
         a2a_context_id: str | None = None,
         configurable: dict[str, Any] | None = None,
         extra_metadata: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
+    ) -> RunnableConfig:
         metadata = {**self.model_metadata, **(extra_metadata or {})}
         return build_runnable_config(
             self.settings,
@@ -402,6 +404,8 @@ async def _create_postgres_checkpointer(
     """
 
     from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+    from psycopg import AsyncConnection
+    from psycopg.rows import DictRow, dict_row
     from psycopg_pool import AsyncConnectionPool
 
     conn_string = settings.psycopg_database_url()
@@ -410,11 +414,12 @@ async def _create_postgres_checkpointer(
 
     # autocommit + no prepared-statement server-side caching is what the
     # AsyncPostgresSaver examples use for pooled connections.
-    pool = AsyncConnectionPool(
+    pool: AsyncConnectionPool[AsyncConnection[DictRow]] = AsyncConnectionPool(
         conninfo=conn_string,
         max_size=20,
         open=False,
-        kwargs={"autocommit": True, "prepare_threshold": 0},
+        connection_class=AsyncConnection[DictRow],
+        kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row},
     )
     await pool.open(wait=True)
     try:

@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from langchain_core.runnables import RunnableConfig
+
 from ops_pilot.agent.runtime import AgentRuntime, build_agent_runtime
 from ops_pilot.config.settings import Settings
 
@@ -139,7 +141,7 @@ class CurrentRuntimeProxy:
         await self._manager.ensure_runtime_ready()
         return await self._manager.current.ainvoke_text(text, **kwargs)
 
-    def runnable_config(self, **kwargs: Any) -> dict[str, Any]:
+    def runnable_config(self, **kwargs: Any) -> RunnableConfig:
         return self._manager.current.runnable_config(**kwargs)
 
     def iterate(self, run_id: str, source: Any, **kwargs: Any) -> Any:

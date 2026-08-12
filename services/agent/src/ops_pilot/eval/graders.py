@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import math
 from collections import defaultdict
@@ -550,7 +551,10 @@ async def _invoke_dimension_judge(model: Any, *, criterion: str, input: Any, out
     ]
     ainvoke = getattr(model, "ainvoke", None)
     if callable(ainvoke):
-        return await ainvoke(messages)
+        result = ainvoke(messages)
+        if not inspect.isawaitable(result):
+            raise TypeError("Judge model ainvoke() did not return an awaitable.")
+        return await result
     invoke = getattr(model, "invoke", None)
     if callable(invoke):
         return invoke(messages)

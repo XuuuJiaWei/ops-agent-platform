@@ -7,7 +7,8 @@ from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
-from psycopg.rows import dict_row
+from psycopg import AsyncConnection
+from psycopg.rows import DictRow, dict_row
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
@@ -39,7 +40,7 @@ from ops_pilot.spaces.repository import (
 class PostgresSpaceRepository(SpaceRepository):
     """Store each Space as one transactionally updated JSONB aggregate."""
 
-    def __init__(self, pool: AsyncConnectionPool, *, namespace: str) -> None:
+    def __init__(self, pool: AsyncConnectionPool[AsyncConnection[DictRow]], *, namespace: str) -> None:
         self._pool = pool
         self._namespace = namespace
 
@@ -51,9 +52,10 @@ class PostgresSpaceRepository(SpaceRepository):
         namespace: str,
         setup: bool,
     ) -> tuple[PostgresSpaceRepository, Callable[[], Awaitable[None]]]:
-        pool = AsyncConnectionPool(
+        pool: AsyncConnectionPool[AsyncConnection[DictRow]] = AsyncConnectionPool(
             conninfo=database_url,
             open=False,
+            connection_class=AsyncConnection[DictRow],
             kwargs={
                 "autocommit": True,
                 "prepare_threshold": 0,
@@ -98,7 +100,7 @@ class PostgresSpaceRepository(SpaceRepository):
                 """
             )
 
-    async def create_space(self, *, name: str, description: str | None = None) -> Space:
+    async def create_space(self, name: str, description: str | None = None) -> Space:
         now = utc_now()
         space = Space(
             id=str(uuid4()),
@@ -204,8 +206,8 @@ class PostgresSpaceRepository(SpaceRepository):
     async def remove_card(self, space_id: str, card_id: str) -> Space:
         return await self._mutate(space_id, lambda space: remove_card(space, card_id))
 
-    async def reorder_cards(self, space_id: str, card_ids: list[str]) -> Space:
-        return await self._mutate(space_id, lambda space: reorder_cards(space, card_ids))
+    async def reorder_cards(self, space_id: str, ordered_card_ids: list[str]) -> Space:
+        return await self._mutate(space_id, lambda space: reorder_cards(space, ordered_card_ids))
 
     async def list_live_cards(self) -> list[tuple[str, SpaceCard]]:
         async with self._pool.connection() as connection:

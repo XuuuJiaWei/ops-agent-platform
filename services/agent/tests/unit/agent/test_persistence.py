@@ -18,7 +18,7 @@ from ops_pilot.config.settings import load_settings
 from ops_pilot.reliability.execution import ReliableToolExecutor, ToolCall
 from ops_pilot.reliability.journal import create_execution_journal
 
-TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
+TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL", "")
 requires_db = pytest.mark.skipif(
     not TEST_DATABASE_URL,
     reason="Set TEST_DATABASE_URL to run persistence integration tests (see deploy/postgres).",
@@ -75,6 +75,7 @@ async def test_postgres_checkpointer_persists_and_resumes_across_reopen():
     config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
 
     checkpointer, closer = await _create_checkpointer(settings)
+    assert checkpointer is not None
     assert closer is not None
     try:
         checkpoint = empty_checkpoint()
@@ -85,6 +86,7 @@ async def test_postgres_checkpointer_persists_and_resumes_across_reopen():
 
     # Simulate a restart: brand-new saver + connection pool, same database.
     reopened, reopened_closer = await _create_checkpointer(settings)
+    assert reopened is not None
     assert reopened_closer is not None
     try:
         tuple_ = await reopened.aget_tuple(config)

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from langchain_core.runnables import RunnableConfig
+
 from ops_pilot.config.settings import Settings
 
 
@@ -58,7 +60,7 @@ def build_runnable_config(
     a2a_context_id: str | None = None,
     configurable: dict[str, Any] | None = None,
     extra_metadata: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+) -> RunnableConfig:
     metadata = build_trace_metadata(
         settings,
         protocol=protocol,
@@ -68,7 +70,7 @@ def build_runnable_config(
         a2a_context_id=a2a_context_id,
         extra=extra_metadata,
     )
-    config: dict[str, Any] = {
+    config: RunnableConfig = {
         "metadata": metadata,
         "run_name": metadata["langfuse_trace_name"],
         "tags": metadata["langfuse_tags"],

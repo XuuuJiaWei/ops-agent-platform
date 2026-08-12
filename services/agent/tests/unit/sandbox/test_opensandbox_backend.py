@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import timedelta
+
 from ops_pilot.config.settings import load_settings
 from ops_pilot.sandbox import opensandbox_backend
 from ops_pilot.sandbox.opensandbox_backend import SandboxRuntime, create_sandbox_runtime
@@ -75,9 +77,14 @@ def test_create_sandbox_runtime_builds_opensandbox_backend(monkeypatch) -> None:
         "memory": "128Mi",
     }
     assert FakeSandbox.created_kwargs["env"] == {}
-    assert FakeSandbox.created_kwargs["timeout"].total_seconds() == 600
-    assert FakeSandbox.created_kwargs["ready_timeout"].total_seconds() == 240
+    timeout = FakeSandbox.created_kwargs["timeout"]
+    ready_timeout = FakeSandbox.created_kwargs["ready_timeout"]
+    assert isinstance(timeout, timedelta)
+    assert isinstance(ready_timeout, timedelta)
+    assert timeout.total_seconds() == 600
+    assert ready_timeout.total_seconds() == 240
     connection = FakeSandbox.created_kwargs["connection_config"]
+    assert isinstance(connection, FakeConnectionConfig)
     assert connection.kwargs == {
         "domain": "opensandbox.example.test",
         "protocol": "https",

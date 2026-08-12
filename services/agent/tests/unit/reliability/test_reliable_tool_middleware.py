@@ -1,16 +1,22 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 from langchain.tools import ToolRuntime
 from langchain.tools.tool_node import ToolCallRequest
 from langchain_core.messages import ToolMessage
+from langchain_core.tools import BaseTool
 from mcp.shared.exceptions import McpError
 from mcp.types import CONNECTION_CLOSED, ErrorData
 
 from ops_pilot.reliability.execution import MemoryExecutionJournal, ReliableToolExecutor, RetryPolicy
 from ops_pilot.reliability.middleware import ReliableToolMiddleware
+
+
+def _tool(name: str, metadata: dict[str, bool]) -> BaseTool:
+    return cast(BaseTool, SimpleNamespace(name=name, metadata=metadata))
 
 
 @pytest.mark.asyncio
@@ -24,7 +30,7 @@ async def test_mcp_503_tool_result_is_retried_without_asking_model_again() -> No
     )
     request = ToolCallRequest(
         tool_call={"id": "call-503", "name": "query_metrics", "args": {"query": "up"}},
-        tool=SimpleNamespace(name="query_metrics", metadata={"readOnlyHint": True}),
+        tool=_tool("query_metrics", {"readOnlyHint": True}),
         state={},
         runtime=ToolRuntime(
             state={},
@@ -61,7 +67,7 @@ async def test_business_error_is_returned_to_agent_and_duplicate_reuses_it() -> 
     )
     request = ToolCallRequest(
         tool_call={"id": "call-invalid", "name": "restart", "args": {"deployment": "missing"}},
-        tool=SimpleNamespace(name="restart", metadata={"destructiveHint": True}),
+        tool=_tool("restart", {"destructiveHint": True}),
         state={},
         runtime=ToolRuntime(
             state={},
@@ -100,7 +106,7 @@ async def test_closed_mcp_session_is_retried_for_read_only_tool() -> None:
     )
     request = ToolCallRequest(
         tool_call={"id": "call-closed", "name": "query_metrics", "args": {"query": "up"}},
-        tool=SimpleNamespace(name="query_metrics", metadata={"readOnlyHint": True}),
+        tool=_tool("query_metrics", {"readOnlyHint": True}),
         state={},
         runtime=ToolRuntime(
             state={},
@@ -139,7 +145,7 @@ async def test_closed_mcp_session_is_not_retried_for_unsafe_tool() -> None:
     )
     request = ToolCallRequest(
         tool_call={"id": "call-unsafe", "name": "restart", "args": {"deployment": "payment"}},
-        tool=SimpleNamespace(name="restart", metadata={"destructiveHint": True}),
+        tool=_tool("restart", {"destructiveHint": True}),
         state={},
         runtime=ToolRuntime(
             state={},

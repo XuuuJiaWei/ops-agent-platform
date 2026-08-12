@@ -16,7 +16,7 @@ from deepagents.backends.protocol import (
     ReadResult,
     WriteResult,
 )
-from langgraph.config import var_child_runnable_config
+from langchain_core.runnables.config import var_child_runnable_config
 
 from ops_pilot.config.settings import load_settings
 from ops_pilot.sandbox import manager as manager_module

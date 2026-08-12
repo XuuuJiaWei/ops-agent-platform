@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from langfuse.experiment import LocalExperimentItem
+
 from ops_pilot.config.paths import SERVICE_ROOT, resolve_path
 from ops_pilot.config.settings import Settings
 
@@ -148,7 +150,7 @@ class EvalCase:
             "expected_judge_pass": self.expected_judge_pass,
         }
 
-    def to_experiment_item(self) -> dict[str, Any]:
+    def to_experiment_item(self) -> LocalExperimentItem:
         # NOTE: only `input` (= the prompt) reaches the agent. `inject` lives in
         # metadata alongside `rubric`, so the injected fault stays ground truth
         # the agent must diagnose — never a leaked answer in the prompt.

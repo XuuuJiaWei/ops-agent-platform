@@ -7,7 +7,12 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from langchain_mcp_adapters.sessions import Connection
+else:
+    Connection = dict[str, Any]
 
 from ops_pilot.config.interpolation import expand_mapping, expand_optional
 from ops_pilot.config.paths import REPO_ROOT, resolve_repo_path
@@ -78,8 +83,9 @@ class MCPServerConfig:
         if self.transport in {"http", "streamable_http", "sse"} and not self.url:
             raise MCPConfigError(f"MCP {self.transport} server '{self.name}' requires a url.")
 
-    def to_client_connection(self) -> dict[str, Any]:
-        connection: dict[str, Any] = {"transport": self.transport}
+    def to_client_connection(self) -> Connection:
+        transport = "streamable_http" if self.transport == "http" else self.transport
+        connection: dict[str, Any] = {"transport": transport}
         if self.command:
             connection["command"] = self.command
         if self.args:
@@ -92,9 +98,9 @@ class MCPServerConfig:
             connection["headers"] = dict(self.headers)
         if self.env:
             connection["env"] = dict(self.env)
-        return connection
+        return cast("Connection", connection)
 
-    def to_langchain_config(self) -> dict[str, Any]:
+    def to_langchain_config(self) -> Connection:
         return self.to_client_connection()
 
 
@@ -145,7 +151,7 @@ class MCPConfig:
             names.update(server.hitl_tools)
         return names
 
-    def to_langchain_config(self) -> dict[str, dict[str, Any]]:
+    def to_langchain_config(self) -> dict[str, Connection]:
         return {server.name: server.to_client_connection() for server in self.servers}
 
 

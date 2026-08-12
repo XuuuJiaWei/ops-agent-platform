@@ -43,6 +43,7 @@ async def test_eval_timeout_cancels_and_awaits_an_isolated_invocation_task() -> 
                 self.cleanup_task = asyncio.current_task()
                 await asyncio.sleep(0)
                 self.cleaned_up.set()
+            raise AssertionError("slow invocation unexpectedly completed")
 
     runtime = Runtime()
     task = runner._build_task(runtime, run_name="timeout-test")

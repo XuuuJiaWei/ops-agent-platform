@@ -207,7 +207,10 @@ class PersistentMCPServer:
             call_arguments = dict(arguments)
             if "runtime" in inspect.signature(coroutine).parameters:
                 call_arguments["runtime"] = runtime
-            return await coroutine(**call_arguments)
+            result = coroutine(**call_arguments)
+            if not inspect.isawaitable(result):
+                raise TypeError(f"MCP tool '{tool_name}' coroutine did not return an awaitable.")
+            return await result
         except BaseException as exc:
             if not is_mcp_session_disconnect(exc):
                 raise

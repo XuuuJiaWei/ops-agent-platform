@@ -6,6 +6,7 @@ import pytest
 
 from ops_pilot.agent.runtime import AgentRuntime
 from ops_pilot.config.settings import load_settings
+from ops_pilot.reliability.run import RunController
 
 
 @dataclass(frozen=True)
@@ -25,12 +26,14 @@ def test_runnable_config_forwards_deepagents_recursion_limit_as_top_level_key() 
         configurable={"tenant": "local"},
     )
 
-    assert config["recursion_limit"] == 1234
-    assert config["configurable"] == {"tenant": "local", "thread_id": "thread-1"}
-    assert config["metadata"]["langfuse_session_id"] == "thread-1"
-    assert config["metadata"]["langfuse_trace_name"] == "handle-copilotkit-run"
-    assert config["run_name"] == "handle-copilotkit-run"
-    assert config["tags"] == ["ops_pilot", "copilotkit-agui", "test"]
+    assert config.get("recursion_limit") == 1234
+    assert config.get("configurable") == {"tenant": "local", "thread_id": "thread-1"}
+    metadata = config.get("metadata")
+    assert metadata is not None
+    assert metadata["langfuse_session_id"] == "thread-1"
+    assert metadata["langfuse_trace_name"] == "handle-copilotkit-run"
+    assert config.get("run_name") == "handle-copilotkit-run"
+    assert config.get("tags") == ["ops_pilot", "copilotkit-agui", "test"]
 
 
 def test_runnable_config_does_not_invent_recursion_limit_when_graph_has_no_bound_config() -> None:
@@ -47,10 +50,13 @@ async def test_ainvoke_trace_passes_the_case_deadline_to_run_controller() -> Non
         async def ainvoke(self, *_args, **_kwargs):
             return {"messages": [{"content": "done"}]}
 
-    class Controller:
-        deadline_seconds: float | None = None
+    class Controller(RunController):
+        def __init__(self) -> None:
+            super().__init__()
+            self.deadline_seconds: float | None = None
 
-        async def run(self, _run_id, operation, *, deadline_seconds=None):
+        async def run(self, run_id, operation, *, deadline_seconds=None):
+            del run_id
             self.deadline_seconds = deadline_seconds
             return await operation()
 

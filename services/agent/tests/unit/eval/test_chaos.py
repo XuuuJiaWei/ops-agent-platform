@@ -75,8 +75,9 @@ def test_restore_flag_replaces_the_complete_spec(monkeypatch) -> None:
 def test_evaluate_flag_uses_ofrep_with_target_context(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    def fake_kubectl(_settings, *args, input_text=None, timeout_seconds=None):
+    def fake_kubectl(_settings, *args, input_text: str | None = None, timeout_seconds=None):
         captured["args"] = args
+        assert input_text is not None
         captured["body"] = json.loads(input_text)
         captured["timeout_seconds"] = timeout_seconds
         return '{"key":"productCatalogFailure","variant":"on","value":true}'
@@ -91,7 +92,9 @@ def test_evaluate_flag_uses_ofrep_with_target_context(monkeypatch) -> None:
 
     assert result["variant"] == "on"
     assert captured["body"] == {"context": {"product_id": "OLJCESPC7Z"}}
-    assert "--raw" in captured["args"]
+    captured_args = captured["args"]
+    assert isinstance(captured_args, tuple)
+    assert "--raw" in captured_args
 
 
 @pytest.mark.asyncio

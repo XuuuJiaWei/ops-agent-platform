@@ -25,7 +25,9 @@ def test_mcp_config_accepts_stdio_and_http_servers():
 
     assert [server.name for server in config.servers] == ["local", "remote"]
     assert config.servers[0].required is True
-    assert config.servers[1].to_client_connection()["url"] == "http://localhost:8000/mcp"
+    remote_connection = dict(config.servers[1].to_client_connection())
+    assert remote_connection["transport"] == "streamable_http"
+    assert remote_connection["url"] == "http://localhost:8000/mcp"
 
 
 def test_mcp_config_rejects_missing_required_connection_fields():
@@ -78,7 +80,7 @@ def test_mcp_config_rejects_non_string_permission_entries():
 def test_mcp_config_passes_cwd_to_stdio_connection():
     config = MCPConfig.from_mapping({"mcpServers": {"dyna": {"transport": "stdio", "command": "npx", "cwd": "config"}}})
 
-    assert config.servers[0].to_client_connection()["cwd"] == str((REPO_ROOT / "config").resolve())
+    assert dict(config.servers[0].to_client_connection())["cwd"] == str((REPO_ROOT / "config").resolve())
 
 
 def test_mcp_config_timeout_is_loader_only():

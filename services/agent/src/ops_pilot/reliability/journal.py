@@ -26,10 +26,12 @@ class _PostgresAdvisoryLock:
         self._connection_token: Token[Any | None] | None = None
 
     async def __aenter__(self) -> _PostgresAdvisoryLock:
-        self._connection_context = self._pool.connection()
-        self._connection = await self._connection_context.__aenter__()
-        await self._connection.execute("SELECT pg_advisory_lock(%s)", (self._key,))
-        self._connection_token = _locked_connection.set(self._connection)
+        connection_context = self._pool.connection()
+        connection = await connection_context.__aenter__()
+        self._connection_context = connection_context
+        self._connection = connection
+        await connection.execute("SELECT pg_advisory_lock(%s)", (self._key,))
+        self._connection_token = _locked_connection.set(connection)
         return self
 
     async def __aexit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:

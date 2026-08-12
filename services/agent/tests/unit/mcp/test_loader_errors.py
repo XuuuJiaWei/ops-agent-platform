@@ -90,6 +90,7 @@ async def test_optional_server_timeout_does_not_block_other_servers(monkeypatch)
 
     assert result.tools == []
     assert result.status.servers[0].ok is False
+    assert result.status.servers[0].error is not None
     assert "timed out after 0.01s" in result.status.servers[0].error
 
 

@@ -54,13 +54,13 @@ async def test_resilient_agui_agent_converts_stream_exceptions_to_run_error_even
 
     agent = create_resilient_agui_agent(RaisingAgent)
     input_data = RunAgentInput(
-        threadId="thread-1",
-        runId="run-1",
+        thread_id="thread-1",
+        run_id="run-1",
         state={},
         messages=[],
         tools=[],
         context=[],
-        forwardedProps={},
+        forwarded_props={},
     )
 
     events = [event async for event in agent.run(input_data)]

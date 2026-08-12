@@ -131,7 +131,7 @@ def read_flags(settings: Settings) -> dict:
         raise ChaosError(f"'{DATA_KEY}' in ConfigMap '{CONFIGMAP}' is not valid JSON: {exc}") from exc
     if not isinstance(document, Mapping) or "flags" not in document:
         raise ChaosError(f"'{DATA_KEY}' does not contain a 'flags' object.")
-    return document
+    return dict(document)
 
 
 def current_variants(settings: Settings) -> dict[str, str]:
@@ -452,7 +452,10 @@ async def run_chaos_eval(
                         f"after {ready['elapsed_s']:.1f}s/{ready['attempts']} probes"
                     )
 
-                output = await base_task(item=item)
+                task_output = await base_task(item=item)
+                if not isinstance(task_output, dict):
+                    raise TypeError(f"Chaos eval task returned {type(task_output).__name__}, expected dict.")
+                output = task_output
                 task_error = output.get("error")
                 finish_observation(
                     current,
