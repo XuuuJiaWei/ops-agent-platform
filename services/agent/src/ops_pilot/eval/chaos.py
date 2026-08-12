@@ -518,7 +518,7 @@ async def run_chaos_eval(
         result = await asyncio.to_thread(execute_experiment)
     finally:
         try:
-            reset_all(settings)
+            await asyncio.to_thread(reset_all, settings)
         except Exception as exc:  # noqa: BLE001 - cleanup must not mask the original error.
             print(f"WARNING: failed to reset fault flags after chaos run: {exc}")
         flush_tracing(runtime.tracing)

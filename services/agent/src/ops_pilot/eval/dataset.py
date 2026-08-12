@@ -11,7 +11,7 @@ from ops_pilot.config.paths import SERVICE_ROOT, resolve_path
 from ops_pilot.config.settings import Settings
 
 DEFAULT_CASES_DIR = SERVICE_ROOT / "eval" / "cases"
-DATASET_SCHEMA_VERSION = 3
+DATASET_SCHEMA_VERSION = 4
 
 
 class EvalDatasetError(ValueError):
@@ -78,6 +78,15 @@ class EvalCase:
     tags: tuple[str, ...] = field(default_factory=tuple)
     timeout_s: float = 60.0
     inject: InjectSpec | None = None
+    # Provenance / traceability (see docs/design/agent-eval.md §11).
+    source: str = "synthetic"
+    version: str | None = None
+    # Judge-calibration sentinels (see docs/design/agent-eval.md §12): when
+    # `fixed_output` is set the runner skips the agent entirely and judges this
+    # canned text, isolating the judge under test. `expected_judge_pass` is the
+    # known-correct verdict the judge must reproduce, else it has drifted.
+    fixed_output: str | None = None
+    expected_judge_pass: bool | None = None
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any], *, source: str = "<eval-case>") -> EvalCase:
@@ -96,6 +105,13 @@ class EvalCase:
             raise EvalDatasetError(f"{source}: field 'inject' must be a mapping.")
         inject = InjectSpec.from_mapping(inject_data, source=source) if inject_data is not None else None
 
+        case_source = _optional_string(data.get("source"), "source", source) or "synthetic"
+        version = _optional_string(data.get("version"), "version", source)
+        fixed_output = _optional_string(data.get("fixed_output"), "fixed_output", source)
+        expected_judge_pass = data.get("expected_judge_pass")
+        if expected_judge_pass is not None and not isinstance(expected_judge_pass, bool):
+            raise EvalDatasetError(f"{source}: field 'expected_judge_pass' must be a boolean.")
+
         return cls(
             id=case_id,
             prompt=prompt,
@@ -108,6 +124,10 @@ class EvalCase:
             tags=_string_tuple(data.get("tags", ()), "tags", source),
             timeout_s=timeout_s,
             inject=inject,
+            source=case_source,
+            version=version,
+            fixed_output=fixed_output,
+            expected_judge_pass=expected_judge_pass,
         )
 
     def metadata(self) -> dict[str, Any]:
@@ -122,6 +142,10 @@ class EvalCase:
             "tags": list(self.tags),
             "timeout_s": self.timeout_s,
             "inject": self.inject.to_dict() if self.inject else None,
+            "source": self.source,
+            "version": self.version,
+            "fixed_output": self.fixed_output,
+            "expected_judge_pass": self.expected_judge_pass,
         }
 
     def to_experiment_item(self) -> dict[str, Any]:

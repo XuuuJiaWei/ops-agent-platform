@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from langfuse.experiment import ExperimentItemResult
 
 from ops_pilot.eval.graders import (
@@ -8,8 +9,11 @@ from ops_pilot.eval.graders import (
     contains,
     infrastructure_completion_rate,
     infrastructure_error_rates,
+    judge_calibration_check,
+    make_dimension_judge,
     no_error,
     pass_rate,
+    pass_rate_wilson_lower,
     run_performance_metrics,
     tool_called,
     tool_not_called,
@@ -196,3 +200,193 @@ def test_infrastructure_error_rates_group_by_exception_type():
         "infrastructure_error_rate:McpError": 0.5,
         "infrastructure_error_rate:TimeoutError": 0.25,
     }
+
+
+class _FakeJudgeModel:
+    """Stands in for a LangChain chat model bound to structured output."""
+
+    def __init__(self, verdict: dict) -> None:
+        self.verdict = verdict
+        self.calls: list = []
+
+    def with_structured_output(self, _schema) -> _FakeJudgeModel:
+        return self
+
+    async def ainvoke(self, messages):
+        self.calls.append(messages)
+        return self.verdict
+
+
+@pytest.mark.asyncio
+async def test_dimension_judge_returns_binary_pass(monkeypatch):
+    fake = _FakeJudgeModel({"pass": True, "reason": "names payment as root cause"})
+    monkeypatch.setattr("ops_pilot.eval.graders.create_chat_model", lambda _s: fake)
+
+    spec = {"name": "judge_root_cause", "gating": True, "requires_rubric": True, "criterion": "root cause?"}
+    judge = make_dimension_judge(spec, settings=object())
+    evaluation = await judge(
+        input="incident prompt",
+        output={"final_text": "The payment service is failing."},
+        metadata={"rubric": "Ground truth: paymentFailure."},
+    )
+
+    assert evaluation.name == "judge_root_cause"
+    assert evaluation.value == 1.0
+    assert evaluation.metadata["pass"] is True
+    assert evaluation.metadata["gating"] is True
+
+
+@pytest.mark.asyncio
+async def test_dimension_judge_returns_binary_fail(monkeypatch):
+    fake = _FakeJudgeModel({"pass": False, "reason": "blamed the wrong service"})
+    monkeypatch.setattr("ops_pilot.eval.graders.create_chat_model", lambda _s: fake)
+
+    spec = {"name": "judge_root_cause", "gating": True, "requires_rubric": True, "criterion": "root cause?"}
+    judge = make_dimension_judge(spec, settings=object())
+    evaluation = await judge(
+        input="incident prompt",
+        output={"final_text": "Everything looks fine."},
+        metadata={"rubric": "Ground truth: paymentFailure."},
+    )
+
+    assert evaluation.value == 0.0
+    assert evaluation.metadata["pass"] is False
+
+
+@pytest.mark.asyncio
+async def test_dimension_judge_skips_when_rubric_required_but_missing(monkeypatch):
+    monkeypatch.setattr(
+        "ops_pilot.eval.graders.create_chat_model",
+        lambda _s: (_ for _ in ()).throw(AssertionError("model must not be built when skipping")),
+    )
+    spec = {"name": "judge_root_cause", "gating": True, "requires_rubric": True, "criterion": "root cause?"}
+    judge = make_dimension_judge(spec, settings=object())
+
+    evaluation = await judge(input="p", output={"final_text": "x"}, metadata={})
+
+    assert evaluation.metadata["skipped"] is True
+    assert evaluation.value == 1.0
+
+
+@pytest.mark.asyncio
+async def test_safety_dimension_runs_without_rubric(monkeypatch):
+    fake = _FakeJudgeModel({"pass": False, "reason": "suggested kubectl delete"})
+    monkeypatch.setattr("ops_pilot.eval.graders.create_chat_model", lambda _s: fake)
+
+    spec = {"name": "judge_safety", "gating": True, "requires_rubric": False, "criterion": "safe?"}
+    judge = make_dimension_judge(spec, settings=object())
+    evaluation = await judge(
+        input="delete the pod",
+        output={"final_text": "Run kubectl delete pod paymentservice."},
+        metadata={},
+    )
+
+    assert evaluation.value == 0.0
+    assert evaluation.metadata["pass"] is False
+
+
+@pytest.mark.asyncio
+async def test_dimension_judge_fails_closed_when_agent_errored(monkeypatch):
+    monkeypatch.setattr(
+        "ops_pilot.eval.graders.create_chat_model",
+        lambda _s: (_ for _ in ()).throw(AssertionError("model must not be built for errored output")),
+    )
+    spec = {"name": "judge_root_cause", "gating": True, "requires_rubric": True, "criterion": "root cause?"}
+    judge = make_dimension_judge(spec, settings=object())
+
+    evaluation = await judge(input="p", output={"error": "boom", "final_text": ""}, metadata={"rubric": "r"})
+
+    assert evaluation.value == 0.0
+    assert evaluation.metadata["pass"] is False
+
+
+def test_pass_rate_wilson_lower_is_below_point_estimate_for_small_n():
+    item_results = [
+        ExperimentItemResult(
+            item={"metadata": {"category": "smoke"}},
+            output={"error": None},
+            evaluations=[no_error(output={"error": None})],
+            trace_id=None,
+            dataset_run_id=None,
+        )
+        for _ in range(4)
+    ]
+
+    lower = pass_rate_wilson_lower(item_results=item_results)
+    point = pass_rate(item_results=item_results)
+
+    assert point.value == 1.0
+    # Wilson lower bound on 4/4 is well under 1.0 — the honesty of small samples.
+    assert 0.0 < lower.value < 1.0
+    assert lower.metadata["sample_size"] == 4
+
+
+def test_pass_rate_wilson_lower_handles_empty():
+    evaluation = pass_rate_wilson_lower(item_results=[])
+    assert evaluation.value == 0.0
+
+
+def _sentinel_item(*, expected_judge_pass: bool, judge_passes: bool) -> ExperimentItemResult:
+    # no_error passes (infra ok); a single gating judge encodes the verdict.
+    return ExperimentItemResult(
+        item={"metadata": {"id": "sentinel", "expected_judge_pass": expected_judge_pass}},
+        output={"error": None},
+        evaluations=[
+            no_error(output={"error": None}),
+            _judge_evaluation("judge_root_cause", judge_passes),
+        ],
+        trace_id=None,
+        dataset_run_id=None,
+    )
+
+
+def _judge_evaluation(name: str, passed: bool):
+    from langfuse import Evaluation
+
+    return Evaluation(
+        name=name,
+        value=1.0 if passed else 0.0,
+        metadata={"pass": passed, "gating": True},
+        data_type="BOOLEAN",
+    )
+
+
+def test_judge_calibration_agreement_all_agree():
+    item_results = [
+        _sentinel_item(expected_judge_pass=True, judge_passes=True),
+        _sentinel_item(expected_judge_pass=False, judge_passes=False),
+    ]
+
+    evaluation = judge_calibration_check(item_results=item_results)
+
+    assert evaluation.value == 1.0
+    assert evaluation.metadata["sentinel_count"] == 2
+
+
+def test_judge_calibration_agreement_detects_drift():
+    item_results = [
+        _sentinel_item(expected_judge_pass=True, judge_passes=True),
+        # judge says pass, sentinel says it should FAIL → drift.
+        _sentinel_item(expected_judge_pass=False, judge_passes=True),
+    ]
+
+    evaluation = judge_calibration_check(item_results=item_results)
+
+    assert evaluation.value == 0.5
+    assert "sentinel" in evaluation.comment
+
+
+def test_judge_calibration_skips_when_no_sentinels():
+    item_results = [
+        ExperimentItemResult(
+            item={"metadata": {"category": "diagnosis"}},
+            output={"error": None},
+            evaluations=[no_error(output={"error": None})],
+            trace_id=None,
+            dataset_run_id=None,
+        )
+    ]
+
+    evaluation = judge_calibration_check(item_results=item_results)
+
+    assert evaluation.metadata["skipped"] is True

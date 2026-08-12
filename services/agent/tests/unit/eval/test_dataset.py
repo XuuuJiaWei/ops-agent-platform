@@ -33,7 +33,7 @@ def test_load_cases_from_yaml_directory(tmp_path):
     assert cases[0].expected_tools == ("local_echo",)
     assert cases[0].metadata()["category"] == "smoke"
     assert cases[0].metadata()["split"] == "validation"
-    assert cases[0].metadata()["dataset_schema_version"] == 3
+    assert cases[0].metadata()["dataset_schema_version"] == 4
     assert cases[1].timeout_s == 5.0
 
 
@@ -46,6 +46,56 @@ def test_load_cases_accepts_top_level_list(tmp_path):
     cases = load_cases_from_yaml(tmp_path / "cases.yaml")
 
     assert [case.id for case in cases] == ["solo"]
+
+
+def test_sentinel_and_provenance_fields_parse(tmp_path):
+    (tmp_path / "cases.yaml").write_text(
+        "cases:\n"
+        "  - id: __sentinel\n"
+        "    prompt: incident\n"
+        "    category: sentinel\n"
+        "    source: sentinel\n"
+        "    version: '2025-11'\n"
+        "    rubric: ground truth\n"
+        "    fixed_output: canned agent text\n"
+        "    expected_judge_pass: false\n",
+        encoding="utf-8",
+    )
+
+    (case,) = load_cases_from_yaml(tmp_path / "cases.yaml")
+
+    assert case.source == "sentinel"
+    assert case.version == "2025-11"
+    assert case.fixed_output == "canned agent text"
+    assert case.expected_judge_pass is False
+    metadata = case.metadata()
+    assert metadata["fixed_output"] == "canned agent text"
+    assert metadata["expected_judge_pass"] is False
+    assert metadata["source"] == "sentinel"
+
+
+def test_defaults_for_provenance_fields(tmp_path):
+    (tmp_path / "cases.yaml").write_text(
+        "- id: plain\n  prompt: hello\n  category: smoke\n",
+        encoding="utf-8",
+    )
+
+    (case,) = load_cases_from_yaml(tmp_path / "cases.yaml")
+
+    assert case.source == "synthetic"
+    assert case.version is None
+    assert case.fixed_output is None
+    assert case.expected_judge_pass is None
+
+
+def test_expected_judge_pass_must_be_boolean(tmp_path):
+    (tmp_path / "cases.yaml").write_text(
+        "- id: bad\n  prompt: hi\n  category: smoke\n  expected_judge_pass: yes-please\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(EvalDatasetError, match="expected_judge_pass"):
+        load_cases_from_yaml(tmp_path / "cases.yaml")
 
 
 def test_load_cases_rejects_duplicate_ids(tmp_path):

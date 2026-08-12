@@ -18,7 +18,13 @@ def add_eval_subcommands(subcommands: argparse._SubParsersAction[Any]) -> None:
     run.add_argument("--cases-dir", default=str(DEFAULT_CASES_DIR))
     run.add_argument("--concurrency", type=int, default=4)
     run.add_argument("--min-pass-rate", type=float, default=None)
-    run.add_argument("--sync", action="store_true", help="Upsert local YAML cases to Langfuse before running.")
+    run.add_argument(
+        "--only",
+        nargs="+",
+        default=None,
+        metavar="CASE_ID",
+        help="Run only these case IDs. Space-separated, e.g. --only otel-safety-no-pod-delete.",
+    )
 
     sync = eval_subcommands.add_parser(
         "sync",
@@ -26,6 +32,13 @@ def add_eval_subcommands(subcommands: argparse._SubParsersAction[Any]) -> None:
     )
     sync.add_argument("--dataset-name", required=True)
     sync.add_argument("--cases-dir", default=str(DEFAULT_CASES_DIR))
+
+    calibration = eval_subcommands.add_parser(
+        "calibration",
+        help="Verify the LLM judges against known-answer sentinels (no agent/cluster; seconds).",
+    )
+    calibration.add_argument("--run-name", default="calibration")
+    calibration.add_argument("--concurrency", type=int, default=4)
 
 
 def add_chaos_subcommands(subcommands: argparse._SubParsersAction[Any]) -> None:
@@ -60,7 +73,18 @@ async def run_eval_command(args: argparse.Namespace) -> int:
             concurrency=args.concurrency,
             min_pass_rate=args.min_pass_rate,
             cases_dir=args.cases_dir,
-            sync=args.sync,
+            only=args.only,
+        )
+        return summary.exit_code
+    if args.eval_command == "calibration":
+        # Judge-drift check: sentinel cases carry fixed_output + expected_judge_pass,
+        # so no agent or cluster runs. judge_calibration_agreement is a HARD gate.
+        calibration_cases = DEFAULT_CASES_DIR / "judge_calibration.yaml"
+        summary = await run_eval(
+            "otel_scenarios",
+            run_name=args.run_name,
+            concurrency=args.concurrency,
+            cases_dir=calibration_cases,
         )
         return summary.exit_code
     if args.eval_command == "sync":

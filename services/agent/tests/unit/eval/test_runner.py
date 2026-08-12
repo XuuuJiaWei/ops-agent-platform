@@ -83,9 +83,8 @@ async def test_eval_task_dispatches_runtime_work_to_its_owner_loop() -> None:
 
 
 @pytest.mark.asyncio
-async def test_local_eval_awaits_runtime_async_cleanup(monkeypatch) -> None:
+async def test_close_runtime_prefers_aclose() -> None:
     class Runtime:
-        tracing = object()
         async_closed = False
         sync_closed = False
 
@@ -96,21 +95,69 @@ async def test_local_eval_awaits_runtime_async_cleanup(monkeypatch) -> None:
             self.sync_closed = True
 
     runtime = Runtime()
-
-    async def create_runtime(**_kwargs):
-        return runtime
-
-    monkeypatch.setattr(runner, "create_agent_runtime_async", create_runtime)
-    monkeypatch.setattr(runner, "build_item_evaluators", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(runner, "flush_tracing", lambda _tracing: None)
-
-    await runner._run_local_eval(
-        dataset_name="test",
-        cases=(),
-        settings=object(),
-        run_name="cleanup-test",
-        concurrency=1,
-    )
+    await runner._close_runtime(runtime)
 
     assert runtime.async_closed is True
     assert runtime.sync_closed is False
+
+
+@pytest.mark.asyncio
+async def test_fixed_output_case_skips_the_agent() -> None:
+    class Runtime:
+        invoked = False
+
+        async def ainvoke_trace(self, *_args, **_kwargs):
+            self.invoked = True
+            return _Trace()
+
+    runtime = Runtime()
+    task = runner._build_task(runtime, run_name="sentinel-test")
+
+    output = await task(
+        item={
+            "input": "PagerDuty alert...",
+            "metadata": {"id": "__sentinel", "fixed_output": "canned judge input", "timeout_s": 5},
+        }
+    )
+
+    assert runtime.invoked is False  # agent never ran
+    assert output["final_text"] == "canned judge input"
+    assert output["steps"] == 0
+    assert output["error"] is None
+
+
+def test_evaluate_gates_hard_fail_on_safety_regression() -> None:
+    from langfuse import Evaluation
+    from langfuse.experiment import ExperimentResult
+
+    result = ExperimentResult(
+        name="t",
+        run_name="t",
+        description="t",
+        item_results=[],
+        run_evaluations=[
+            Evaluation(name="pass_rate", value=0.9),
+            Evaluation(name="category_pass_rate:safety", value=0.5),  # regression
+            Evaluation(name="infrastructure_completion_rate", value=1.0),
+        ],
+        experiment_id="t",
+    )
+
+    assert runner._evaluate_gates(result, min_pass_rate=None) == 1
+
+
+def test_evaluate_gates_pass_when_metrics_absent() -> None:
+    from langfuse import Evaluation
+    from langfuse.experiment import ExperimentResult
+
+    result = ExperimentResult(
+        name="t",
+        run_name="t",
+        description="t",
+        item_results=[],
+        run_evaluations=[Evaluation(name="pass_rate", value=1.0)],
+        experiment_id="t",
+    )
+
+    # No safety / calibration / infra metrics present → nothing to gate → pass.
+    assert runner._evaluate_gates(result, min_pass_rate=None) == 0
