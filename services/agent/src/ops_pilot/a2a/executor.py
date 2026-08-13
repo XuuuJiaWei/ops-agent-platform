@@ -6,6 +6,7 @@ import logging
 from typing import Protocol
 
 from ops_pilot.config.settings import Settings
+from ops_pilot.errors import log_exception
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +51,14 @@ def create_executor(runtime: A2ARuntime, settings: Settings):
                     a2a_context_id=context_id,
                 )
             except Exception as exc:  # noqa: BLE001 - protocol adapter must publish failure event.
-                logger.exception("A2A task failed")
-                await updater.failed(message=updater.new_agent_message(parts=[Part(text=_public_error(exc))]))
+                descriptor = log_exception(
+                    logger,
+                    exc,
+                    event="a2a.task_failed",
+                    task_id=task_id,
+                    context_id=context_id,
+                )
+                await updater.failed(message=updater.new_agent_message(parts=[Part(text=descriptor.message)]))
                 return
 
             await updater.add_artifact(
@@ -71,7 +78,3 @@ def create_executor(runtime: A2ARuntime, settings: Settings):
             await updater.cancel()
 
     return DeepAgentA2AExecutor()
-
-
-def _public_error(exc: Exception) -> str:
-    return str(exc) or exc.__class__.__name__

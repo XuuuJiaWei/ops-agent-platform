@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from typing import Any
 
 from ops_pilot.config.mcp_schema import MCPConfig, MCPServerConfig
 from ops_pilot.config.settings import Settings
+from ops_pilot.errors import safe_exception_summary
 from ops_pilot.mcp.session import PersistentMCPServer
 from ops_pilot.mcp.status import MCPLoadResult, MCPLoadStatus, MCPServerLoadStatus
 
@@ -189,21 +189,4 @@ async def _close_owners(owners: list[PersistentMCPServer]) -> None:
 
 
 def _safe_error(exc: BaseException) -> str:
-    text = _error_text(exc)
-    for key, value in os.environ.items():
-        if _looks_secret(key) and value:
-            text = text.replace(value, "[redacted]")
-    return text
-
-
-def _error_text(exc: BaseException) -> str:
-    if isinstance(exc, BaseExceptionGroup):
-        parts = [_error_text(child) for child in exc.exceptions]
-        joined = "; ".join(part for part in parts if part)
-        return joined or (str(exc) or exc.__class__.__name__)
-    return str(exc) or exc.__class__.__name__
-
-
-def _looks_secret(key: str) -> bool:
-    key_upper = key.upper()
-    return any(marker in key_upper for marker in ("TOKEN", "SECRET", "PASSWORD", "KEY"))
+    return safe_exception_summary(exc, limit=2000)

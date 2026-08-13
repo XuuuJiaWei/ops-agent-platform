@@ -5,9 +5,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from ag_ui.core import EventType, RunErrorEvent, RunFinishedEvent
+from ag_ui.core import RunErrorEvent
 
-from ops_pilot.api.errors import stream_error_payload
+from ops_pilot.errors import log_exception
 
 logger = logging.getLogger(__name__)
 
@@ -16,27 +16,23 @@ class ResilientAGUIAgentMixin:
     """Convert uncaught AG-UI run exceptions into protocol error events."""
 
     async def run(self, input_data: Any):
-        yielded_finished = False
         try:
             source = super().run(input_data)  # type: ignore[misc]
             controller = getattr(self, "_ops_pilot_run_controller", None)
             run_id = getattr(input_data, "run_id", None)
             events = controller.iterate(run_id, source) if controller is not None and run_id else source
             async for event in events:
-                yielded_finished = yielded_finished or getattr(event, "type", None) == EventType.RUN_FINISHED
                 yield event
         except Exception as exc:  # noqa: BLE001 - protocol boundary: convert to RUN_ERROR.
             thread_id, run_id = _run_ids(self, input_data)
-            logger.exception(
-                "AG-UI run failed thread_id=%s run_id=%s",
-                thread_id,
-                run_id,
-                exc_info=exc,
+            descriptor = log_exception(
+                logger,
+                exc,
+                event="agui.run_failed",
+                thread_id=thread_id,
+                run_id=run_id,
             )
-            payload = stream_error_payload(exc)
-            yield RunErrorEvent(message=payload["message"], code=payload["code"])
-            if not yielded_finished and thread_id and run_id:
-                yield RunFinishedEvent(thread_id=thread_id, run_id=run_id)
+            yield RunErrorEvent(message=descriptor.message, code=descriptor.code)
 
 
 def create_resilient_agui_agent(

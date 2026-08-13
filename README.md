@@ -129,6 +129,7 @@ Useful development overrides:
 CHAT_PORT=8130 pnpm run dev:backend
 WEB_WAIT_TIMEOUT=180 pnpm dev
 OPS_PILOT_DEV_VERBOSE_MCP=1 pnpm dev # show full structured MCP diagnostics
+OPS_PILOT_DEV_VERBOSE_BROWSER=1 pnpm dev # forward browser console.warn/error to the terminal
 ```
 
 `pnpm run dev:langgraph` is available for optional LangGraph API / Studio debugging. It is not part of the default product path. The wrapper runs `langgraph-cli[inmem]` on demand through `uv run --with` and starts `langgraph dev` on `http://127.0.0.1:2024`.
