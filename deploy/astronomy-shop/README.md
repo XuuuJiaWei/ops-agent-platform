@@ -1,4 +1,4 @@
-# Rebuild the OTel Demo Shoot
+# Rebuild the Astronomy Shop Shoot
 
 This directory records the non-secret configuration needed to rebuild the
 seven-day Gardener Shoot. The cluster is disposable; these files are the source
@@ -11,7 +11,7 @@ Pinned releases:
 - `ingress-nginx/ingress-nginx` chart `4.15.1` (app `1.15.1`)
 - Jaeger `2.19+` native `jaeger_mcp` extension
 
-The demo needs a two-node worker pool: the full stack requests ~98% of a
+The cluster needs a two-node worker pool: the full stack requests ~98% of a
 single node's memory, so the cluster autoscaler adds a second node during the
 first install. Expect a few pods to sit `Pending` until it joins.
 
@@ -36,26 +36,26 @@ helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
 helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
 helm repo update
 
-helm upgrade --install otel-demo open-telemetry/opentelemetry-demo \
-  --namespace otel-demo --create-namespace \
+helm upgrade --install astronomy-shop open-telemetry/opentelemetry-demo \
+  --namespace astronomy-shop --create-namespace \
   --version 0.41.0 \
-  --values deploy/otel-demo/otel-demo-values.yaml \
+  --values deploy/astronomy-shop/values.yaml \
   --server-side=true --force-conflicts \
   --wait --timeout 10m
 
 helm upgrade --install prometheus-mcp \
   oci://ghcr.io/tjhop/charts/prometheus-mcp-server \
-  --namespace otel-demo \
+  --namespace astronomy-shop \
   --version 0.18.0 \
-  --values deploy/otel-demo/prometheus-mcp-values.yaml \
+  --values deploy/astronomy-shop/prometheus-mcp-values.yaml \
   --wait --timeout 5m
 ```
 
-Create `otel-demo-basic-auth` in the namespace without committing its
+Create `astronomy-shop-basic-auth` in the namespace without committing its
 credentials — an nginx basic-auth secret holds an `apr1`-hashed line:
 
 ```bash
-kubectl create secret generic otel-demo-basic-auth --namespace otel-demo \
+kubectl create secret generic astronomy-shop-basic-auth --namespace astronomy-shop \
   --from-literal=auth="otel:$(openssl passwd -apr1 "$OTEL_BASIC_AUTH_PASSWORD")"
 ```
 
@@ -66,8 +66,8 @@ apply time rather than editing the file:
 
 ```bash
 DOMAIN=$(kubectl -n kube-system get cm shoot-info -o jsonpath='{.data.domain}')
-sed "s/\.example\.com/.${DOMAIN}/g" deploy/otel-demo/otel-ops-ingress.yaml \
-  | kubectl --namespace otel-demo apply -f -
+sed "s/\.example\.com/.${DOMAIN}/g" deploy/astronomy-shop/otel-ops-ingress.yaml \
+  | kubectl --namespace astronomy-shop apply -f -
 ```
 
 Gardener creates and renews the TLS secret declared by the Ingress. Wait until
