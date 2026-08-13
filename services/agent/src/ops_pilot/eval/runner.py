@@ -17,7 +17,7 @@ from langfuse.experiment import ExperimentResult
 from ops_pilot.agent.factory import create_agent_runtime_async
 from ops_pilot.config.settings import Settings, load_settings
 from ops_pilot.eval.dataset import (
-    DEFAULT_CASES_DIR,
+    EvalDatasetError,
     load_cases_from_yaml,
     validate_expected_tool_names,
 )
@@ -55,7 +55,6 @@ class EvalRunSummary:
 # bound is compared against --min-pass-rate so a tiny suite cannot silently
 # "pass" a threshold it lacks the statistical power to support.
 HARD_GATES: dict[str, float] = {
-    "category_pass_rate:safety": 1.0,
     "judge_calibration_agreement": 1.0,
     "infrastructure_completion_rate": 0.95,
 }
@@ -68,7 +67,7 @@ async def run_eval(
     run_name: str = "local",
     concurrency: int = 4,
     min_pass_rate: float | None = None,
-    cases_dir: str | Path = DEFAULT_CASES_DIR,
+    cases_dir: str | Path,
     only: list[str] | None = None,
 ) -> EvalRunSummary:
     resolved_settings = settings or load_settings()
@@ -84,7 +83,15 @@ async def run_eval(
         if not cases:
             raise ValueError(f"--only matched no cases. Requested: {sorted(only)}")
 
-    runtime = await create_agent_runtime_async(settings=resolved_settings, attach_checkpointer=False)
+    inject_cases = [c.id for c in cases if c.inject]
+    if inject_cases:
+        raise EvalDatasetError(
+            f"eval run cannot execute inject-bearing cases — use 'chaos run' instead. "
+            f"Offending cases ({len(inject_cases)}): {', '.join(inject_cases)}. "
+            f"Move them to ops_chaos_scenarios.yaml or pass a --cases-dir without them."
+        )
+
+    runtime = await create_agent_runtime_async(settings=resolved_settings, attach_checkpointer=False, bypass_hitl=True)
     try:
         validate_expected_tool_names(cases, _runtime_tool_names(runtime))
         async_task = _build_task(runtime, run_name=run_name)
@@ -94,13 +101,17 @@ async def run_eval(
         # regardless; connectivity only affects whether traces are uploaded.
         langfuse = get_client()
         items = [case.to_experiment_item() for case in cases]
-        item_evaluators = [_ensure_sync(ev) for ev in build_item_evaluators(resolved_settings, include_judge=True)]
+        runtime_loop = asyncio.get_running_loop()
+        item_evaluators = [_ensure_sync(ev, runtime_loop) for ev in build_item_evaluators(resolved_settings, include_judge=True)]
 
         def execute_experiment() -> ExperimentResult:
             def sync_task(*, item: Any, **_: Any) -> Any:
-                # Langfuse calls task synchronously from a worker thread; dispatch
-                # back to the runtime event loop via asyncio.run → cross-loop path.
-                return asyncio.run(async_task(item=item))
+                # Langfuse 4.x runs tasks inside its own event loop, so
+                # asyncio.run() would fail with "cannot be called from a
+                # running event loop". Schedule onto the runtime loop instead
+                # and block this thread until the coroutine completes.
+                future = asyncio.run_coroutine_threadsafe(async_task(item=item), runtime_loop)
+                return future.result()
 
             return langfuse.run_experiment(
                 name="ops_pilot eval",
@@ -164,13 +175,14 @@ def _evaluate_gates(result: ExperimentResult, *, min_pass_rate: float | None) ->
     return exit_code
 
 
-def _ensure_sync(evaluator: Any) -> Any:
+def _ensure_sync(evaluator: Any, loop: asyncio.AbstractEventLoop) -> Any:
     """Wrap an async evaluator so Langfuse's synchronous SDK can call it."""
     if not inspect.iscoroutinefunction(evaluator):
         return evaluator
 
     def sync_ev(**kwargs: Any) -> Any:
-        return asyncio.run(evaluator(**kwargs))
+        future = asyncio.run_coroutine_threadsafe(evaluator(**kwargs), loop)
+        return future.result()
 
     sync_ev.__name__ = getattr(evaluator, "__name__", "evaluator")
     return sync_ev

@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 from typing import Any
 
-from ops_pilot.eval.dataset import DEFAULT_CASES_DIR
 from ops_pilot.eval.runner import run_eval
 
 
@@ -15,7 +14,7 @@ def add_eval_subcommands(subcommands: argparse._SubParsersAction[Any]) -> None:
     run = eval_subcommands.add_parser("run", help="Run an eval dataset experiment.")
     run.add_argument("--dataset-name", required=True)
     run.add_argument("--run-name", default="local")
-    run.add_argument("--cases-dir", default=str(DEFAULT_CASES_DIR))
+    run.add_argument("--cases-dir", required=True, metavar="PATH")
     run.add_argument("--concurrency", type=int, default=4)
     run.add_argument("--min-pass-rate", type=float, default=None)
     run.add_argument(
@@ -31,7 +30,7 @@ def add_eval_subcommands(subcommands: argparse._SubParsersAction[Any]) -> None:
         help="Upsert local YAML cases to a Langfuse dataset without running the agent.",
     )
     sync.add_argument("--dataset-name", required=True)
-    sync.add_argument("--cases-dir", default=str(DEFAULT_CASES_DIR))
+    sync.add_argument("--cases-dir", required=True, metavar="PATH")
 
     calibration = eval_subcommands.add_parser(
         "calibration",
@@ -39,6 +38,12 @@ def add_eval_subcommands(subcommands: argparse._SubParsersAction[Any]) -> None:
     )
     calibration.add_argument("--run-name", default="calibration")
     calibration.add_argument("--concurrency", type=int, default=4)
+    calibration.add_argument(
+        "--cases-dir",
+        required=True,
+        metavar="PATH",
+        help="Path to a YAML file or directory containing sentinel cases with fixed_output.",
+    )
 
 
 def add_chaos_subcommands(subcommands: argparse._SubParsersAction[Any]) -> None:
@@ -61,7 +66,7 @@ def add_chaos_subcommands(subcommands: argparse._SubParsersAction[Any]) -> None:
     )
     run.add_argument("--dataset-name", default="otel_scenarios")
     run.add_argument("--run-name", default=None)
-    run.add_argument("--cases-dir", default=str(DEFAULT_CASES_DIR))
+    run.add_argument("--cases-dir", required=True, metavar="PATH")
     run.add_argument("--only", nargs="+", default=None, help="Restrict to these case ids.")
 
 
@@ -79,12 +84,11 @@ async def run_eval_command(args: argparse.Namespace) -> int:
     if args.eval_command == "calibration":
         # Judge-drift check: sentinel cases carry fixed_output + expected_judge_pass,
         # so no agent or cluster runs. judge_calibration_agreement is a HARD gate.
-        calibration_cases = DEFAULT_CASES_DIR / "judge_calibration.yaml"
         summary = await run_eval(
             "otel_scenarios",
             run_name=args.run_name,
             concurrency=args.concurrency,
-            cases_dir=calibration_cases,
+            cases_dir=args.cases_dir,
         )
         return summary.exit_code
     if args.eval_command == "sync":

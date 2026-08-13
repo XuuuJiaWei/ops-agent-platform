@@ -185,6 +185,7 @@ async def build_agent_runtime(
     settings: Settings | None = None,
     *,
     attach_checkpointer: bool = True,
+    bypass_hitl: bool = False,
 ) -> AgentRuntime:
     """Build the shared DeepAgent runtime.
 
@@ -242,7 +243,7 @@ async def build_agent_runtime(
         )
         sandbox = create_sandbox_manager(resolved_settings)
         skills = _resolve_backend_skill_paths(local_skills, sandbox)
-        interrupt_on = {name: True for name in mcp_registry.hitl_tools}
+        interrupt_on = {} if bypass_hitl else {name: True for name in mcp_registry.hitl_tools}
         graph = _create_deep_agent(
             model=model,
             tools=tools,

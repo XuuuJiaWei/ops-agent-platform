@@ -1,16 +1,17 @@
-"""Transactional chaos control for the OTel-demo flagd feature flags.
+"""Transactional chaos control for the Astronomy Shop flagd feature flags.
 
-The OTel demo injects faults via feature flags served by flagd. The flags live
-in a Kubernetes ConfigMap (``flagd-config`` in namespace ``otel-demo``) whose
-single data key ``demo.flagd.json`` holds a JSON string of the form::
+The Astronomy Shop injects faults via feature flags served by flagd. The flags
+live in a Kubernetes ConfigMap (``flagd-config`` in namespace
+``astronomy-shop``) whose single data key ``demo.flagd.json`` holds a JSON
+string of the form::
 
     {"flags": {"paymentFailure": {"defaultVariant": "off", "variants": {...}}, ...}}
 
 This module patches one flag transactionally, polls flagd's OFREP data plane
 until the new variant is stable, runs the bound eval case, restores the exact
 original flag specification, and polls recovery. It therefore follows the same
-condition-based readiness pattern as the OTel Demo telemetry tests instead of
-guessing ConfigMap propagation time with fixed sleeps.
+condition-based readiness pattern as the OpenTelemetry Demo telemetry tests
+instead of guessing ConfigMap propagation time with fixed sleeps.
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ from typing import Any
 
 from ops_pilot.config.settings import Settings
 
-NAMESPACE = "otel-demo"
+NAMESPACE = "astronomy-shop"
 CONFIGMAP = "flagd-config"
 DATA_KEY = "demo.flagd.json"
 FLAGD_OFREP_SERVICE_PROXY = f"/api/v1/namespaces/{NAMESPACE}/services/http:flagd:8016/proxy/ofrep/v1/evaluate/flags"
@@ -88,7 +89,7 @@ def _kubectl(
     input_text: str | None = None,
     timeout_seconds: float | None = None,
 ) -> str:
-    """Run a kubectl command scoped to the otel-demo namespace and return stdout."""
+    """Run a kubectl command scoped to the astronomy-shop namespace and return stdout."""
 
     kubeconfig = _kubeconfig_from_settings(settings)
     command = ["kubectl", "--kubeconfig", kubeconfig, "-n", NAMESPACE, *args]
@@ -307,7 +308,7 @@ async def run_chaos_eval(
     settings: Settings,
     dataset_name: str = "otel_scenarios",
     only: list[str] | None = None,
-    cases_dir: str | Path | None = None,
+    cases_dir: str | Path,
     run_name: str | None = None,
 ) -> int:
     """Drive the full chaos->eval loop ONLINE and record to a Langfuse dataset run.
@@ -325,7 +326,6 @@ async def run_chaos_eval(
     # without pulling in the agent runtime / langfuse eval stack.
     from ops_pilot.agent.factory import create_agent_runtime_async
     from ops_pilot.eval.dataset import (
-        DEFAULT_CASES_DIR,
         close_langfuse_client,
         create_langfuse_client,
         langfuse_client_is_reachable,
@@ -344,7 +344,7 @@ async def run_chaos_eval(
     from ops_pilot.eval.runner import _build_task, _close_runtime, _run_evaluation_value
     from ops_pilot.observability.langfuse import finish_observation, flush_tracing, observation
 
-    resolved_cases_dir = cases_dir if cases_dir is not None else DEFAULT_CASES_DIR
+    resolved_cases_dir = cases_dir
 
     # 1. LOCAL yaml is authoritative for flag/variant/target.
     inject_by_id = {case.id: case.inject for case in load_cases_from_yaml(resolved_cases_dir) if case.inject}
@@ -394,7 +394,7 @@ async def run_chaos_eval(
         print(f"error: {exc}")
         return 1
 
-    runtime = await create_agent_runtime_async(settings=settings, attach_checkpointer=False)
+    runtime = await create_agent_runtime_async(settings=settings, attach_checkpointer=False, bypass_hitl=True)
     base_task = _build_task(runtime, run_name=run_name or "chaos")
 
     async def chaos_task(*, item, **_):
