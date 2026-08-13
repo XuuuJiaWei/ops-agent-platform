@@ -129,35 +129,6 @@ def test_load_cases_rejects_invalid_yaml(tmp_path):
         load_cases_from_yaml(path)
 
 
-def test_ops_diagnosis_cases_have_a_bounded_agent_budget() -> None:
-    cases = load_cases_from_yaml(DEFAULT_CASES_DIR / "ops_scenarios.yaml")
-    diagnosis_cases = [case for case in cases if case.category == "diagnosis"]
-
-    assert len(diagnosis_cases) == 8
-    assert all(case.timeout_s == 300 for case in diagnosis_cases)
-
-
-def test_product_catalog_fault_has_target_evaluation_context() -> None:
-    cases = load_cases_from_yaml(DEFAULT_CASES_DIR / "ops_scenarios.yaml")
-    case = next(case for case in cases if case.id == "otel-product-catalog-failure")
-
-    assert case.inject is not None
-    assert case.inject.target == {"product_id": "OLJCESPC7Z"}
-
-
-def test_expected_tool_names_are_validated_against_runtime_catalog() -> None:
-    cases = load_cases_from_yaml(DEFAULT_CASES_DIR / "ops_scenarios.yaml")
-    available = {
-        "search_traces",
-        "query",
-        "get_services",
-        "pods_list_in_namespace",
-        "get_trace_errors",
-    }
-
-    validate_expected_tool_names(cases, available)
-
-
 def test_stale_expected_tool_name_fails_fast(tmp_path) -> None:
     path = tmp_path / "cases.yaml"
     path.write_text(

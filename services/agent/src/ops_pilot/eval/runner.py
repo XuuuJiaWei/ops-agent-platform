@@ -102,7 +102,9 @@ async def run_eval(
         langfuse = get_client()
         items = [case.to_experiment_item() for case in cases]
         runtime_loop = asyncio.get_running_loop()
-        item_evaluators = [_ensure_sync(ev, runtime_loop) for ev in build_item_evaluators(resolved_settings, include_judge=True)]
+        item_evaluators = [
+            _ensure_sync(ev, runtime_loop) for ev in build_item_evaluators(resolved_settings, include_judge=True)
+        ]
 
         def execute_experiment() -> ExperimentResult:
             def sync_task(*, item: Any, **_: Any) -> Any:

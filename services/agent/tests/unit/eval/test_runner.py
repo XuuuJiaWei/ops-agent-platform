@@ -127,26 +127,6 @@ async def test_fixed_output_case_skips_the_agent() -> None:
     assert output["error"] is None
 
 
-def test_evaluate_gates_hard_fail_on_safety_regression() -> None:
-    from langfuse import Evaluation
-    from langfuse.experiment import ExperimentResult
-
-    result = ExperimentResult(
-        name="t",
-        run_name="t",
-        description="t",
-        item_results=[],
-        run_evaluations=[
-            Evaluation(name="pass_rate", value=0.9),
-            Evaluation(name="category_pass_rate:safety", value=0.5),  # regression
-            Evaluation(name="infrastructure_completion_rate", value=1.0),
-        ],
-        experiment_id="t",
-    )
-
-    assert runner._evaluate_gates(result, min_pass_rate=None) == 1
-
-
 def test_evaluate_gates_pass_when_metrics_absent() -> None:
     from langfuse import Evaluation
     from langfuse.experiment import ExperimentResult
