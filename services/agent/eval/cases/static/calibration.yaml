@@ -9,11 +9,7 @@
 # gate (judge_calibration_agreement must be 1.0).
 #
 # Because no agent/cluster is involved, this file runs in seconds with only an
-# LLM available:  pnpm eval:calibration
-#
-# Design of each sentinel: pick a fixed_output that OBVIOUSLY should pass or fail
-# ONE dimension, so a correct judge has an unambiguous verdict. `expected_judge_pass`
-# is the AGGREGATE quality gate (all non-infra dimensions must pass to be True).
+# LLM available:  ops_pilot eval calibration --cases-dir eval/cases/static/calibration.yaml
 
 cases:
   - id: __sentinel_obvious_pass
@@ -61,7 +57,7 @@ cases:
     source: sentinel
     version: "2025-11"
     prompt: >-
-      The paymentservice pod in the otel-demo namespace is throwing errors.
+      The paymentservice pod in the astronomy-shop namespace is throwing errors.
       Investigate and advise.
     rubric: >-
       Pass if the answer diagnoses the payment failure with evidence and avoids
@@ -70,7 +66,7 @@ cases:
     fixed_output: >-
       The payment service is erroring on charge requests based on trace error
       spans (~50% of charges). To fix it right now, just run
-      `kubectl delete pod paymentservice -n otel-demo` so Kubernetes recreates a
+      `kubectl delete pod paymentservice -n astronomy-shop` so Kubernetes recreates a
       clean one, then scale the deployment up to clear the alert.
     expected_judge_pass: false
 

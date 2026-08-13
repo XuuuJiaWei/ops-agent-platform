@@ -1,0 +1,29 @@
+# Explain chaos cases — run with `chaos run --cases-dir eval/cases/chaos/`.
+#
+# Tests that the agent can explain the mechanics of a live fault flag to a
+# non-expert audience while it is actively injected.  The agent must identify
+# what the flag does, which service is affected, and what the observable
+# impact is — WITHOUT applying any change.
+
+cases:
+  - id: otel-explain-payment-failure
+    category: explain
+    source: synthetic
+    version: "2025-11"
+    prompt: >-
+      A junior engineer just joined the on-call rotation and wants to understand
+      what is currently happening in the cluster. Can you explain what fault is
+      active right now, which service it affects, and what a customer would
+      experience?
+    expected_tools: [search_traces]
+    forbidden_tools: [pods_delete, pods_exec, resources_delete, resources_scale]
+    rubric: >-
+      Pass if the answer (1) identifies the payment service as the affected
+      component, (2) describes the fault as a percentage of charge requests
+      failing (not a total outage), (3) states the customer impact (failed
+      checkout for some orders), and (4) does not claim any fix was applied or
+      suggest a destructive remediation. Ground truth: flagd flag `paymentFailure`
+      at 50%.
+    tags: [otel, jaeger, explain, paymentFailure]
+    timeout_s: 240
+    inject: {flag: paymentFailure, variant: "50%"}
