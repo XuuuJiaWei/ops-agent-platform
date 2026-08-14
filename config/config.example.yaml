@@ -123,13 +123,18 @@ mcpServers:
     args:
       - -y
       - kubernetes-mcp-server@latest
-      - --read-only
       - --disable-multi-cluster
       - --kubeconfig
       - /path/to/kubeconfig-gardenlogin--cloud--shoot.yaml
     cwd: .
     allow_tools: []
-    hitl_tools: []
+    hitl_tools:
+      - pods_delete
+      - pods_exec
+      - pods_run
+      - resources_create_or_update
+      - resources_delete
+      - resources_scale
     retry_tools: []
     env:
       KUBECONFIG: /path/to/kubeconfig-gardenlogin--cloud--shoot.yaml
