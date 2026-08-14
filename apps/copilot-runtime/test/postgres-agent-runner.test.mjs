@@ -1,7 +1,26 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { EventType } from "@ag-ui/client";
-import { PostgresAgentRunner } from "../src/postgres-agent-runner.mjs";
+import { normalizeDatabaseUrl, PostgresAgentRunner } from "../src/postgres-agent-runner.mjs";
+
+test("normalizes shared Python Postgres URLs for node-postgres", () => {
+  const normalized = new URL(
+    normalizeDatabaseUrl("postgresql+asyncpg://user:password@db.example.com:5432/app?sslmode=require"),
+  );
+
+  assert.equal(normalized.protocol, "postgresql:");
+  assert.equal(normalized.searchParams.get("sslmode"), "require");
+  assert.equal(normalized.searchParams.get("uselibpqcompat"), "true");
+});
+
+test("preserves explicit node-postgres SSL compatibility choices", () => {
+  const normalized = new URL(
+    normalizeDatabaseUrl("postgres://user:password@db.example.com:5432/app?sslmode=require&uselibpqcompat=false"),
+  );
+
+  assert.equal(normalized.protocol, "postgresql:");
+  assert.equal(normalized.searchParams.get("uselibpqcompat"), "false");
+});
 
 test("PostgresAgentRunner replays a completed run after a new runner is created", async () => {
   const pool = new FakePool();

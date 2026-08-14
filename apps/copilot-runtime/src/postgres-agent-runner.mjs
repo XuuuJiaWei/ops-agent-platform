@@ -438,6 +438,11 @@ function withRunInput(event, input, historicMessageIds) {
   };
 }
 
-function normalizeDatabaseUrl(value) {
-  return value.replace(/^postgresql\+asyncpg:/, "postgresql:").replace(/^postgres:/, "postgresql:");
+export function normalizeDatabaseUrl(value) {
+  const normalized = value.replace(/^postgresql\+asyncpg:/, "postgresql:").replace(/^postgres:/, "postgresql:");
+  const url = new URL(normalized);
+  if (url.searchParams.get("sslmode") === "require" && !url.searchParams.has("uselibpqcompat")) {
+    url.searchParams.set("uselibpqcompat", "true");
+  }
+  return url.toString();
 }

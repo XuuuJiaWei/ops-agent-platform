@@ -345,6 +345,28 @@ def test_load_settings_reads_postgres_persistence():
     assert settings.sqlalchemy_database_url() == "postgresql+asyncpg://u:p@h:5433/db"
 
 
+def test_sqlalchemy_url_translates_libpq_sslmode_for_asyncpg():
+    database_url = "postgresql://u:p@h:5432/db?sslmode=require"
+    settings = load_settings(
+        env={"DATABASE_URL": database_url},
+        config={"persistence": {"backend": "postgres"}},
+    )
+
+    assert settings.persistence_database_url == database_url
+    assert settings.psycopg_database_url() == database_url
+    assert settings.sqlalchemy_database_url() == "postgresql+asyncpg://u:p@h:5432/db?ssl=require"
+    assert settings.configured_system_prompt() is None
+
+
+def test_sqlalchemy_url_prefers_an_explicit_asyncpg_ssl_parameter():
+    settings = load_settings(
+        env={"DATABASE_URL": "postgresql+asyncpg://u:p@h/db?sslmode=require&ssl=verify-full"},
+        config={"persistence": {"backend": "postgres"}},
+    )
+
+    assert settings.sqlalchemy_database_url() == "postgresql+asyncpg://u:p@h/db?ssl=verify-full"
+
+
 def test_sqlalchemy_and_psycopg_urls_normalize_driver_suffix():
     settings = load_settings(
         env={"DATABASE_URL": "postgresql+asyncpg://u:p@h/db"},

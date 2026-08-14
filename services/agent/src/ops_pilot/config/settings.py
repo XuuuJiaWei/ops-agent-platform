@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from ops_pilot.config.interpolation import expand_optional
 from ops_pilot.config.mcp_schema import MCPConfig
@@ -130,12 +131,14 @@ class Settings:
         if not url:
             return None
         if url.startswith("postgresql+"):
+            normalized = url
+        elif url.startswith("postgresql://"):
+            normalized = "postgresql+asyncpg://" + url[len("postgresql://") :]
+        elif url.startswith("postgres://"):
+            normalized = "postgresql+asyncpg://" + url[len("postgres://") :]
+        else:
             return url
-        if url.startswith("postgresql://"):
-            return "postgresql+asyncpg://" + url[len("postgresql://") :]
-        if url.startswith("postgres://"):
-            return "postgresql+asyncpg://" + url[len("postgres://") :]
-        return url
+        return _rename_url_query_parameter(normalized, source="sslmode", target="ssl")
 
     def psycopg_database_url(self) -> str | None:
         """Return the persistence URL normalized for psycopg (``AsyncPostgresSaver``).
@@ -161,6 +164,19 @@ class Settings:
 
     def skill_path_values(self) -> list[str]:
         return [str(path) for path in self.skills_paths]
+
+
+def _rename_url_query_parameter(url: str, *, source: str, target: str) -> str:
+    parsed = urlsplit(url)
+    query = parse_qsl(parsed.query, keep_blank_values=True)
+    source_values = [value for key, value in query if key == source]
+    if not source_values:
+        return url
+
+    without_source = [(key, value) for key, value in query if key != source]
+    if not any(key == target for key, _ in without_source):
+        without_source.append((target, source_values[-1]))
+    return urlunsplit(parsed._replace(query=urlencode(without_source)))
 
 
 def load_settings(env: Mapping[str, str] | None = None, *, config: Mapping[str, Any] | None = None) -> Settings:
