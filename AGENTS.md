@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This repo contains a thin CopilotKit/Vite frontend and an `ops_pilot` DeepAgents backend. Frontend code lives in `apps/web/src`; the local CopilotKit Runtime bridge lives in `apps/copilot-runtime/src`. Backend Python code lives in `services/agent/src/ops_pilot`, with tests under `services/agent/tests`. Shared configuration examples live in `config/`, documentation in `docs/`, archived legacy frontend artifacts in `archives/`, and optional DeepAgents skills in `skills/`.
+This repo contains a thin CopilotKit/Vite frontend and an `ops_pilot` DeepAgents backend. Frontend code lives in `apps/web/src`; the local CopilotKit Runtime bridge lives in `apps/copilot-runtime/src`. Backend Python code lives in `services/agent/src/ops_pilot`, with tests under `services/agent/tests`. Shared configuration examples live in `config/`, documentation in `docs/`, and optional DeepAgents skills in `skills/`.
 
 Keep agent policy, prompts, tools, data access, sandbox lifecycle, MCP lifecycle, tracing, and protocol adapters in the backend. The frontend should stay a standard CopilotKit UI surface that forwards to the local runtime/backend.
 
