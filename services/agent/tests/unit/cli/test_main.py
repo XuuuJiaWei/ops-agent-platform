@@ -42,3 +42,21 @@ def test_serve_backend_lets_the_configured_event_loop_policy_select_the_loop(mon
 
     assert cli._serve_backend(None, None) == 0
     assert captured_config["loop"] == "none"
+
+
+def test_status_closes_the_runtime_it_builds(monkeypatch, capsys) -> None:
+    runtime = SimpleNamespace(closed=False)
+
+    async def close() -> None:
+        runtime.closed = True
+
+    async def build_runtime():
+        runtime.aclose = close
+        return runtime
+
+    monkeypatch.setattr(cli, "build_agent_runtime", build_runtime)
+    monkeypatch.setattr(cli, "build_runtime_status", lambda _: {"ok": True})
+
+    assert asyncio.run(cli._print_status()) == 0
+    assert runtime.closed is True
+    assert '"ok": true' in capsys.readouterr().out

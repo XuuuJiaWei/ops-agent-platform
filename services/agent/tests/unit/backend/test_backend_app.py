@@ -1,4 +1,3 @@
-import pytest
 from fastapi.testclient import TestClient
 
 from ops_pilot.backend import create_backend_app
@@ -57,12 +56,11 @@ def _patch_agui(monkeypatch) -> None:
     monkeypatch.setattr(copilotkit.langgraph, "copilotkit_customize_config", lambda **_: {})
 
 
-@pytest.mark.asyncio
-async def test_unified_backend_mounts_chat_a2a_and_health_routes(monkeypatch) -> None:
+def test_unified_backend_mounts_chat_a2a_and_health_routes(monkeypatch) -> None:
     _patch_agui(monkeypatch)
 
     settings = load_settings(env={}, config={"app_env": "test", "assistant_id": "agent"})
-    app = await create_backend_app(settings, runtime=DummyRuntime())
+    app = create_backend_app(settings, runtime=DummyRuntime())
 
     with TestClient(app) as client:
         paths = {path for route in app.routes if (path := getattr(route, "path", None))}
@@ -76,23 +74,22 @@ async def test_unified_backend_mounts_chat_a2a_and_health_routes(monkeypatch) ->
         assert status.json()["mcp"]["tool_count"] == 0
 
 
-@pytest.mark.asyncio
-async def test_backend_builds_runtime_inside_lifespan(monkeypatch) -> None:
+def test_backend_builds_runtime_inside_lifespan(monkeypatch) -> None:
     import ops_pilot.backend as backend
 
     _patch_agui(monkeypatch)
 
     created: list[CloseTrackingRuntime] = []
 
-    async def fake_create_agent_runtime_async(_settings):
+    async def fake_build_agent_runtime(_settings):
         runtime = CloseTrackingRuntime()
         created.append(runtime)
         return runtime
 
-    monkeypatch.setattr(backend, "create_agent_runtime_async", fake_create_agent_runtime_async)
+    monkeypatch.setattr(backend, "build_agent_runtime", fake_build_agent_runtime)
     settings = load_settings(env={}, config={"app_env": "test", "assistant_id": "agent"})
 
-    app = await create_backend_app(settings)
+    app = create_backend_app(settings)
 
     assert created == []
 

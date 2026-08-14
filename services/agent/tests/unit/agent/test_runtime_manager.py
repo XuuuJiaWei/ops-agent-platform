@@ -76,3 +76,20 @@ async def test_runtime_manager_rebuilds_when_sandbox_renew_reports_missing(monke
     assert sandbox.renew_calls == 1
     assert manager.current is rebuilt_runtime
     assert initial_runtime.closed is True
+
+
+def test_runtime_proxies_do_not_expose_arbitrary_runtime_or_graph_attributes() -> None:
+    settings = load_settings(env={}, config={"app_env": "test"})
+    graph = type("Graph", (), {"nodes": {}, "internal_graph_detail": "hidden"})()
+    runtime = DummyRuntime()
+    runtime_with_internals: Any = runtime
+    runtime_with_internals.graph = graph
+    runtime_with_internals.internal_runtime_detail = "hidden"
+    manager = AgentRuntimeManager(settings=settings, runtime=runtime)  # type: ignore[arg-type]
+    runtime_proxy: Any = manager.runtime_proxy()
+    graph_proxy: Any = manager.graph_proxy()
+
+    with pytest.raises(AttributeError):
+        _ = runtime_proxy.internal_runtime_detail
+    with pytest.raises(AttributeError):
+        _ = graph_proxy.internal_graph_detail

@@ -1,14 +1,23 @@
-"""LangGraph server export.
-
-``langgraph.json`` points at the ``graph`` object below. Importing this module is
-therefore the startup validation point for SAP model discovery, required MCP
-servers, skills, checkpointing, and tracing setup.
-"""
+"""Lazy LangGraph server export."""
 
 from __future__ import annotations
 
-from ops_pilot.agent.factory import create_agent_runtime
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import Any
 
-runtime = create_agent_runtime(attach_checkpointer=False)
-agent = runtime.graph
-graph = agent
+from langchain_core.runnables import RunnableConfig
+
+from ops_pilot.agent.runtime import build_agent_runtime
+
+
+@asynccontextmanager
+async def graph(config: RunnableConfig) -> AsyncIterator[Any]:
+    """Build one graph per LangGraph execution context and release its resources."""
+
+    del config
+    runtime = await build_agent_runtime(attach_checkpointer=False)
+    try:
+        yield runtime.graph
+    finally:
+        await runtime.aclose()

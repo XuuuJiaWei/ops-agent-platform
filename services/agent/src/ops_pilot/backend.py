@@ -12,8 +12,8 @@ from fastapi import FastAPI
 from ops_pilot.a2a.agent_card import build_agent_card
 from ops_pilot.a2a.executor import create_executor
 from ops_pilot.a2a.task_store import create_task_store
-from ops_pilot.agent.factory import create_agent_runtime_async
 from ops_pilot.agent.manager import AgentRuntimeManager
+from ops_pilot.agent.runtime import build_agent_runtime
 from ops_pilot.agui.resilient import create_resilient_agui_agent
 from ops_pilot.api.errors import register_exception_handlers
 from ops_pilot.config.settings import Settings, get_settings
@@ -24,7 +24,7 @@ from ops_pilot.spaces.resolver import CardResolver
 logger = logging.getLogger("uvicorn.error")
 
 
-async def create_backend_app(
+def create_backend_app(
     settings: Settings | None = None,
     runtime: Any | None = None,
 ) -> FastAPI:
@@ -41,13 +41,13 @@ async def create_backend_app(
     resolved_settings = settings or get_settings()
     runtime_manager = AgentRuntimeManager(settings=resolved_settings, runtime=runtime)
 
-    def _mount_protocol_routes(app: FastAPI, resolved_runtime: Any, task_store: Any) -> None:
+    def _mount_protocol_routes(app: FastAPI, task_store: Any) -> None:
         agui_config = copilotkit_customize_config(
             emit_tool_calls=True,
             emit_messages=True,
         )
         agui_config.update(
-            resolved_runtime.runnable_config(
+            runtime_manager.current.runnable_config(
                 protocol="copilotkit-agui",
                 extra_metadata={"entrypoint": "backend"},
             )
@@ -90,7 +90,7 @@ async def create_backend_app(
         task_store_closer = None
         try:
             if runtime is None:
-                runtime_manager.attach_runtime(await create_agent_runtime_async(resolved_settings))
+                runtime_manager.attach_runtime(await build_agent_runtime(resolved_settings))
             mcp_status = runtime_manager.current.mcp.status
             server_summary = ", ".join(
                 f"{server.name}={'ok' if server.ok else 'failed'}({server.tool_count})" for server in mcp_status.servers
@@ -99,7 +99,7 @@ async def create_backend_app(
             if not getattr(app.state, "protocol_routes_mounted", False):
                 task_store, task_store_closer = await create_task_store(resolved_settings)
                 app.state.a2a_task_store_closer = task_store_closer
-                _mount_protocol_routes(app, runtime_manager.current, task_store)
+                _mount_protocol_routes(app, task_store)
                 app.state.protocol_routes_mounted = True
             if resolved_settings.spaces_resolver_enabled and not getattr(app.state, "resolver_task", None):
                 rt = runtime_manager.current

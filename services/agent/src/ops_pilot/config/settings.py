@@ -289,7 +289,9 @@ def load_settings(env: Mapping[str, str] | None = None, *, config: Mapping[str, 
         open_sandbox_use_server_proxy=_bool(sandbox.get("use_server_proxy"), True),
         open_sandbox_disable_metrics=_bool(sandbox.get("disable_metrics"), True),
         open_sandbox_image=_str(sandbox.get("image"), "python:3.11"),
-        open_sandbox_timeout_seconds=_optional_int(sandbox.get("timeout_seconds")) or 600,
+        open_sandbox_timeout_seconds=(
+            _optional_int(sandbox["timeout_seconds"]) if "timeout_seconds" in sandbox else 600
+        ),
         open_sandbox_ready_timeout_seconds=_int(sandbox.get("ready_timeout_seconds"), 240),
         open_sandbox_cpu_limit=_str(sandbox.get("cpu_limit"), "250m"),
         open_sandbox_memory_limit=_str(sandbox.get("memory_limit"), "256Mi"),

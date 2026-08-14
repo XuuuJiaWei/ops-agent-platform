@@ -12,12 +12,14 @@ from typing import Any
 
 import uvicorn
 
-from ops_pilot.agent.factory import create_agent_runtime_async
+from ops_pilot.agent.runtime import build_agent_runtime
 from ops_pilot.config.mcp_schema import MCPConfig
 from ops_pilot.config.settings import load_settings
 from ops_pilot.eval.cli import add_chaos_subcommands, add_eval_subcommands, run_chaos_command, run_eval_command
 from ops_pilot.health.status import build_runtime_status, health_snapshot
+from ops_pilot.mcp.status import MCPLoadStatus
 from ops_pilot.models.smoke import smoke_bind_tools, smoke_invoke, smoke_model_invocation
+from ops_pilot.spaces import MemorySpaceRepository
 from ops_pilot.tools.smoke_tools import get_smoke_tools
 
 
@@ -98,9 +100,12 @@ def _print_settings() -> int:
 
 
 async def _print_status() -> int:
-    runtime = await create_agent_runtime_async()
-    print(json.dumps(build_runtime_status(runtime), indent=2, sort_keys=True))
-    return 0
+    runtime = await build_agent_runtime()
+    try:
+        print(json.dumps(build_runtime_status(runtime), indent=2, sort_keys=True))
+        return 0
+    finally:
+        await runtime.aclose()
 
 
 def _serve_backend(host: str | None, port: int | None) -> int:
@@ -112,14 +117,14 @@ def _serve_backend(host: str | None, port: int | None) -> int:
         chat_host=host or settings.chat_host,
         chat_port=port or settings.chat_port,
     )
-    # Build only the FastAPI routing graph on this throwaway loop. Runtime-owned
-    # resources such as MCP stdio sessions and sandboxes are created by the app
-    # lifespan inside uvicorn's event loop and cleaned up from the same loop.
+    # Runtime-owned resources such as MCP stdio sessions and sandboxes are
+    # created by the app lifespan inside uvicorn's event loop and cleaned up
+    # from the same loop.
     # Uvicorn owns SIGINT through its capture_signals() contextmanager, runs a
     # graceful shutdown, then re-raises the captured signal by design — so
     # KeyboardInterrupt surfaces from run() and we swallow it at this CLI boundary
     # for a clean exit (the same thing uvicorn's own CLI does).
-    app = asyncio.run(create_backend_app(settings))
+    app = create_backend_app(settings)
     config = uvicorn.Config(app, host=settings.chat_host, port=settings.chat_port, log_level="info", loop="none")
     try:
         uvicorn.Server(config).run()
@@ -148,7 +153,7 @@ def _smoke_model() -> int:
 
 async def _smoke_agent() -> int:
     settings = replace(load_settings(), mcp=MCPConfig())
-    runtime = await create_agent_runtime_async(settings=settings, extra_tools=get_smoke_tools())
+    runtime = await build_agent_runtime(settings=settings, extra_tools=get_smoke_tools())
     try:
         response = await runtime.ainvoke_text(
             "Use add_numbers to compute 2 + 3, then reply with the result.",
@@ -163,13 +168,18 @@ async def _smoke_agent() -> int:
 
 async def _smoke_a2a() -> int:
     from ops_pilot.a2a.agent_card import build_agent_card
-    from ops_pilot.a2a.app import create_a2a_app
+    from ops_pilot.backend import create_backend_app
 
-    settings = load_settings()
+    settings = replace(
+        load_settings(),
+        persistence_backend="memory",
+        spaces_resolver_enabled=False,
+    )
     card = build_agent_card(settings)
     print(card)
-    app = await create_a2a_app(settings, runtime=_DummyRuntime())
-    print("routes:", ", ".join(_route_paths(app)))
+    app = create_backend_app(settings, runtime=_DummyRuntime())
+    async with app.router.lifespan_context(app):
+        print("routes:", ", ".join(_route_paths(app)))
     return 0
 
 
@@ -178,12 +188,26 @@ def _smoke_invoke_for_compat() -> str:
 
 
 class _DummyRuntime:
+    graph = type("SmokeGraph", (), {"nodes": {}})()
+    mcp = type("SmokeMCP", (), {"status": MCPLoadStatus(), "tools": (), "hitl_tools": ()})()
+    spaces = MemorySpaceRepository()
+    run_controller = None
+
+    def runnable_config(self, **_: object) -> dict:
+        return {}
+
     async def ainvoke_text(self, text: str, **_: object) -> str:
         return f"ok: {text}"
 
+    async def cancel_run(self, *_: object, **__: object) -> bool:
+        return True
+
+    async def aclose(self) -> None:
+        return None
+
 
 def _route_paths(app) -> list[str]:
-    return sorted({path for route in app.routes if (path := getattr(route, "path", None))})
+    return sorted(app.openapi().get("paths", {}))
 
 
 if __name__ == "__main__":

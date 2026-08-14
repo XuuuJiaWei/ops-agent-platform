@@ -234,6 +234,18 @@ def test_load_settings_reads_open_sandbox_pool_options():
     assert settings.open_sandbox_internal_root == "/internal"
 
 
+def test_load_settings_preserves_explicit_null_open_sandbox_timeout():
+    settings = load_settings(env={}, config={"open_sandbox": {"timeout_seconds": None}})
+
+    assert settings.open_sandbox_timeout_seconds is None
+
+
+def test_load_settings_defaults_open_sandbox_timeout_when_absent():
+    settings = load_settings(env={}, config={"open_sandbox": {}})
+
+    assert settings.open_sandbox_timeout_seconds == 600
+
+
 def test_load_settings_rejects_invalid_open_sandbox_scope():
     with pytest.raises(SettingsError, match="open_sandbox.scope"):
         load_settings(env={}, config={"open_sandbox": {"scope": "user"}})

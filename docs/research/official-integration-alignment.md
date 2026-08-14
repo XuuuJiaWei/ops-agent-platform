@@ -52,6 +52,23 @@ prompt caching、skills、memory 与 HITL 的固定 middleware stack。项目不
 - [LangChain prebuilt middleware](https://docs.langchain.com/oss/python/langchain/middleware/built-in)
 - [DeepAgents production guardrails](https://docs.langchain.com/oss/python/deepagents/going-to-production)
 
+## OpenSandbox provider 验证
+
+本项目锁定并实际安装的 `deepagents-opensandbox 1.0.2` 提供
+`OpensandboxProvider`，但它属于 `cli` extra，默认安装不会导出该类。进一步核对已安装源码后，
+当前 provider 不能无损替换本项目的 sandbox 创建 seam：
+
+- `get_or_create()` / `aget_or_create()` 将 `timeout` 强制转换为 `timedelta`，不支持
+  OpenSandbox SDK 原生允许的 `timeout=None`。
+- provider 只转发 resource limits，不转发 resource requests、entrypoint 和
+  `disable_metrics`。
+- 引入 provider 需要额外安装 `deepagents-cli`，而本项目不使用 DeepAgents CLI。
+
+因此暂不增加这个依赖，也不保留“provider + direct SDK”双路径。项目继续使用官方
+`SandboxSync.create()` 创建资源，并将其交给官方 `OpensandboxBackend`；项目代码只拥有
+provider 尚未覆盖的 scope、workspace projection、skills sync、TTL renew 与资源参数策略。
+如果 provider 后续覆盖这些能力，再用一次替换式迁移删除 direct lifecycle。
+
 ## 为什么 Langfuse 不需要线程桥和私有 OTel 管理
 
 Langfuse Experiment SDK 原生接受 async task 和 async evaluator，并通过 `max_concurrency`

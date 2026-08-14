@@ -134,9 +134,6 @@ class CurrentRuntimeProxy:
     def __init__(self, manager: AgentRuntimeManager) -> None:
         self._manager = manager
 
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._manager.current, name)
-
     async def ainvoke_text(self, text: str, **kwargs: Any) -> str:
         await self._manager.ensure_runtime_ready()
         return await self._manager.current.ainvoke_text(text, **kwargs)
@@ -161,6 +158,19 @@ class CurrentGraphProxy:
     def nodes(self) -> Any:
         return self._manager.current.graph.nodes
 
+    @property
+    def context_schema(self) -> Any:
+        return getattr(self._manager.current.graph, "context_schema", None)
+
+    def get_input_jsonschema(self, *args: Any, **kwargs: Any) -> Any:
+        return self._manager.current.graph.get_input_jsonschema(*args, **kwargs)
+
+    def get_output_jsonschema(self, *args: Any, **kwargs: Any) -> Any:
+        return self._manager.current.graph.get_output_jsonschema(*args, **kwargs)
+
+    def config_schema(self, *args: Any, **kwargs: Any) -> Any:
+        return self._manager.current.graph.config_schema(*args, **kwargs)
+
     async def aget_state(self, *args: Any, **kwargs: Any) -> Any:
         await self._manager.ensure_runtime_ready()
         return await self._manager.current.graph.aget_state(*args, **kwargs)
@@ -181,8 +191,13 @@ class CurrentGraphProxy:
 
         return _stream()
 
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._manager.current.graph, name)
+    def aget_state_history(self, *args: Any, **kwargs: Any) -> Any:
+        async def _history():
+            await self._manager.ensure_runtime_ready()
+            async for snapshot in self._manager.current.graph.aget_state_history(*args, **kwargs):
+                yield snapshot
+
+        return _history()
 
 
 def _now_iso() -> str:
