@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import pytest
 
 from ops_pilot.eval import runner
+from ops_pilot.eval.dataset import EvalCase, EvalDatasetError
 
 
 @dataclass
@@ -23,7 +24,7 @@ class _Trace:
 
 
 @pytest.mark.asyncio
-async def test_eval_timeout_cancels_and_awaits_an_isolated_invocation_task() -> None:
+async def test_eval_timeout_is_returned_as_a_scored_infrastructure_error() -> None:
     caller_task = asyncio.current_task()
 
     class Runtime:
@@ -53,13 +54,12 @@ async def test_eval_timeout_cancels_and_awaits_an_isolated_invocation_task() -> 
     assert output["error_type"] == "TimeoutError"
     assert runtime.cleaned_up.is_set()
     assert runtime.invocation_task is runtime.cleanup_task
-    assert runtime.invocation_task is not caller_task
+    assert runtime.invocation_task is caller_task
     assert runtime.received_deadline == 0.1
 
 
 @pytest.mark.asyncio
-async def test_eval_task_dispatches_runtime_work_to_its_owner_loop() -> None:
-    owner_loop = asyncio.get_running_loop()
+async def test_eval_task_runs_natively_on_the_sdk_worker_loop() -> None:
 
     class Runtime:
         invocation_loop: asyncio.AbstractEventLoop | None = None
@@ -79,7 +79,7 @@ async def test_eval_task_dispatches_runtime_work_to_its_owner_loop() -> None:
     output = await asyncio.to_thread(invoke_from_worker_thread)
 
     assert output["final_text"] == "done"
-    assert runtime.invocation_loop is owner_loop
+    assert runtime.invocation_loop is not asyncio.get_running_loop()
     assert runtime.received_deadline == 1
 
 
@@ -142,3 +142,31 @@ def test_evaluate_gates_pass_when_metrics_absent() -> None:
 
     # No safety / calibration / infra metrics present → nothing to gate → pass.
     assert runner._evaluate_gates(result, min_pass_rate=None) == 0
+
+
+def test_evaluate_gates_fail_when_hitl_safety_regresses() -> None:
+    from langfuse import Evaluation
+    from langfuse.experiment import ExperimentResult
+
+    result = ExperimentResult(
+        name="t",
+        run_name="t",
+        description="t",
+        item_results=[],
+        run_evaluations=[Evaluation(name="hitl_safety_rate", value=0.5)],
+        experiment_id="t",
+    )
+
+    assert runner._evaluate_gates(result, min_pass_rate=None) == 1
+
+
+def test_smoke_tools_are_injected_only_for_an_isolated_smoke_dataset(monkeypatch) -> None:
+    smoke_tool = object()
+    monkeypatch.setattr(runner, "get_smoke_tools", lambda: [smoke_tool])
+    smoke_case = EvalCase(id="smoke", prompt="p", category="smoke")
+    status_case = EvalCase(id="status", prompt="p", category="status-query")
+
+    assert runner._extra_tools_for_cases((smoke_case,)) == (smoke_tool,)
+    assert runner._extra_tools_for_cases((status_case,)) == ()
+    with pytest.raises(EvalDatasetError, match="own case file"):
+        runner._extra_tools_for_cases((smoke_case, status_case))

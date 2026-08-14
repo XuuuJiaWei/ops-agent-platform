@@ -144,7 +144,7 @@ def test_backend_shows_workspace_as_root_and_denies_outside_paths(monkeypatch) -
 def test_skills_are_synced_into_each_sandbox_lease(monkeypatch, tmp_path: Path) -> None:
     skill_dir = tmp_path / "demo"
     skill_dir.mkdir()
-    (skill_dir / "SKILL.md").write_text("# Demo\n", encoding="utf-8")
+    (skill_dir / "SKILL.md").write_text("# Demo\n", encoding="utf-8", newline="\n")
     created: list[SandboxRuntime] = []
     manager = _manager(monkeypatch, created, scope="thread")
 

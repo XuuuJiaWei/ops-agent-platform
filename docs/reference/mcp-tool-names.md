@@ -50,10 +50,10 @@ trace:
 ## opensearch
 
 - Package: `opensearch-mcp-server-py` (PyPI)
-- Launch: `uvx opensearch-mcp-server-py`
-- The set below is the `allow_tools` allowlist already configured in
-  `config/config.yaml`. `GenericOpenSearchApiTool` is in `hitl_tools`
-  (human-in-the-loop approval) because it can hit arbitrary endpoints.
+- Launch: `uvx opensearch-mcp-server-py@0.11.0`
+- `allow_tools: []` exposes every tool in the stable configured server surface below.
+  `GenericOpenSearchApiTool` is in `hitl_tools` (human-in-the-loop approval) because
+  it can hit arbitrary endpoints.
 
 | Tool | Purpose |
 | --- | --- |
@@ -61,22 +61,23 @@ trace:
 | `IndexMappingTool` | Get index mappings |
 | `SearchIndexTool` | Query documents (DSL) |
 | `GetShardsTool` | Shard-level status |
-| `ClusterHealthTool` | Cluster health |
-| `CountTool` | Document counts |
-| `ExplainTool` | Explain a query match |
-| `MsearchTool` | Multi-search |
 | `PPLQueryTool` | Piped Processing Language query |
 | `GenericOpenSearchApiTool` | Arbitrary API call (**hitl**) |
 
 Write access is off (`OPENSEARCH_SETTINGS_ALLOW_WRITE=false`).
 
+`ClusterHealthTool`, `CountTool`, `ExplainTool`, and `MsearchTool` are intentionally
+not part of the startup contract in 0.11.0: that server generates them by fetching
+the OpenSearch API specification from GitHub `main` at process startup. Their
+equivalent endpoints remain reachable through `GenericOpenSearchApiTool` under HITL.
+
 ## kubernetes
 
 - Package: `kubernetes-mcp-server` (npm), repo `containers/kubernetes-mcp-server`, v0.0.66
-- Launch: `npx -y kubernetes-mcp-server@latest --read-only --disable-multi-cluster --kubeconfig <path>`
+- Launch: `npx -y kubernetes-mcp-server@latest --disable-multi-cluster --kubeconfig <path>`
 - Tool names are the `Name:` fields in `pkg/toolsets/core/*.go`.
 
-**Read-only tools (available under `--read-only`):**
+**Read-only query tools:**
 
 | Tool | Purpose |
 | --- | --- |
@@ -94,8 +95,13 @@ Write access is off (`OPENSEARCH_SETTINGS_ALLOW_WRITE=false`).
 | `resources_get` | Get an arbitrary resource |
 | `resources_list` | List arbitrary resources |
 
-**Mutating tools — BLOCKED by `--read-only`** (use as `forbidden_tools` to
-catch regressions / prompt injection):
+**Destructive or non-idempotent tools — protected by HITL:**
 
 `pods_delete`, `pods_exec`, `pods_run`, `resources_create_or_update`,
 `resources_delete`, `resources_scale`.
+
+The server exposes all Kubernetes tools so an approved operator can use the
+complete MCP surface. The six tools above are configured in `hitl_tools` and
+DeepAgents interrupts before executing them. Eval derives its forbidden policy
+from the same config at runtime; case YAML should list only additional,
+case-specific restrictions instead of copying this list.

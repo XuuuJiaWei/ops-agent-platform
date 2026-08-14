@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from ops_pilot.eval.dataset import (
-    DEFAULT_CASES_DIR,
     EvalDatasetError,
+    langfuse_client_is_reachable,
     load_cases_from_yaml,
+    sync_and_verify_cases_to_langfuse,
+    validate_dataset_matches_local,
     validate_dataset_schema,
     validate_expected_tool_names,
 )
@@ -145,3 +149,110 @@ def test_stale_online_dataset_schema_fails_fast() -> None:
 
     with pytest.raises(EvalDatasetError, match="ops_pilot eval sync"):
         validate_dataset_schema(items)
+
+
+def test_validate_dataset_matches_local_rejects_stale_cloud_item(tmp_path) -> None:
+    path = tmp_path / "cases.yaml"
+    path.write_text("- id: local\n  prompt: current\n  category: diagnosis\n", encoding="utf-8")
+    case = load_cases_from_yaml(path)[0]
+    online = {
+        "id": case.id,
+        "input": "stale",
+        "expected_output": case.expected_output,
+        "metadata": case.metadata(),
+    }
+
+    with pytest.raises(EvalDatasetError, match="input differs"):
+        validate_dataset_matches_local([case], [online])
+
+
+def test_validate_dataset_matches_local_accepts_exact_mirror(tmp_path) -> None:
+    path = tmp_path / "cases.yaml"
+    path.write_text("- id: local\n  prompt: current\n  category: diagnosis\n", encoding="utf-8")
+    case = load_cases_from_yaml(path)[0]
+    online = {
+        "id": case.id,
+        "input": case.prompt,
+        "expected_output": case.expected_output,
+        "metadata": case.metadata(),
+    }
+
+    validate_dataset_matches_local([case], [online])
+
+
+def test_sync_and_verify_uses_local_truth_and_order(tmp_path) -> None:
+    path = tmp_path / "cases.yaml"
+    path.write_text(
+        "- id: first\n  prompt: one\n  category: diagnosis\n- id: second\n  prompt: two\n  category: diagnosis\n",
+        encoding="utf-8",
+    )
+    cases = load_cases_from_yaml(path)
+
+    class FakeLangfuse:
+        items: dict[str, SimpleNamespace] = {}
+
+        def create_dataset(self, **_kwargs) -> None:
+            pass
+
+        def create_dataset_item(self, **kwargs) -> None:
+            self.items[kwargs["id"]] = SimpleNamespace(
+                id=kwargs["id"],
+                input=kwargs["input"],
+                expected_output=kwargs["expected_output"],
+                metadata=kwargs["metadata"],
+            )
+
+        def flush(self) -> None:
+            pass
+
+        def get_dataset(self, _name):
+            return SimpleNamespace(items=list(reversed(self.items.values())))
+
+    result = sync_and_verify_cases_to_langfuse(cases, "chaos", langfuse=FakeLangfuse())
+
+    assert [item.id for item in result] == ["first", "second"]
+    assert [item.input for item in result] == ["one", "two"]
+
+
+def test_langfuse_reachability_retries_transient_failures() -> None:
+    outcomes = iter((TimeoutError("TLS"), False, True))
+
+    class FakeLangfuse:
+        def auth_check(self):
+            outcome = next(outcomes)
+            if isinstance(outcome, BaseException):
+                raise outcome
+            return outcome
+
+    assert langfuse_client_is_reachable(FakeLangfuse(), attempts=3, backoff_seconds=0) is True
+
+
+def test_sync_skips_items_that_already_match_local_truth(tmp_path) -> None:
+    path = tmp_path / "cases.yaml"
+    path.write_text("- id: current\n  prompt: same\n  category: diagnosis\n", encoding="utf-8")
+    case = load_cases_from_yaml(path)[0]
+
+    class FakeLangfuse:
+        creates = 0
+        item = SimpleNamespace(
+            id=case.id,
+            input=case.prompt,
+            expected_output=case.expected_output,
+            metadata=case.metadata(),
+        )
+
+        def create_dataset(self, **_kwargs) -> None:
+            pass
+
+        def get_dataset(self, _name):
+            return SimpleNamespace(items=[self.item])
+
+        def create_dataset_item(self, **_kwargs) -> None:
+            self.creates += 1
+
+    client = FakeLangfuse()
+
+    result = sync_and_verify_cases_to_langfuse([case], "chaos", langfuse=client)
+
+    assert client.creates == 0
+    assert result == (client.item,)

@@ -22,7 +22,7 @@ def add_eval_subcommands(subcommands: argparse._SubParsersAction[Any]) -> None:
         nargs="+",
         default=None,
         metavar="CASE_ID",
-        help="Run only these case IDs. Space-separated, e.g. --only otel-safety-no-pod-delete.",
+        help="Run only these case IDs. Space-separated, e.g. --only smoke-add-numbers.",
     )
 
     sync = eval_subcommands.add_parser(
@@ -139,16 +139,16 @@ async def run_chaos_command(args: argparse.Namespace) -> int:
     command = args.chaos_command
 
     if command == "status":
-        variants = chaos.current_variants(settings)
+        variants = await chaos.current_variants(settings)
         _print_flag_variants(variants)
         return 0
     if command == "reset":
-        variants = chaos.reset_all(settings)
+        variants = await chaos.reset_all(settings)
         print("reset all fault flags to off.")
         _print_flag_variants(variants)
         return 0
     if command == "set":
-        chaos.set_flag(settings, args.flag, args.variant)
+        await chaos.set_flag(settings, args.flag, args.variant)
         print(f"set flag '{args.flag}' to '{args.variant}'.")
         return 0
     if command == "run":

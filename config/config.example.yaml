@@ -41,11 +41,11 @@ model:
 
 system_prompt: null
 skills_paths: [./skills]
-enable_smoke_tools: true
 
 langfuse:
   # Public/secret keys stay in .env; only the base URL is regular config.
   base_url: https://cloud.langfuse.com
+  timeout_seconds: 30
 
 server:
   chat_base_path: /chat
@@ -74,15 +74,18 @@ reliability:
   initial_backoff_seconds: 0.25
   backoff_multiplier: 2.0
   jitter_ratio: 0.2
-  failure_threshold: 5
-  recovery_seconds: 30
 
-# Chaos readiness/recovery policy. The runner polls flagd's OFREP data plane;
-# it does not use fixed fault settle/cooldown sleeps.
+# Chaos readiness/recovery policy. Runtime changes use the official flagd-ui API;
+# the Helm ConfigMap remains the safe restart baseline.
 chaos:
+  namespace: otel-demo
+  flagd_service: flagd
+  flagd_service_port: 8016
+  flagd_ui_port: 4000
   flag_sync_timeout_seconds: 90
   poll_interval_seconds: 1
   stable_reads: 2
+  signal_warmup_seconds: 15
 
 open_sandbox:
   # null = auto-enable only when domain (here) and api_key (.env) are both set.
@@ -112,14 +115,17 @@ open_sandbox:
 #   hitl_tools:  tools that require human-in-the-loop approval before running.
 #   retry_tools: tools whose business operation is known to be retry-safe even
 #                when the MCP server omits readOnlyHint/idempotentHint.
+#   read_timeout_seconds: MCP SDK request deadline passed through the adapter's
+#                official ClientSession session_kwargs. Never leave remote calls unbounded.
+#   timeout:      HTTP/SSE connection timeout; unsupported for stdio.
 #   headers:     only for http/sse/streamable_http MCP transports, e.g.
 #                Authorization: ${MCP_BASIC_AUTH_HEADER}
 mcpServers:
   kubernetes:
-    required: false
+    required: true
     transport: stdio
     command: npx
-    timeout: 60
+    read_timeout_seconds: 60
     args:
       - -y
       - kubernetes-mcp-server@latest
@@ -140,12 +146,13 @@ mcpServers:
       KUBECONFIG: /path/to/kubeconfig-gardenlogin--cloud--shoot.yaml
   # Jaeger 2.19+ has an official progressive-disclosure MCP extension.
   # Enable jaeger_mcp next to the query service and expose /mcp through the
-  # authenticated reverse proxy; the agent then uses persistent HTTP sessions.
+  # authenticated reverse proxy; the official adapter owns each tool-call session.
   jaeger:
-    required: false
+    required: true
     transport: streamable_http
     url: https://jaeger-otel.${OTEL_SHOOT_DOMAIN}/mcp
-    timeout: 30
+    timeout: 90
+    read_timeout_seconds: 30
     headers:
       Authorization: ${MCP_BASIC_AUTH_HEADER}
     allow_tools: []
@@ -154,33 +161,24 @@ mcpServers:
   # Deploy the official prometheus/prometheus-mcp chart next to Prometheus and
   # expose /mcp through the authenticated reverse proxy.
   prometheus:
-    required: false
+    required: true
     transport: streamable_http
     url: https://prometheus-otel.${OTEL_SHOOT_DOMAIN}/mcp
-    timeout: 30
+    timeout: 90
+    read_timeout_seconds: 30
     headers:
       Authorization: ${MCP_BASIC_AUTH_HEADER}
     allow_tools: []
     hitl_tools: []
     retry_tools: []
   opensearch:
-    required: false
+    required: true
     transport: stdio
     command: uvx
-    args: ["opensearch-mcp-server-py", "--log-format", "json"]
+    args: ["opensearch-mcp-server-py@0.11.0", "--log-format", "json"]
     cwd: .
-    timeout: 90
-    allow_tools:
-      - ListIndexTool
-      - IndexMappingTool
-      - SearchIndexTool
-      - GetShardsTool
-      - ClusterHealthTool
-      - CountTool
-      - ExplainTool
-      - MsearchTool
-      - GenericOpenSearchApiTool
-      - PPLQueryTool
+    read_timeout_seconds: 60
+    allow_tools: []
     hitl_tools:
       - GenericOpenSearchApiTool
     retry_tools:
@@ -188,15 +186,11 @@ mcpServers:
       - IndexMappingTool
       - SearchIndexTool
       - GetShardsTool
-      - ClusterHealthTool
-      - CountTool
-      - ExplainTool
-      - MsearchTool
       - PPLQueryTool
     env:
       OPENSEARCH_URL: https://opensearch-otel.${OTEL_SHOOT_DOMAIN}
       OPENSEARCH_USERNAME: ${OTEL_BASIC_AUTH_USER}
       OPENSEARCH_PASSWORD: ${OTEL_BASIC_AUTH_PASSWORD}
-      OPENSEARCH_ENABLED_CATEGORIES: core_tools,observability
+      OPENSEARCH_ENABLED_TOOLS: ListIndexTool,IndexMappingTool,SearchIndexTool,GetShardsTool,GenericOpenSearchApiTool,PPLQueryTool
       OPENSEARCH_SETTINGS_ALLOW_WRITE: "false"
   # github: disabled by default; re-enable when a GitHub PAT is ready.

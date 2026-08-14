@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
+from typing import Any
 
 from ops_pilot.agent.runtime import AgentRuntime, build_agent_runtime
 from ops_pilot.config.settings import Settings
@@ -16,6 +18,7 @@ def create_agent_runtime(
     settings: Settings | None = None,
     *,
     attach_checkpointer: bool = True,
+    extra_tools: Sequence[Any] = (),
 ) -> AgentRuntime:
     """Synchronously build the runtime for LangGraph graph imports and CLI use."""
 
@@ -26,6 +29,7 @@ def create_agent_runtime(
             build_agent_runtime(
                 settings,
                 attach_checkpointer=attach_checkpointer,
+                extra_tools=extra_tools,
             )
         )
     raise RuntimeError(

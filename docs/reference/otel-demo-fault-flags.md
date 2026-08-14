@@ -4,13 +4,15 @@ The OTel Demo (astronomy shop) injects faults through feature flags served by
 **flagd**. Source of truth is `src/flagd/demo.flagd.json` in the
 [opentelemetry-demo](https://github.com/open-telemetry/opentelemetry-demo)
 repo. These flags are the **ground truth** for the ops_pilot eval scenarios in
-[`services/agent/eval/cases/ops_scenarios.yaml`](../../services/agent/eval/cases/ops_scenarios.yaml):
+[`services/agent/eval/cases/chaos/`](../../services/agent/eval/cases/chaos/):
 enable a flag, run the agent, and score whether it names the injected fault.
 
-> Snapshot from `main` (15 flags). Flag keys changed across versions — the old
-> long names (`adServiceFailure`, `cartServiceFailure`, `recommendationServiceCacheFailure`,
-> `loadGeneratorFloodHomepage`, …) are gone. Re-check the file after upgrading
-> the demo: `gh api repos/open-telemetry/opentelemetry-demo/contents/src/flagd/demo.flagd.json --jq .content | base64 -d`
+> This project is pinned to a demo snapshot whose deployed flag document uses short keys such
+> as `adFailure`, `cartFailure`, and `paymentFailure`. The current
+> [official feature-flag reference](https://opentelemetry.io/docs/demo/feature-flags/)
+> uses several long keys such as `adServiceFailure`, `cartServiceFailure`, and
+> `paymentServiceFailure`. Do not rename eval injections until the deployed
+> deployment is upgraded; `ops_pilot chaos status` (flagd-ui `/api/read`) is the runtime source of truth.
 
 ## How the faults are implemented (important)
 
@@ -55,7 +57,8 @@ Consequences for an ops agent:
   pod that reads the same flag and misbehaves identically. The only real
   "cure" is turning the flag off. This is why ops_pilot targets a **diagnosis
   closed loop** (enable flag → RCA → correct root-cause statement, scored
-  against the flag as ground truth), and the kubernetes MCP is `--read-only`.
+  against the flag as ground truth). Kubernetes mutations remain available to
+  operators but are protected by HITL and are forbidden during eval.
 
 ### Localization granularity (what RCA can pinpoint)
 
@@ -80,9 +83,9 @@ scoring eval rubrics against the operation name.
 
 - **UI:** open the Feature Flags UI at `http://localhost:8080/feature/`, pick a
   flag, set its variant. flagd hot-reloads within seconds.
-- **JSON:** edit `src/flagd/demo.flagd.json`, change the flag's `defaultVariant`
-  (e.g. `off` → `on`, `50%`, or `10sec`). flagd watches the file / ConfigMap and
-  reloads. In k8s, edit the mounted ConfigMap.
+- **API:** use flagd-ui's official `/feature/api/read` and `/feature/api/write`
+  endpoints. `ops_pilot chaos set` and `chaos reset` access these through one
+  bounded Kubernetes port-forward. Experiments do not patch the Helm ConfigMap.
 
 Enable **one** flag at a time so a single fault is the known root cause.
 
@@ -122,7 +125,7 @@ Enable **one** flag at a time so a single fault is the known root cause.
 
 | Flag (ground truth) | Eval case id |
 | --- | --- |
-| `paymentFailure` (pct) | `otel-payment-failure-charge`, `otel-explain-payment-impact` |
+| `paymentFailure` (pct) | `otel-payment-failure-charge`, `otel-explain-payment-failure` |
 | `paymentUnreachable=on` | `otel-payment-unreachable` |
 | `productCatalogFailure=on` | `otel-product-catalog-failure` |
 | `cartFailure` (pct) | `otel-cart-failure-rate` |
@@ -130,4 +133,8 @@ Enable **one** flag at a time so a single fault is the known root cause.
 | `imageSlowLoad` (5s/10s) | `otel-image-slow-load` |
 | `kafkaQueueProblems=on` | `otel-kafka-queue-problems` |
 | `recommendationCacheFailure=on` | `otel-recommendation-cache-failure` |
-| `failedReadinessProbe=on` | `otel-status-pod-health` |
+| `adFailure=on` | `otel-ad-service-failure` |
+| `adManualGc=on` | `otel-ad-manual-gc` |
+| `emailMemoryLeak=100x` | `otel-email-memory-leak` |
+| `failedReadinessProbe=on` | `otel-cart-readiness-failure`, `otel-status-pod-health` |
+| `intlShippingSlowdown=10sec` | `otel-international-shipping-slowdown` |

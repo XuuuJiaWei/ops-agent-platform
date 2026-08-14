@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -14,21 +14,13 @@ from ops_pilot.agent.middleware import NormalizeSystemMessagesMiddleware
 from ops_pilot.config.settings import Settings, load_settings
 from ops_pilot.mcp.registry import MCPRegistry, create_mcp_registry
 from ops_pilot.models import create_chat_model
-from ops_pilot.observability.langfuse import TracingSetup, create_callback_handler
+from ops_pilot.observability.langfuse import TracingSetup, create_callback_handler, flush_tracing
 from ops_pilot.observability.metadata import build_model_metadata, build_runnable_config
-from ops_pilot.reliability.execution import (
-    CircuitBreakerPolicy,
-    ReliableToolExecutor,
-    RetryPolicy,
-)
-from ops_pilot.reliability.journal import create_execution_journal
-from ops_pilot.reliability.middleware import ReliableToolMiddleware
 from ops_pilot.reliability.run import RunController
 from ops_pilot.sandbox import SandboxManager, SandboxRuntime, create_sandbox_manager
 from ops_pilot.skills.resolver import resolve_skill_paths
 from ops_pilot.skills.sync import sync_skill_paths_to_backend
 from ops_pilot.spaces import MemorySpaceRepository, SpaceRepository, build_space_tools, create_space_repository
-from ops_pilot.tools.smoke_tools import get_smoke_tools
 
 if TYPE_CHECKING:
     from ops_pilot.eval.trace import AgentTrace
@@ -48,7 +40,6 @@ class AgentRuntime:
     spaces: SpaceRepository = field(default_factory=MemorySpaceRepository)
     space_repository_closer: Callable[[], Awaitable[None]] | None = None
     run_controller: RunController = field(default_factory=RunController)
-    execution_journal_closer: Callable[[], Awaitable[None]] | None = None
 
     def close(self) -> None:
         if self.sandbox is not None:
@@ -56,8 +47,6 @@ class AgentRuntime:
 
     async def aclose(self) -> None:
         try:
-            await self.mcp.aclose()
-        finally:
             try:
                 if self.checkpointer_closer is not None:
                     await self.checkpointer_closer()
@@ -66,11 +55,9 @@ class AgentRuntime:
                     if self.space_repository_closer is not None:
                         await self.space_repository_closer()
                 finally:
-                    try:
-                        if self.execution_journal_closer is not None:
-                            await self.execution_journal_closer()
-                    finally:
-                        self.close()
+                    self.close()
+        finally:
+            flush_tracing(self.tracing)
 
     def runnable_config(
         self,
@@ -125,10 +112,11 @@ class AgentRuntime:
                     configurable=configurable,
                     extra_metadata=extra_metadata,
                 ),
+                version="v2",
             )
 
         result = await self.run_controller.run(effective_run_id, invoke)
-        return _extract_result_text(result)
+        return _extract_result_text(_unwrap_graph_result(result))
 
     async def ainvoke_trace(
         self,
@@ -162,6 +150,7 @@ class AgentRuntime:
                     configurable=configurable,
                     extra_metadata=extra_metadata,
                 ),
+                version="v2",
             )
 
         try:
@@ -175,7 +164,7 @@ class AgentRuntime:
             if effective_deadline is None:
                 raise
             raise TimeoutError(f"Agent invocation timed out after {effective_deadline:g}s.") from exc
-        return build_agent_trace(result, latency_s=time.perf_counter() - started)
+        return build_agent_trace(_unwrap_graph_result(result), latency_s=time.perf_counter() - started)
 
     async def cancel_run(self, run_id: str, *, reason: str = "cancel requested") -> bool:
         return await self.run_controller.cancel(run_id, reason=reason)
@@ -186,6 +175,7 @@ async def build_agent_runtime(
     *,
     attach_checkpointer: bool = True,
     bypass_hitl: bool = False,
+    extra_tools: Sequence[Any] = (),
 ) -> AgentRuntime:
     """Build the shared DeepAgent runtime.
 
@@ -209,35 +199,10 @@ async def build_agent_runtime(
     checkpointer_closer: Callable[[], Awaitable[None]] | None = None
     space_repository: SpaceRepository | None = None
     space_repository_closer: Callable[[], Awaitable[None]] | None = None
-    execution_journal_closer: Callable[[], Awaitable[None]] | None = None
     try:
-        journal, execution_journal_closer = await create_execution_journal(resolved_settings)
-        tool_executor = ReliableToolExecutor(
-            journal=journal,
-            retry_policy=RetryPolicy(
-                max_attempts=resolved_settings.tool_retry_max_attempts,
-                initial_backoff_seconds=resolved_settings.tool_retry_initial_backoff_seconds,
-                backoff_multiplier=resolved_settings.tool_retry_backoff_multiplier,
-                jitter_ratio=resolved_settings.tool_retry_jitter_ratio,
-            ),
-            circuit_breaker_policy=CircuitBreakerPolicy(
-                failure_threshold=resolved_settings.circuit_breaker_failure_threshold,
-                recovery_timeout_seconds=resolved_settings.circuit_breaker_recovery_seconds,
-            ),
-        )
-        reliability_middleware = (
-            ReliableToolMiddleware(
-                executor=tool_executor,
-                tool_servers=mcp_registry.tool_servers,
-                retry_tools=set(mcp_registry.retry_tools),
-            )
-            if resolved_settings.reliability_enabled
-            else None
-        )
+        retry_middleware = _create_tool_retry_middleware(resolved_settings, mcp_registry.retry_tools)
         space_repository, space_repository_closer = await create_space_repository(resolved_settings)
-        tools = [*mcp_registry.tools, *build_space_tools(space_repository)]
-        if resolved_settings.enable_smoke_tools:
-            tools.extend(get_smoke_tools())
+        tools = [*mcp_registry.tools, *build_space_tools(space_repository), *extra_tools]
         checkpointer, checkpointer_closer = (
             await _create_checkpointer(resolved_settings) if attach_checkpointer else (None, None)
         )
@@ -253,18 +218,16 @@ async def build_agent_runtime(
             checkpointer=checkpointer,
             backend=sandbox.backend if sandbox is not None else None,
             interrupt_on=interrupt_on,
-            reliability_middleware=reliability_middleware,
+            retry_middleware=retry_middleware,
         )
     except Exception:
-        await mcp_registry.aclose()
         if checkpointer_closer is not None:
             await checkpointer_closer()
         if space_repository_closer is not None:
             await space_repository_closer()
-        if execution_journal_closer is not None:
-            await execution_journal_closer()
         if sandbox is not None:
             sandbox.close()
+        flush_tracing(tracing)
         raise
     assert space_repository is not None
     return AgentRuntime(
@@ -280,7 +243,6 @@ async def build_agent_runtime(
         spaces=space_repository,
         space_repository_closer=space_repository_closer,
         run_controller=run_controller,
-        execution_journal_closer=execution_journal_closer,
     )
 
 
@@ -316,6 +278,21 @@ def _resolve_backend_skill_paths(
     return sync_result.remote_paths
 
 
+def _create_tool_retry_middleware(settings: Settings, retry_tools: tuple[str, ...]) -> Any | None:
+    if not settings.reliability_enabled or not retry_tools:
+        return None
+    from langchain.agents.middleware import ToolRetryMiddleware
+
+    return ToolRetryMiddleware(
+        tools=list(retry_tools),
+        max_retries=max(0, settings.tool_retry_max_attempts - 1),
+        initial_delay=settings.tool_retry_initial_backoff_seconds,
+        backoff_factor=settings.tool_retry_backoff_multiplier,
+        jitter=settings.tool_retry_jitter_ratio > 0,
+        on_failure="continue",
+    )
+
+
 def _create_deep_agent(
     *,
     model: Any,
@@ -326,7 +303,7 @@ def _create_deep_agent(
     checkpointer: Any | None,
     backend: Any | None,
     interrupt_on: dict[str, Any] | None = None,
-    reliability_middleware: Any | None = None,
+    retry_middleware: Any | None = None,
 ) -> Any:
     try:
         from deepagents import create_deep_agent
@@ -348,8 +325,8 @@ def _create_deep_agent(
 
     copilotkit_middleware = _create_copilotkit_middleware()
     middleware = [NormalizeSystemMessagesMiddleware()]
-    if reliability_middleware is not None:
-        middleware.insert(0, reliability_middleware)
+    if retry_middleware is not None:
+        middleware.insert(0, retry_middleware)
     if copilotkit_middleware is not None:
         middleware.insert(0, copilotkit_middleware)
     kwargs["middleware"] = middleware
@@ -458,6 +435,14 @@ def _extract_result_text(result: Any) -> str:
             if value is not None:
                 return str(value)
     return _message_content(result)
+
+
+def _unwrap_graph_result(result: Any) -> Any:
+    """Normalize LangGraph v2 output and never present an interrupt as a final answer."""
+
+    if getattr(result, "interrupts", ()):
+        raise RuntimeError("Agent execution paused for human approval.")
+    return getattr(result, "value", result)
 
 
 def _message_content(message: Any) -> str:

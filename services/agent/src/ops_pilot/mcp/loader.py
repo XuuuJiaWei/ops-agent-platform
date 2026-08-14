@@ -1,4 +1,4 @@
-"""Load LangChain tools from deployment-level MCP server config."""
+"""Load LangChain tools with the official MCP adapter."""
 
 from __future__ import annotations
 
@@ -6,187 +6,112 @@ import asyncio
 import logging
 from typing import Any
 
+from langchain_mcp_adapters.client import MultiServerMCPClient
+
 from ops_pilot.config.mcp_schema import MCPConfig, MCPServerConfig
 from ops_pilot.config.settings import Settings
 from ops_pilot.errors import safe_exception_summary
-from ops_pilot.mcp.session import PersistentMCPServer
 from ops_pilot.mcp.status import MCPLoadResult, MCPLoadStatus, MCPServerLoadStatus
 
 logger = logging.getLogger(__name__)
 
 
 class MCPLoadError(RuntimeError):
-    """Raised when MCP tool loading cannot continue."""
+    """Raised when configured MCP tools cannot be loaded."""
 
 
 class RequiredMCPServerError(MCPLoadError):
-    """Raised when a required MCP server fails to load."""
+    """Raised when a required MCP server fails initialization."""
 
 
 async def load_mcp_tools(settings: Settings | MCPConfig) -> MCPLoadResult:
-    """Load configured MCP tools and collect per-server status.
+    """Initialize configured servers and return loop-neutral LangChain tools.
 
-    Accepts ``Settings`` (production path, reads the inline ``settings.mcp``
-    config) or an ``MCPConfig`` directly (dynamic developer-mode servers).
+    ``MultiServerMCPClient.get_tools`` owns the protocol lifecycle. The tools it
+    returns create a fresh MCP session for each call, so the compiled agent can
+    be invoked from Langfuse worker event loops without a local reconnect layer.
     """
 
-    if isinstance(settings, MCPConfig):
-        return await _load_from_config(settings, config_path=None)
+    config = settings if isinstance(settings, MCPConfig) else settings.mcp
+    config_path = None if isinstance(settings, MCPConfig) else "config.yaml"
+    if not config.servers:
+        return MCPLoadResult(tools=[], status=MCPLoadStatus(config_path=config_path))
 
-    if not settings.mcp.servers:
-        return MCPLoadResult(tools=[], status=MCPLoadStatus(config_path=None, servers=()))
+    client = MultiServerMCPClient(
+        {server.name: server.to_client_connection() for server in config.servers},
+        handle_tool_errors=True,
+    )
 
-    return await _load_from_config(settings.mcp, config_path="config.yaml")
+    async def load(server: MCPServerConfig) -> list[Any]:
+        return list(await client.get_tools(server_name=server.name))
 
-
-async def _load_from_config(config: MCPConfig, *, config_path: str | None) -> MCPLoadResult:
+    loaded = await asyncio.gather(*(load(server) for server in config.servers), return_exceptions=True)
     tools: list[Any] = []
     statuses: list[MCPServerLoadStatus] = []
     hitl_tools: list[str] = []
     retry_tools: list[str] = []
     tool_servers: dict[str, str] = {}
-    session_managers: list[PersistentMCPServer] = []
 
-    async def load(server: MCPServerConfig) -> Any:
-        return await _load_single_server_with_timeout(server)
-
-    results = await asyncio.gather(*(load(server) for server in config.servers), return_exceptions=True)
-    all_owners = [
-        owner
-        for result in results
-        if not isinstance(result, BaseException)
-        for _, owner in [_unpack_server_load_result(result)]
-        if owner is not None
-    ]
-
-    for server, result in zip(config.servers, results, strict=True):
+    for server, result in zip(config.servers, loaded, strict=True):
         if isinstance(result, BaseException):
-            exc = result
-            status = MCPServerLoadStatus(
-                name=server.name,
-                required=server.required,
-                transport=server.transport,
-                ok=False,
-                error=_safe_error(exc),
+            error = safe_exception_summary(result, limit=2000)
+            statuses.append(
+                MCPServerLoadStatus(
+                    name=server.name,
+                    required=server.required,
+                    transport=server.transport,
+                    ok=False,
+                    error=error,
+                )
             )
-            statuses.append(status)
             if server.required:
-                await _close_owners(all_owners)
-                raise RequiredMCPServerError(
-                    f"Required MCP server '{server.name}' failed to load: {status.error}"
-                ) from exc
-            logger.warning("Optional MCP server '%s' failed to load: %s", server.name, status.error)
+                raise RequiredMCPServerError(f"Required MCP server '{server.name}' failed to load: {error}") from result
+            logger.warning("Optional MCP server '%s' failed to load: %s", server.name, error)
             continue
 
-        server_tools, owner = _unpack_server_load_result(result)
-        kept_tools = _apply_allowlist(server, server_tools)
-        tools.extend(kept_tools)
-        hitl_tools.extend(_collect_hitl_tools(server, kept_tools))
-        kept_names = {_tool_name(tool) for tool in kept_tools}
-        tool_servers.update({name: server.name for name in kept_names})
-        retry_tools.extend(name for name in server.retry_tools if name in kept_names)
-        if owner is not None:
-            if kept_tools:
-                session_managers.append(owner)
-            else:
-                await owner.aclose()
+        server_tools = _allowed_tools(server, result)
+        names = {_tool_name(tool) for tool in server_tools}
+        _warn_unknown_policy_tools(server, names)
+        tools.extend(server_tools)
+        hitl_tools.extend(name for name in server.hitl_tools if name in names)
+        retry_tools.extend(name for name in server.retry_tools if name in names)
+        tool_servers.update({name: server.name for name in names})
         statuses.append(
             MCPServerLoadStatus(
                 name=server.name,
                 required=server.required,
                 transport=server.transport,
                 ok=True,
-                tool_count=len(kept_tools),
+                tool_count=len(server_tools),
             )
         )
-        logger.info("MCP server '%s' loaded %d tools", server.name, len(kept_tools))
 
-    status = MCPLoadStatus(config_path=config_path, servers=tuple(statuses))
-    logger.info(
-        "MCP runtime loaded %d/%d servers with %d tools",
-        sum(server.ok for server in statuses),
-        len(statuses),
-        status.tool_count,
-    )
     return MCPLoadResult(
         tools=tools,
-        status=status,
+        status=MCPLoadStatus(config_path=config_path, servers=tuple(statuses)),
         hitl_tools=tuple(dict.fromkeys(hitl_tools)),
-        session_managers=tuple(session_managers),
         tool_servers=tool_servers,
         retry_tools=tuple(dict.fromkeys(retry_tools)),
     )
 
 
-def _tool_name(tool: Any) -> str:
-    return str(getattr(tool, "name", ""))
-
-
-def _apply_allowlist(server: MCPServerConfig, tools: list[Any]) -> list[Any]:
-    """Keep only allowlisted tools. Empty/omitted ``allow_tools`` allows all."""
-
+def _allowed_tools(server: MCPServerConfig, tools: list[Any]) -> list[Any]:
     if not server.allow_tools:
         return tools
     allowed = set(server.allow_tools)
-    kept = [tool for tool in tools if _tool_name(tool) in allowed]
-    unmatched = allowed - {_tool_name(tool) for tool in tools}
-    if unmatched:
+    return [tool for tool in tools if _tool_name(tool) in allowed]
+
+
+def _warn_unknown_policy_tools(server: MCPServerConfig, loaded_names: set[str]) -> None:
+    configured = set(server.allow_tools) | set(server.hitl_tools) | set(server.retry_tools)
+    unknown = configured - loaded_names
+    if unknown:
         logger.warning(
-            "MCP server '%s' allow_tools entries matched no loaded tool: %s",
+            "MCP server '%s' policy entries matched no loaded tool: %s",
             server.name,
-            ", ".join(sorted(unmatched)),
+            ", ".join(sorted(unknown)),
         )
-    return kept
 
 
-def _collect_hitl_tools(server: MCPServerConfig, kept_tools: list[Any]) -> list[str]:
-    """Return hitl tool names that survived the allowlist; warn on non-matches."""
-
-    if not server.hitl_tools:
-        return []
-    kept_names = {_tool_name(tool) for tool in kept_tools}
-    hitl = [name for name in server.hitl_tools if name in kept_names]
-    unmatched = set(server.hitl_tools) - kept_names
-    if unmatched:
-        logger.warning(
-            "MCP server '%s' hitl_tools entries matched no loaded/allowed tool: %s",
-            server.name,
-            ", ".join(sorted(unmatched)),
-        )
-    return hitl
-
-
-async def _load_single_server(server: MCPServerConfig) -> tuple[list[Any], PersistentMCPServer]:
-    return await PersistentMCPServer.start(server)
-
-
-async def _load_single_server_with_timeout(server: MCPServerConfig) -> tuple[list[Any], PersistentMCPServer]:
-    if server.timeout is None:
-        return await _load_single_server(server)
-    try:
-        return await asyncio.wait_for(_load_single_server(server), timeout=server.timeout)
-    except TimeoutError as exc:
-        timeout = f"{server.timeout:g}"
-        raise MCPLoadError(f"MCP server '{server.name}' timed out after {timeout}s while loading tools.") from exc
-
-
-def _unpack_server_load_result(loaded: Any) -> tuple[list[Any], PersistentMCPServer | None]:
-    """Accept old test doubles while production returns tools plus session owner."""
-
-    if isinstance(loaded, tuple) and len(loaded) == 2:
-        tools, owner = loaded
-        return list(tools), owner
-    return list(loaded), None
-
-
-async def _close_owners(owners: list[PersistentMCPServer]) -> None:
-    seen: set[int] = set()
-    for owner in reversed(owners):
-        if id(owner) in seen:
-            continue
-        seen.add(id(owner))
-        await owner.aclose()
-
-
-def _safe_error(exc: BaseException) -> str:
-    return safe_exception_summary(exc, limit=2000)
+def _tool_name(tool: Any) -> str:
+    return str(getattr(tool, "name", ""))

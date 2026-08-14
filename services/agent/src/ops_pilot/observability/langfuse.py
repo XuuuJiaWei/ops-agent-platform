@@ -1,9 +1,7 @@
-"""Langfuse callback setup with local no-op behavior."""
+"""Langfuse's official singleton client and LangChain callback integration."""
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
-from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -25,8 +23,23 @@ class TracingSetup:
         }
 
 
+def get_langfuse_client(settings: Settings) -> Any:
+    """Configure once and return the SDK client registered for this project."""
+
+    from langfuse import Langfuse, get_client
+
+    Langfuse(
+        public_key=settings.langfuse_public_key,
+        secret_key=settings.langfuse_secret_key,
+        base_url=settings.langfuse_base_url,
+        timeout=settings.langfuse_timeout_seconds,
+        environment=settings.app_env,
+    )
+    return get_client(public_key=settings.langfuse_public_key)
+
+
 def create_callback_handler(settings: Settings) -> TracingSetup:
-    """Create a Langfuse callback handler or return disabled local status."""
+    """Create the official LangChain handler or a local no-op status."""
 
     missing = _missing_langfuse_keys(settings)
     if missing:
@@ -36,20 +49,15 @@ def create_callback_handler(settings: Settings) -> TracingSetup:
         )
 
     try:
-        from langfuse import Langfuse
         from langfuse.langchain import CallbackHandler
+
+        client = get_langfuse_client(settings)
     except ImportError as exc:
         return TracingSetup(
             enabled=False,
             warning=f"Langfuse tracing disabled; langfuse package import failed: {exc}",
         )
 
-    client = Langfuse(
-        public_key=settings.langfuse_public_key,
-        secret_key=settings.langfuse_secret_key,
-        base_url=settings.langfuse_base_url,
-        environment=settings.app_env,
-    )
     return TracingSetup(
         enabled=True,
         callbacks=(CallbackHandler(public_key=settings.langfuse_public_key),),
@@ -58,64 +66,10 @@ def create_callback_handler(settings: Settings) -> TracingSetup:
 
 
 def flush_tracing(tracing: TracingSetup) -> None:
-    """Flush tracing callbacks when the underlying handler exposes a flush API."""
+    """Flush buffered events without owning or replacing the SDK's OTel provider."""
 
-    targets = (*tracing.callbacks, tracing.client)
-    seen: set[int] = set()
-    for target in targets:
-        if target is None or id(target) in seen:
-            continue
-        seen.add(id(target))
-        flush = getattr(target, "flush", None)
-        if callable(flush):
-            flush()
-
-
-@contextmanager
-def observation(
-    tracing: TracingSetup,
-    *,
-    name: str,
-    as_type: str = "span",
-    input: Any | None = None,
-    metadata: Mapping[str, Any] | None = None,
-) -> Iterator[Any | None]:
-    """Create a current Langfuse observation or a transparent no-op context.
-
-    Framework callbacks executed inside this context inherit it through the
-    OpenTelemetry context, so LangChain generations and tools are nested under
-    the application-level agent/phase that actually owns them.
-    """
-
-    if not tracing.enabled or tracing.client is None:
-        yield None
-        return
-    with tracing.client.start_as_current_observation(
-        name=name,
-        as_type=as_type,
-        input=input,
-        metadata=dict(metadata or {}),
-    ) as current:
-        yield current
-
-
-def finish_observation(
-    current: Any | None,
-    *,
-    output: Any | None = None,
-    error: BaseException | None = None,
-    metadata: Mapping[str, Any] | None = None,
-) -> None:
-    """Update an optional observation with its terminal result."""
-
-    if current is None:
-        return
-    values: dict[str, Any] = {"output": output}
-    if metadata:
-        values["metadata"] = dict(metadata)
-    if error is not None:
-        values.update(level="ERROR", status_message=str(error) or type(error).__name__)
-    current.update(**values)
+    if tracing.client is not None:
+        tracing.client.flush()
 
 
 def _missing_langfuse_keys(settings: Settings) -> tuple[str, ...]:

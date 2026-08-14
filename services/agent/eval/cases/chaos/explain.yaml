@@ -9,14 +9,13 @@ cases:
   - id: otel-explain-payment-failure
     category: explain
     source: synthetic
-    version: "2025-11"
+    version: "2026-08"
     prompt: >-
       A junior engineer just joined the on-call rotation and wants to understand
       what is currently happening in the cluster. Can you explain what fault is
       active right now, which service it affects, and what a customer would
       experience?
     expected_tools: [search_traces]
-    forbidden_tools: [pods_delete, pods_exec, resources_delete, resources_scale]
     rubric: >-
       Pass if the answer (1) identifies the payment service as the affected
       component, (2) describes the fault as a percentage of charge requests

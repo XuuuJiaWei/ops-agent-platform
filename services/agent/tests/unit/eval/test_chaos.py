@@ -1,11 +1,17 @@
 from __future__ import annotations
 
-import json
+from collections.abc import Mapping
+from dataclasses import dataclass
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
+from ops_pilot.config.mcp_schema import MCPConfig
 from ops_pilot.config.settings import Settings
 from ops_pilot.eval import chaos
+from ops_pilot.eval.dataset import EvalCase, InjectSpec
+from ops_pilot.mcp.status import MCPLoadStatus, MCPServerLoadStatus
 
 
 def _document() -> dict:
@@ -26,92 +32,133 @@ def _document() -> dict:
     }
 
 
-def test_targeted_flag_activation_is_transactional(monkeypatch) -> None:
-    document = _document()
-    patched: list[dict] = []
-    monkeypatch.setattr(chaos, "read_flags", lambda _settings: document)
-    monkeypatch.setattr(chaos, "_patch_document", lambda _settings, value: patched.append(value))
-
-    original = chaos.set_flag(
-        Settings(),
+def test_targeted_flag_activation_replaces_the_complete_runtime_rule() -> None:
+    desired, original = chaos._document_with_flag(
+        _document(),
         "productCatalogFailure",
         "on",
         target={"product_id": "OLJCESPC7Z"},
     )
 
-    active = patched[-1]["flags"]["productCatalogFailure"]
+    active = desired["flags"]["productCatalogFailure"]
     assert original["targeting"]["if"][1:] == ["off", "off"]
     assert active["defaultVariant"] == "on"
     assert active["targeting"]["if"][1:] == ["on", "off"]
 
 
-def test_plain_activation_removes_targeting_that_can_override_default(monkeypatch) -> None:
-    document = _document()
-    monkeypatch.setattr(chaos, "read_flags", lambda _settings: document)
-    monkeypatch.setattr(chaos, "_patch_document", lambda *_args: None)
+def test_plain_activation_removes_targeting_that_overrides_the_default() -> None:
+    desired, _ = chaos._document_with_flag(_document(), "productCatalogFailure", "on")
 
-    chaos.set_flag(Settings(), "productCatalogFailure", "on")
-
-    active = document["flags"]["productCatalogFailure"]
+    active = desired["flags"]["productCatalogFailure"]
     assert active["defaultVariant"] == "on"
     assert "targeting" not in active
 
 
-def test_restore_flag_replaces_the_complete_spec(monkeypatch) -> None:
+def test_baseline_is_a_copy_with_all_known_faults_off() -> None:
     document = _document()
-    original = document["flags"]["productCatalogFailure"].copy()
-    document["flags"]["productCatalogFailure"] = {
-        "defaultVariant": "on",
-        "variants": {"on": True, "off": False},
-    }
-    monkeypatch.setattr(chaos, "read_flags", lambda _settings: document)
-    monkeypatch.setattr(chaos, "_patch_document", lambda *_args: None)
+    document["flags"]["productCatalogFailure"]["defaultVariant"] = "on"
 
-    chaos.restore_flag(Settings(), "productCatalogFailure", original)
+    baseline = chaos._baseline_document(document)
 
-    assert document["flags"]["productCatalogFailure"] == original
+    assert baseline["flags"]["productCatalogFailure"]["defaultVariant"] == "off"
+    assert "targeting" not in baseline["flags"]["productCatalogFailure"]
+    assert document["flags"]["productCatalogFailure"]["defaultVariant"] == "on"
 
 
-def test_evaluate_flag_uses_ofrep_with_target_context(monkeypatch) -> None:
-    captured: dict[str, object] = {}
+def test_validate_flag_catalog_requires_traffic_and_case_variants() -> None:
+    flags = {flag: {"defaultVariant": "off", "variants": {"off": False, "on": True}} for flag in chaos.FAULT_FLAGS}
+    flags["loadGeneratorTraffic"] = {"defaultVariant": "on", "variants": {"off": False, "on": True}}
+    inject = InjectSpec(flag="paymentFailure", variant="on")
 
-    def fake_kubectl(_settings, *args, input_text: str | None = None, timeout_seconds=None):
-        captured["args"] = args
-        assert input_text is not None
-        captured["body"] = json.loads(input_text)
-        captured["timeout_seconds"] = timeout_seconds
-        return '{"key":"productCatalogFailure","variant":"on","value":true}'
+    chaos.validate_flag_catalog({"flags": flags}, {"payment": inject})
 
-    monkeypatch.setattr(chaos, "_kubectl", fake_kubectl)
+    flags["loadGeneratorTraffic"]["defaultVariant"] = "off"
+    with pytest.raises(chaos.ChaosError, match="loadGeneratorTraffic"):
+        chaos.validate_flag_catalog({"flags": flags}, {"payment": inject})
 
-    result = chaos.evaluate_flag(
-        Settings(),
-        "productCatalogFailure",
-        context={"product_id": "OLJCESPC7Z"},
-    )
 
-    assert result["variant"] == "on"
-    assert captured["body"] == {"context": {"product_id": "OLJCESPC7Z"}}
-    captured_args = captured["args"]
-    assert isinstance(captured_args, tuple)
-    assert "--raw" in captured_args
+@dataclass
+class _FakeFlagd:
+    variants: list[str]
+    settings: Settings
+
+    async def read(self) -> dict[str, Any]:
+        return {"flags": {}}
+
+    async def write(self, document: Mapping[str, Any]) -> None:
+        del document
+
+    async def evaluate(
+        self,
+        flag: str,
+        context: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        del flag, context
+        return {"variant": self.variants.pop(0)}
 
 
 @pytest.mark.asyncio
-async def test_wait_for_flag_variant_requires_stable_reads(monkeypatch) -> None:
-    variants = iter(("off", "on", "on"))
-    monkeypatch.setattr(
-        chaos,
-        "evaluate_flag",
-        lambda *_args, **_kwargs: {"variant": next(variants)},
-    )
-    settings = Settings(
-        chaos_flag_sync_timeout_seconds=1,
-        chaos_poll_interval_seconds=0.001,
-        chaos_stable_reads=2,
+async def test_wait_for_flag_variant_requires_stable_ofrep_reads() -> None:
+    flagd = _FakeFlagd(
+        variants=["off", "on", "on"],
+        settings=Settings(
+            chaos_flag_sync_timeout_seconds=1,
+            chaos_poll_interval_seconds=0.001,
+            chaos_stable_reads=2,
+        ),
     )
 
-    result = await chaos.wait_for_flag_variant(settings, "productCatalogFailure", "on")
+    result = await chaos.wait_for_flag_variant(flagd, "productCatalogFailure", "on")
 
     assert result["attempts"] == 3
     assert result["evaluation"]["variant"] == "on"
+
+
+def _mcp_settings(*, required: bool = True) -> Settings:
+    return Settings(
+        mcp=MCPConfig.from_mapping(
+            {
+                "mcpServers": {
+                    "kubernetes": {
+                        "required": required,
+                        "transport": "stdio",
+                        "command": "kubernetes",
+                    },
+                    "prometheus": {
+                        "required": required,
+                        "transport": "stdio",
+                        "command": "prometheus",
+                    },
+                }
+            }
+        )
+    )
+
+
+def _runtime() -> SimpleNamespace:
+    statuses = tuple(
+        MCPServerLoadStatus(name=name, required=True, transport="stdio", ok=True, tool_count=1)
+        for name in ("kubernetes", "prometheus")
+    )
+    mcp = SimpleNamespace(
+        status=MCPLoadStatus(servers=statuses),
+        tool_names=("pods_list", "query"),
+    )
+    return SimpleNamespace(mcp=mcp)
+
+
+def test_mcp_preflight_requires_every_server_to_be_required() -> None:
+    with pytest.raises(chaos.ChaosError, match="required: true"):
+        chaos.validate_mcp_runtime(_mcp_settings(required=False), _runtime(), [])
+
+
+def test_mcp_preflight_rejects_missing_case_tool_without_calling_tools() -> None:
+    case = EvalCase(
+        id="payment",
+        prompt="investigate",
+        category="diagnosis",
+        expected_tools=("search_traces",),
+    )
+
+    with pytest.raises(ValueError, match="search_traces"):
+        chaos.validate_mcp_runtime(_mcp_settings(), _runtime(), [case])

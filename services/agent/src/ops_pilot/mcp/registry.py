@@ -17,7 +17,6 @@ class MCPRegistry:
     tools: tuple[Any, ...] = field(default_factory=tuple)
     status: MCPLoadStatus = field(default_factory=MCPLoadStatus)
     hitl_tools: tuple[str, ...] = field(default_factory=tuple)
-    session_managers: tuple[Any, ...] = field(default_factory=tuple)
     tool_servers: Mapping[str, str] = field(default_factory=dict)
     retry_tools: tuple[str, ...] = field(default_factory=tuple)
 
@@ -28,7 +27,6 @@ class MCPRegistry:
             tools=tuple(result.tools),
             status=result.status,
             hitl_tools=tuple(result.hitl_tools),
-            session_managers=tuple(result.session_managers),
             tool_servers=dict(result.tool_servers),
             retry_tools=tuple(result.retry_tools),
         )
@@ -43,16 +41,9 @@ class MCPRegistry:
             tools=tuple(result.tools),
             status=status,
             hitl_tools=tuple(result.hitl_tools),
-            session_managers=tuple(result.session_managers),
             tool_servers=dict(result.tool_servers),
             retry_tools=tuple(result.retry_tools),
         )
-
-    async def aclose(self) -> None:
-        for manager in reversed(self.session_managers):
-            aclose = getattr(manager, "aclose", None)
-            if aclose is not None:
-                await aclose()
 
     @property
     def tool_names(self) -> tuple[str, ...]:

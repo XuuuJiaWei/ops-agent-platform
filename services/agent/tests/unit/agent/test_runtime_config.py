@@ -47,7 +47,10 @@ def test_runnable_config_does_not_invent_recursion_limit_when_graph_has_no_bound
 @pytest.mark.asyncio
 async def test_ainvoke_trace_passes_the_case_deadline_to_run_controller() -> None:
     class Graph:
+        version: str | None = None
+
         async def ainvoke(self, *_args, **_kwargs):
+            self.version = _kwargs.get("version")
             return {"messages": [{"content": "done"}]}
 
     class Controller(RunController):
@@ -76,3 +79,20 @@ async def test_ainvoke_trace_passes_the_case_deadline_to_run_controller() -> Non
 
     assert trace.final_text == "done"
     assert controller.deadline_seconds == 42
+    assert runtime.graph.version == "v2"
+
+
+@pytest.mark.asyncio
+async def test_ainvoke_text_never_treats_a_hitl_interrupt_as_final_output() -> None:
+    class Result:
+        value = {"messages": [{"content": "I will check that now."}]}
+        interrupts = (object(),)
+
+    class Graph:
+        async def ainvoke(self, *_args, **_kwargs):
+            return Result()
+
+    runtime = AgentRuntime(graph=Graph(), settings=load_settings(env={}, config={}))
+
+    with pytest.raises(RuntimeError, match="human approval"):
+        await runtime.ainvoke_text("delete the pod", protocol="test")

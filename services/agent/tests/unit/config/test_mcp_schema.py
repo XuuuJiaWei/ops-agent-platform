@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 import pytest
 
 from ops_pilot.config.mcp_schema import MCPConfig, MCPConfigError
@@ -83,8 +85,32 @@ def test_mcp_config_passes_cwd_to_stdio_connection():
     assert dict(config.servers[0].to_client_connection())["cwd"] == str((REPO_ROOT / "config").resolve())
 
 
-def test_mcp_config_timeout_is_loader_only():
-    config = MCPConfig.from_mapping({"mcpServers": {"dyna": {"transport": "stdio", "command": "npx", "timeout": 5}}})
+def test_mcp_config_passes_read_timeout_to_official_session():
+    config = MCPConfig.from_mapping(
+        {
+            "mcpServers": {
+                "dyna": {
+                    "transport": "stdio",
+                    "command": "npx",
+                    "read_timeout_seconds": 7,
+                }
+            }
+        }
+    )
 
-    assert config.servers[0].timeout == 5.0
-    assert "timeout" not in config.servers[0].to_client_connection()
+    assert config.servers[0].read_timeout_seconds == 7.0
+    assert config.servers[0].to_client_connection().get("session_kwargs") == {
+        "read_timeout_seconds": timedelta(seconds=7)
+    }
+
+
+def test_mcp_config_rejects_http_timeout_on_stdio():
+    with pytest.raises(MCPConfigError, match="cannot use 'timeout'"):
+        MCPConfig.from_mapping({"mcpServers": {"dyna": {"transport": "stdio", "command": "npx", "timeout": 5}}})
+
+
+def test_mcp_config_rejects_nonpositive_read_timeout():
+    with pytest.raises(MCPConfigError, match="read_timeout_seconds"):
+        MCPConfig.from_mapping(
+            {"mcpServers": {"dyna": {"transport": "stdio", "command": "npx", "read_timeout_seconds": 0}}}
+        )

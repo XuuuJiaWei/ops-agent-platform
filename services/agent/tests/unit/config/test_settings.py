@@ -20,15 +20,19 @@ def test_load_settings_defaults_with_empty_config():
     assert settings.model_reasoning_mode == "adaptive"
     assert settings.model_reasoning_effort == "medium"
     assert settings.langfuse_enabled is False
-    assert settings.enable_smoke_tools is True
+    assert settings.langfuse_timeout_seconds == 30
     assert settings.mcp.servers == ()
     assert settings.reliability_enabled is True
     assert settings.run_deadline_seconds == 600.0
     assert settings.tool_retry_max_attempts == 3
-    assert settings.circuit_breaker_failure_threshold == 5
+    assert settings.chaos_namespace == "otel-demo"
+    assert settings.chaos_flagd_service == "flagd"
+    assert settings.chaos_flagd_service_port == 8016
+    assert settings.chaos_flagd_ui_port == 4000
     assert settings.chaos_flag_sync_timeout_seconds == 90
     assert settings.chaos_poll_interval_seconds == 1
     assert settings.chaos_stable_reads == 2
+    assert settings.chaos_signal_warmup_seconds == 15
 
 
 def test_load_settings_reads_reliability_policy() -> None:
@@ -41,8 +45,6 @@ def test_load_settings_reads_reliability_policy() -> None:
                 "initial_backoff_seconds": 0,
                 "backoff_multiplier": 3,
                 "jitter_ratio": 0,
-                "failure_threshold": 4,
-                "recovery_seconds": 15,
             }
         },
     )
@@ -52,8 +54,6 @@ def test_load_settings_reads_reliability_policy() -> None:
     assert settings.tool_retry_initial_backoff_seconds == 0
     assert settings.tool_retry_backoff_multiplier == 3
     assert settings.tool_retry_jitter_ratio == 0
-    assert settings.circuit_breaker_failure_threshold == 4
-    assert settings.circuit_breaker_recovery_seconds == 15
 
 
 def test_load_settings_reads_reasoning_policy():
@@ -70,15 +70,23 @@ def test_load_settings_reads_reasoning_policy():
     assert settings.model_reasoning_effort == "medium"
 
 
-def test_load_settings_reads_chaos_probe_policy():
+def test_load_settings_reads_chaos_readiness_policy():
     settings = load_settings(
         env={},
-        config={"chaos": {"flag_sync_timeout_seconds": 12, "poll_interval_seconds": 0.2, "stable_reads": 3}},
+        config={
+            "chaos": {
+                "flag_sync_timeout_seconds": 12,
+                "poll_interval_seconds": 0.2,
+                "stable_reads": 3,
+                "signal_warmup_seconds": 0,
+            }
+        },
     )
 
     assert settings.chaos_flag_sync_timeout_seconds == 12
     assert settings.chaos_poll_interval_seconds == 0.2
     assert settings.chaos_stable_reads == 3
+    assert settings.chaos_signal_warmup_seconds == 0
 
 
 def test_load_settings_reads_model_request_timeout():
@@ -155,12 +163,13 @@ def test_load_settings_reads_nested_regular_config():
 def test_load_settings_overlays_secrets_from_env():
     settings = load_settings(
         env={"LANGFUSE_PUBLIC_KEY": "pk", "LANGFUSE_SECRET_KEY": "sk"},
-        config={"langfuse": {"base_url": "https://lf.internal"}},
+        config={"langfuse": {"base_url": "https://lf.internal", "timeout_seconds": 45}},
     )
 
     assert settings.langfuse_public_key == "pk"
     assert settings.langfuse_secret_key == "sk"
     assert settings.langfuse_base_url == "https://lf.internal"
+    assert settings.langfuse_timeout_seconds == 45
     assert settings.langfuse_enabled is True
 
 

@@ -1,5 +1,5 @@
-# Offline smoke cases. Use only local smoke tools (add_numbers, local_echo),
-# so this dataset runs without Dynatrace or any external credentials.
+# Cluster-free smoke cases. The runner disables MCP and injects only local smoke
+# tools (add_numbers, local_echo); model-provider credentials are still required.
 cases:
   - id: smoke-add-numbers
     category: smoke

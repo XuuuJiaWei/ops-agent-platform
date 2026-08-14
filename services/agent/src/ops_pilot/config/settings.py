@@ -48,10 +48,10 @@ class Settings:
     system_prompt: str | None = None
     mcp: MCPConfig = field(default_factory=MCPConfig)
     skills_paths: tuple[Path, ...] = field(default_factory=tuple)
-    enable_smoke_tools: bool = True
     langfuse_public_key: str | None = None
     langfuse_secret_key: str | None = None
     langfuse_base_url: str | None = "https://cloud.langfuse.com"
+    langfuse_timeout_seconds: int = 30
     chat_base_path: str = "/chat"
     chat_host: str = "127.0.0.1"
     chat_port: int = 8123
@@ -67,11 +67,14 @@ class Settings:
     tool_retry_initial_backoff_seconds: float = 0.25
     tool_retry_backoff_multiplier: float = 2.0
     tool_retry_jitter_ratio: float = 0.2
-    circuit_breaker_failure_threshold: int = 5
-    circuit_breaker_recovery_seconds: float = 30.0
+    chaos_namespace: str = "otel-demo"
+    chaos_flagd_service: str = "flagd"
+    chaos_flagd_service_port: int = 8016
+    chaos_flagd_ui_port: int = 4000
     chaos_flag_sync_timeout_seconds: float = 90.0
     chaos_poll_interval_seconds: float = 1.0
     chaos_stable_reads: int = 2
+    chaos_signal_warmup_seconds: float = 15.0
     open_sandbox_enabled: bool = False
     open_sandbox_domain: str | None = None
     open_sandbox_api_key: str | None = None
@@ -246,10 +249,10 @@ def load_settings(env: Mapping[str, str] | None = None, *, config: Mapping[str, 
         system_prompt=_optional_str(config_data.get("system_prompt")),
         mcp=MCPConfig.from_mapping(config_data, env=secret_source),
         skills_paths=tuple(resolve_path(path) for path in _str_list(config_data.get("skills_paths"))),
-        enable_smoke_tools=_bool(config_data.get("enable_smoke_tools"), True),
         langfuse_public_key=_optional_str(secret_source.get("LANGFUSE_PUBLIC_KEY")),
         langfuse_secret_key=_optional_str(secret_source.get("LANGFUSE_SECRET_KEY")),
         langfuse_base_url=_optional_str(langfuse.get("base_url")),
+        langfuse_timeout_seconds=_positive_int(langfuse.get("timeout_seconds"), 30),
         chat_base_path=_str(server.get("chat_base_path"), "/chat"),
         chat_host=_str(server.get("chat_host"), "127.0.0.1"),
         chat_port=_int(server.get("chat_port"), 8123),
@@ -265,11 +268,14 @@ def load_settings(env: Mapping[str, str] | None = None, *, config: Mapping[str, 
         tool_retry_initial_backoff_seconds=_nonnegative_float(reliability.get("initial_backoff_seconds"), 0.25),
         tool_retry_backoff_multiplier=_positive_float(reliability.get("backoff_multiplier"), 2.0),
         tool_retry_jitter_ratio=_ratio(reliability.get("jitter_ratio"), 0.2),
-        circuit_breaker_failure_threshold=_positive_int(reliability.get("failure_threshold"), 5),
-        circuit_breaker_recovery_seconds=_positive_float(reliability.get("recovery_seconds"), 30.0),
+        chaos_namespace=_str(chaos.get("namespace"), "otel-demo"),
+        chaos_flagd_service=_str(chaos.get("flagd_service"), "flagd"),
+        chaos_flagd_service_port=_positive_int(chaos.get("flagd_service_port"), 8016),
+        chaos_flagd_ui_port=_positive_int(chaos.get("flagd_ui_port"), 4000),
         chaos_flag_sync_timeout_seconds=_positive_float(chaos.get("flag_sync_timeout_seconds"), 90.0),
         chaos_poll_interval_seconds=_positive_float(chaos.get("poll_interval_seconds"), 1.0),
         chaos_stable_reads=_positive_int(chaos.get("stable_reads"), 2),
+        chaos_signal_warmup_seconds=_nonnegative_float(chaos.get("signal_warmup_seconds"), 15.0),
         open_sandbox_enabled=open_sandbox_enabled,
         open_sandbox_domain=open_sandbox_domain,
         open_sandbox_api_key=open_sandbox_api_key,

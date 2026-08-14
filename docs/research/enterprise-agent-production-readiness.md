@@ -41,7 +41,7 @@ ops_pilot 已经不是“调用框架完成对话和工具调用”的普通 Dem
 | 企业级多租户平台 | SSO、RBAC/ABAC、租户隔离、配额、审计、数据治理 |
 | 可治理产品体系 | Agent/Tool/Skill registry、版本、灰度、回滚、SLO、事故响应 |
 
-ops_pilot 已处于第二阶段后半段。Postgres checkpoint、A2A task store 和 CopilotKit event replay 已补齐“重启后不完全丢失执行现场”的基础；当前已进一步实现首版可靠执行 contract，详见 [Agent Runtime 可靠执行设计](../reliability-execution.md)。
+ops_pilot 已处于第二阶段后半段。Postgres checkpoint、A2A task store 和 CopilotKit event replay 已补齐“重启后不完全丢失执行现场”的基础；当前只把 run deadline/cancel、显式幂等重试和 HITL 视为已实现可靠性能力。
 
 ## 二、框架能力不等于生产保证
 
@@ -62,7 +62,7 @@ ops_pilot 已处于第二阶段后半段。Postgres checkpoint、A2A task store 
 
 | 能力面 | 企业环境要求 | ops_pilot 当前状态 |
 | --- | --- | --- |
-| Runtime | 状态、恢复、deadline、取消、幂等、重试、熔断 | 已有 run deadline/cancel、MCP 工具账本、分类重试和 Server 级熔断；仍需运行指标与更多故障注入 |
+| Runtime | 状态、恢复、deadline、取消、幂等、重试、熔断 | 已有 run deadline/cancel 与显式幂等重试；下游幂等和依赖级熔断未实现 |
 | 工具治理 | 最小权限、身份感知授权、审批、动态凭证 | 有 allowlist、HITL、MCP；权限仍是部署级静态配置 |
 | 隔离 | 文件/命令/网络/密钥隔离 | 有远程沙箱、工作区隔离和资源限制；缺 egress 策略 |
 | 质量 | trajectory eval、安全回归、灰度 | 有 deterministic grader、LLM judge、Chaos Eval；未接 CI |
@@ -88,7 +88,7 @@ AG-UI/CopilotKit 与 A2A 复用同一个 Agent Runtime、模型、MCP registry�
 
 ### 2. MCP 生命周期与降级
 
-MCP 接入不只是 `get_tools()`：当前实现包含并发加载、persistent session、per-server timeout、required/optional 降级、allowlist、HITL 工具映射和错误脱敏。
+MCP 生命周期直接采用官方 `MultiServerMCPClient.get_tools()`：工具调用时由 adapter 建立 session；本项目只保留并发发现、required/optional、allowlist、HITL/retry 策略和错误脱敏。
 
 ### 3. 有分配策略的远程沙箱
 
@@ -184,21 +184,19 @@ pending → running → succeeded | failed | unknown
 
 ## 七、推荐的 Runtime seam
 
-可靠性逻辑不应分别写进 AG-UI、A2A、MCP loader 和 sandbox adapter。建议在协议 adapter 与 LangGraph graph 之间形成一个深的 execution module：
+协议 adapter 只应调用共享 Runtime；MCP session、工具重试和 HITL 分别交给官方 adapter/middleware。应用层只拥有 run deadline/cancel 与下游明确提供的幂等/对账契约：
 
 ```text
 AG-UI adapter ─┐
                ├─ AgentExecutionRunner.run(request, policy)
 A2A adapter ───┘       ├─ deadline / cancellation
                        ├─ run state / recovery
-                       ├─ idempotency journal
-                       ├─ retry classification
-                       └─ dependency circuit breakers
+                       └─ downstream idempotency/reconcile contract
                                   ↓
-                       LangGraph + model + tools + sandbox
+                       LangGraph + official middleware + MCP adapter
 ```
 
-外部 interface 应保持小：调用者只提供输入、thread/run identity 和 execution policy；复杂的重试顺序、剩余时间计算、幂等状态机与清理留在 implementation 内。测试也应从这个 interface 验证可观察结果，而不是绑定内部 `asyncio` task 或具体 SDK 异常。
+外部 interface 应保持小：调用者只提供输入、thread/run identity 和 execution policy；SDK 已经承担的生命周期不在本项目复制。测试从 interface 验证可观察结果，而不是绑定内部 `asyncio` task 或具体 SDK 异常。
 
 ## 八、项目表达
 

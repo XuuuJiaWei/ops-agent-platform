@@ -1,26 +1,37 @@
 import asyncio
+from collections.abc import Awaitable, Callable
+from typing import Any, cast
 
 import pytest
 
 from ops_pilot.config.interpolation import MissingEnvironmentError
 from ops_pilot.config.mcp_schema import MCPConfig
 from ops_pilot.mcp import loader
-from ops_pilot.mcp.loader import RequiredMCPServerError, _safe_error, load_mcp_tools
+from ops_pilot.mcp.loader import RequiredMCPServerError, load_mcp_tools
 
 
-def test_safe_error_unwraps_exception_groups() -> None:
-    error = ExceptionGroup(
-        "unhandled errors in a TaskGroup",
-        [RuntimeError("MCP server 'kubernetes' is not connected.")],
-    )
+class _FakeClient:
+    results: dict[str, Any] = {}
 
-    assert _safe_error(error) == "MCP server 'kubernetes' is not connected."
+    def __init__(self, connections, **kwargs):
+        self.connections = connections
+        self.kwargs = kwargs
+
+    async def get_tools(self, *, server_name):
+        result = self.results[server_name]
+        if isinstance(result, BaseException):
+            raise result
+        if callable(result):
+            return await cast(Callable[[], Awaitable[Any]], result)()
+        return result
+
+
+def _install_client(monkeypatch, results: dict[str, Any]) -> None:
+    _FakeClient.results = results
+    monkeypatch.setattr(loader, "MultiServerMCPClient", _FakeClient)
 
 
 def test_missing_env_reference_fails_fast_at_config_build(monkeypatch) -> None:
-    # New architecture: interpolation happens once at config construction and a
-    # missing var fails fast for ANY server (required or optional), rather than
-    # degrading per-server at load time.
     monkeypatch.delenv("DT_MISSING_TOKEN", raising=False)
 
     with pytest.raises(MissingEnvironmentError, match="DT_MISSING_TOKEN"):
@@ -69,67 +80,58 @@ def test_missing_url_var_fails_fast() -> None:
 
 
 @pytest.mark.asyncio
-async def test_optional_server_timeout_does_not_block_other_servers(monkeypatch) -> None:
-    async def slow_load(_server):
-        await asyncio.sleep(10)
-
-    monkeypatch.setattr(loader, "_load_single_server", slow_load)
+async def test_optional_server_failure_does_not_block_other_servers(monkeypatch) -> None:
+    _install_client(monkeypatch, {"broken": ConnectionError("TLS EOF"), "healthy": []})
     config = MCPConfig.from_mapping(
         {
             "mcpServers": {
-                "slow": {
-                    "transport": "stdio",
-                    "command": "npx",
-                    "timeout": 0.01,
-                }
+                "broken": {"transport": "stdio", "command": "broken"},
+                "healthy": {"transport": "stdio", "command": "healthy"},
             }
         }
     )
 
     result = await load_mcp_tools(config)
 
-    assert result.tools == []
-    assert result.status.servers[0].ok is False
-    assert result.status.servers[0].error is not None
-    assert "timed out after 0.01s" in result.status.servers[0].error
+    assert [status.ok for status in result.status.servers] == [False, True]
+    assert result.status.servers[0].error == "TLS EOF"
 
 
 @pytest.mark.asyncio
-async def test_required_server_timeout_fails_startup(monkeypatch) -> None:
-    async def slow_load(_server):
-        await asyncio.sleep(10)
-
-    monkeypatch.setattr(loader, "_load_single_server", slow_load)
+async def test_required_server_failure_fails_startup(monkeypatch) -> None:
+    _install_client(monkeypatch, {"required": ConnectionError("TLS EOF")})
     config = MCPConfig.from_mapping(
         {
             "mcpServers": {
-                "slow": {
+                "required": {
                     "required": True,
                     "transport": "stdio",
-                    "command": "npx",
-                    "timeout": 0.01,
+                    "command": "required",
                 }
             }
         }
     )
 
-    with pytest.raises(RequiredMCPServerError, match="timed out after 0.01s"):
+    with pytest.raises(RequiredMCPServerError, match="required.*TLS EOF"):
         await load_mcp_tools(config)
 
 
 @pytest.mark.asyncio
-async def test_servers_are_started_concurrently(monkeypatch) -> None:
+async def test_servers_are_loaded_concurrently(monkeypatch) -> None:
     both_started = asyncio.Event()
     started: set[str] = set()
 
-    async def coordinated_load(server):
-        started.add(server.name)
-        if started == {"one", "two"}:
-            both_started.set()
-        await asyncio.wait_for(both_started.wait(), timeout=0.2)
-        return []
+    def coordinated(name: str):
+        async def load():
+            started.add(name)
+            if started == {"one", "two"}:
+                both_started.set()
+            await asyncio.wait_for(both_started.wait(), timeout=0.2)
+            return []
 
-    monkeypatch.setattr(loader, "_load_single_server", coordinated_load)
+        return load
+
+    _install_client(monkeypatch, {"one": coordinated("one"), "two": coordinated("two")})
     config = MCPConfig.from_mapping(
         {
             "mcpServers": {

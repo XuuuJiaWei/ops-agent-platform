@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,7 +25,8 @@ class EvalDatasetError(ValueError):
 class InjectSpec:
     """A chaos fault to inject before running a diagnosis case.
 
-    ``flag``/``variant`` drive the flagd ConfigMap (see ``eval/chaos.py``).
+    ``flag``/``variant`` drive flagd through the demo's flagd-ui API (see
+    ``eval/chaos.py``).
     ``target`` optionally describes the OpenFeature evaluation context that
     should receive the injected variant. Readiness and recovery are verified
     against flagd's OFREP data plane rather than represented as fixed sleeps in
@@ -227,6 +229,38 @@ def validate_dataset_schema(cases: Iterable[Any]) -> None:
         )
 
 
+def validate_dataset_matches_local(local_cases: Iterable[EvalCase], online_items: Iterable[Any]) -> None:
+    """Require selected Langfuse items to be exact mirrors of local YAML cases."""
+
+    online_by_id = {str(_item_metadata(item).get("id") or getattr(item, "id", "")): item for item in online_items}
+    mismatches: list[str] = []
+    for case in local_cases:
+        item = online_by_id.get(case.id)
+        if item is None:
+            mismatches.append(f"{case.id}: missing online item")
+            continue
+        mismatches.extend(f"{case.id}: {difference}" for difference in _dataset_item_differences(case, item))
+    if mismatches:
+        raise EvalDatasetError(
+            "Langfuse dataset is not an exact mirror of local YAML after sync: " + "; ".join(mismatches)
+        )
+
+
+def _dataset_item_differences(case: EvalCase, item: Any) -> tuple[str, ...]:
+    actual_input = item.get("input") if isinstance(item, Mapping) else getattr(item, "input", None)
+    actual_expected = (
+        item.get("expected_output") if isinstance(item, Mapping) else getattr(item, "expected_output", None)
+    )
+    differences: list[str] = []
+    if actual_input != case.prompt:
+        differences.append("input differs")
+    if actual_expected != case.expected_output:
+        differences.append("expected_output differs")
+    if _item_metadata(item) != case.metadata():
+        differences.append("metadata differs")
+    return tuple(differences)
+
+
 def _iter_yaml_files(directory: Path) -> list[Path]:
     return [*directory.glob("*.yaml"), *directory.glob("*.yml")]
 
@@ -276,43 +310,88 @@ def sync_cases_to_langfuse(
     return count
 
 
+def sync_and_verify_cases_to_langfuse(
+    cases: Iterable[EvalCase],
+    dataset_name: str,
+    settings: Settings | None = None,
+    *,
+    langfuse: Any,
+) -> tuple[Any, ...]:
+    """Push local truth, read it back, verify exact equality, and preserve local order."""
+
+    local_cases = tuple(cases)
+    _ensure_langfuse_dataset(langfuse, dataset_name)
+    dataset = langfuse.get_dataset(dataset_name)
+    existing_by_id = {str(item.id): item for item in dataset.items}
+    dirty = tuple(
+        case
+        for case in local_cases
+        if case.id not in existing_by_id or _dataset_item_differences(case, existing_by_id[case.id])
+    )
+    for case in dirty:
+        langfuse.create_dataset_item(
+            dataset_name=dataset_name,
+            id=case.id,
+            input=case.prompt,
+            expected_output=case.expected_output,
+            metadata=case.metadata(),
+        )
+    if dirty:
+        flush = getattr(langfuse, "flush", None)
+        if callable(flush):
+            flush()
+        dataset = langfuse.get_dataset(dataset_name)
+    online_by_id = {str(item.id): item for item in dataset.items}
+    missing = [case.id for case in local_cases if case.id not in online_by_id]
+    if missing:
+        raise EvalDatasetError("Langfuse sync completed but items are still missing: " + ", ".join(missing))
+    ordered = tuple(online_by_id[case.id] for case in local_cases)
+    validate_dataset_schema(ordered)
+    validate_dataset_matches_local(local_cases, ordered)
+    return ordered
+
+
 def create_langfuse_client(settings: Settings | None = None) -> Any:
     try:
-        from langfuse import Langfuse, get_client
+        from langfuse import get_client
     except ImportError as exc:
         raise EvalDatasetError("Langfuse package is not installed; run `uv sync` in services/agent.") from exc
     if settings is None:
         return get_client()
-    return Langfuse(
-        public_key=settings.langfuse_public_key,
-        secret_key=settings.langfuse_secret_key,
-        base_url=settings.langfuse_base_url,
-        environment=settings.app_env,
-    )
+    from ops_pilot.observability.langfuse import get_langfuse_client
+
+    return get_langfuse_client(settings)
 
 
-def langfuse_client_is_reachable(langfuse: Any) -> bool:
+def langfuse_client_is_reachable(
+    langfuse: Any,
+    *,
+    attempts: int = 3,
+    backoff_seconds: float = 1.0,
+) -> bool:
     """Verify connectivity to a (self-hosted) Langfuse instance before running an experiment."""
 
     auth_check = getattr(langfuse, "auth_check", None)
     if not callable(auth_check):
         return True
-    try:
-        return bool(auth_check())
-    except Exception:  # noqa: BLE001 - unreachable host / bad creds must degrade, not crash.
-        return False
+    for attempt in range(1, attempts + 1):
+        try:
+            if auth_check():
+                return True
+        except Exception:  # noqa: BLE001 - unreachable host / bad creds remain fail-closed after retries.
+            pass
+        if attempt < attempts:
+            time.sleep(backoff_seconds * attempt)
+    return False
 
 
 def close_langfuse_client(langfuse: Any) -> None:
     """Flush and shut down a Langfuse client so short-lived runs upload before exit."""
 
-    for method_name in ("flush", "shutdown"):
-        method = getattr(langfuse, method_name, None)
-        if callable(method):
-            try:
-                method()
-            except Exception:  # noqa: BLE001 - best-effort teardown at process boundary.
-                pass
+    try:
+        langfuse.shutdown()
+    except Exception:  # noqa: BLE001 - best-effort teardown at process boundary.
+        pass
 
 
 def _ensure_langfuse_dataset(langfuse: Any, dataset_name: str) -> None:

@@ -6,6 +6,7 @@ import json
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -36,6 +37,7 @@ class MCPServerConfig:
     headers: Mapping[str, str] = field(default_factory=dict)
     env: Mapping[str, str] = field(default_factory=dict)
     timeout: float | None = None
+    read_timeout_seconds: float | None = None
     allow_tools: tuple[str, ...] = field(default_factory=tuple)
     hitl_tools: tuple[str, ...] = field(default_factory=tuple)
     retry_tools: tuple[str, ...] = field(default_factory=tuple)
@@ -70,6 +72,11 @@ class MCPServerConfig:
             headers=expand_mapping(_string_mapping(name, "headers", data.get("headers", {})), env),
             env=expand_mapping(_string_mapping(name, "env", data.get("env", {})), env),
             timeout=parsed_timeout,
+            read_timeout_seconds=_optional_positive_float(
+                name,
+                "read_timeout_seconds",
+                data.get("read_timeout_seconds"),
+            ),
             allow_tools=_string_list(name, "allow_tools", data.get("allow_tools", ())),
             hitl_tools=_string_list(name, "hitl_tools", data.get("hitl_tools", ())),
             retry_tools=_string_list(name, "retry_tools", data.get("retry_tools", ())),
@@ -80,6 +87,11 @@ class MCPServerConfig:
     def validate(self) -> None:
         if self.transport == "stdio" and not self.command:
             raise MCPConfigError(f"MCP stdio server '{self.name}' requires a command.")
+        if self.transport == "stdio" and self.timeout is not None:
+            raise MCPConfigError(
+                f"MCP stdio server '{self.name}' cannot use 'timeout'; "
+                "use read_timeout_seconds for the official ClientSession deadline."
+            )
         if self.transport in {"http", "streamable_http", "sse"} and not self.url:
             raise MCPConfigError(f"MCP {self.transport} server '{self.name}' requires a url.")
 
@@ -96,8 +108,14 @@ class MCPServerConfig:
             connection["url"] = self.url
         if self.headers:
             connection["headers"] = dict(self.headers)
+        if self.timeout is not None and transport in {"streamable_http", "sse"}:
+            connection["timeout"] = self.timeout
         if self.env:
             connection["env"] = dict(self.env)
+        if self.read_timeout_seconds is not None:
+            connection["session_kwargs"] = {
+                "read_timeout_seconds": timedelta(seconds=self.read_timeout_seconds),
+            }
         return cast("Connection", connection)
 
     def to_langchain_config(self) -> Connection:
@@ -189,3 +207,12 @@ def _string_list(name: str, field_name: str, value: Any) -> tuple[str, ...]:
     if not isinstance(value, list | tuple) or not all(isinstance(item, str) for item in value):
         raise MCPConfigError(f"MCP server '{name}' field '{field_name}' must be a list of strings.")
     return tuple(value)
+
+
+def _optional_positive_float(name: str, field_name: str, value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    parsed = float(value)
+    if parsed <= 0:
+        raise MCPConfigError(f"MCP server '{name}' field '{field_name}' must be positive.")
+    return parsed

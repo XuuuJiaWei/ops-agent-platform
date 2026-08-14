@@ -37,7 +37,7 @@ class FakeBackend:
 def test_sync_collection_skills_directory_to_remote_backend(tmp_path) -> None:
     skill_dir = tmp_path / "examples" / "ops-basic"
     skill_dir.mkdir(parents=True)
-    (skill_dir / "SKILL.md").write_text("---\nname: ops-basic\n---\n", encoding="utf-8")
+    (skill_dir / "SKILL.md").write_text("---\nname: ops-basic\n---\n", encoding="utf-8", newline="\n")
     scripts = skill_dir / "scripts"
     scripts.mkdir()
     (scripts / "check.py").write_text("print('ok')\n", encoding="utf-8")
@@ -58,7 +58,7 @@ def test_sync_collection_skills_directory_to_remote_backend(tmp_path) -> None:
 def test_sync_nested_skills_container_expands_to_discoverable_sources(tmp_path) -> None:
     skill_dir = tmp_path / "skills" / "examples" / "ops-basic"
     skill_dir.mkdir(parents=True)
-    (skill_dir / "SKILL.md").write_text("---\nname: ops-basic\n---\n", encoding="utf-8")
+    (skill_dir / "SKILL.md").write_text("---\nname: ops-basic\n---\n", encoding="utf-8", newline="\n")
     backend = FakeBackend()
 
     result = sync_skill_paths_to_backend([tmp_path / "skills"], backend, remote_root="/remote")
@@ -70,10 +70,10 @@ def test_sync_nested_skills_container_expands_to_discoverable_sources(tmp_path) 
 def test_sync_mixed_real_and_example_skills_uploads_only_skill_dirs(tmp_path) -> None:
     real_skill = tmp_path / "skills" / "mongo-atlas-dynatrace"
     real_skill.mkdir(parents=True)
-    (real_skill / "SKILL.md").write_text("---\nname: mongo\n---\n", encoding="utf-8")
+    (real_skill / "SKILL.md").write_text("---\nname: mongo\n---\n", encoding="utf-8", newline="\n")
     example_skill = tmp_path / "skills" / "examples" / "ops-basic"
     example_skill.mkdir(parents=True)
-    (example_skill / "SKILL.md").write_text("---\nname: ops-basic\n---\n", encoding="utf-8")
+    (example_skill / "SKILL.md").write_text("---\nname: ops-basic\n---\n", encoding="utf-8", newline="\n")
     (tmp_path / "skills" / "README.md").write_text("not a skill\n", encoding="utf-8")
     backend = FakeBackend()
 
@@ -90,7 +90,7 @@ def test_sync_mixed_real_and_example_skills_uploads_only_skill_dirs(tmp_path) ->
 def test_sync_single_skill_directory_as_discoverable_source(tmp_path) -> None:
     skill_dir = tmp_path / "ops-basic"
     skill_dir.mkdir()
-    (skill_dir / "SKILL.md").write_text("---\nname: ops-basic\n---\n", encoding="utf-8")
+    (skill_dir / "SKILL.md").write_text("---\nname: ops-basic\n---\n", encoding="utf-8", newline="\n")
     backend = FakeBackend()
 
     result = sync_skill_paths_to_backend([skill_dir], backend, remote_root="/remote")
@@ -103,7 +103,7 @@ def test_sync_skill_md_file_as_discoverable_source(tmp_path) -> None:
     skill_dir = tmp_path / "ops-basic"
     skill_dir.mkdir()
     skill_md = skill_dir / "SKILL.md"
-    skill_md.write_text("---\nname: ops-basic\n---\n", encoding="utf-8")
+    skill_md.write_text("---\nname: ops-basic\n---\n", encoding="utf-8", newline="\n")
     backend = FakeBackend()
 
     result = sync_skill_paths_to_backend([skill_md], backend, remote_root="/remote")
@@ -115,7 +115,7 @@ def test_sync_skill_md_file_as_discoverable_source(tmp_path) -> None:
 def test_sync_reports_upload_failures(tmp_path) -> None:
     skill_dir = tmp_path / "examples" / "ops-basic"
     skill_dir.mkdir(parents=True)
-    (skill_dir / "SKILL.md").write_text("---\nname: ops-basic\n---\n", encoding="utf-8")
+    (skill_dir / "SKILL.md").write_text("---\nname: ops-basic\n---\n", encoding="utf-8", newline="\n")
     backend = FakeBackend(upload_error="permission_denied")
 
     with pytest.raises(RuntimeError, match="Failed to upload skill files"):

@@ -4,36 +4,19 @@ import asyncio
 
 import pytest
 
-from ops_pilot.reliability.execution import MemoryExecutionJournal, ReliableToolExecutor, ToolCall
 from ops_pilot.reliability.run import RunController, RunStatus
 
 
 @pytest.mark.asyncio
 async def test_stop_during_slow_mcp_call_cancels_run_before_dangerous_tool() -> None:
     controller = RunController()
-    journal = MemoryExecutionJournal()
-    executor = ReliableToolExecutor(journal=journal)
     slow_tool_entered = asyncio.Event()
     actions: list[str] = []
 
     async def workflow() -> None:
-        async def slow_query() -> str:
-            actions.append("slow-query-started")
-            slow_tool_entered.set()
-            await asyncio.Event().wait()
-            return "unreachable"
-
-        await executor.execute(
-            ToolCall(
-                run_id="run-stop",
-                tool_call_id="slow-call",
-                tool_name="slow_query",
-                arguments={},
-                dependency="prometheus-mcp",
-                retry_safe=True,
-            ),
-            slow_query,
-        )
+        actions.append("slow-query-started")
+        slow_tool_entered.set()
+        await asyncio.Event().wait()
         actions.append("dangerous-tool-executed")
 
     task = asyncio.create_task(controller.run("run-stop", workflow))

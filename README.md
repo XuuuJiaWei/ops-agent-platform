@@ -27,9 +27,8 @@ The product currently exposes three primary surfaces:
 - CopilotKit-compatible chat streaming through AG-UI.
 - A2A agent card discovery and JSON-RPC execution through the official Python SDK.
 - Durable LangGraph checkpoints, A2A tasks, CopilotKit event replay, and agent-authored Spaces through PostgreSQL.
-- Reliable MCP execution with tool-call deduplication, bounded retry with jitter,
-  server-local circuit breakers, run deadlines, cancellation, and explicit
-  `unknown` outcomes for ambiguous non-idempotent writes.
+- Official `MultiServerMCPClient` tool lifecycle, bounded retry for explicitly
+  idempotent tools, run deadlines, and cancellation.
 - Human-in-the-loop approval for configured high-risk tools and optional remote
   sandbox isolation for filesystem and command execution.
 - Optional Langfuse tracing when credentials are configured.
@@ -175,12 +174,12 @@ model credentials.
 
 ## Reliability Semantics
 
-The runtime does not claim mathematical exactly-once execution across an
-external side-effecting system. It uses a durable `(run_id, tool_call_id)`
-journal and returns cached terminal results for duplicate calls. Read-only or
-explicitly idempotent tools may be retried; an ambiguous failure from a
-non-idempotent write is recorded as `unknown` and must be reconciled rather
-than repeated blindly. See [Reliable Agent Execution](docs/reliability-execution.md).
+The runtime does not claim exactly-once execution across external systems.
+LangChain's official `ToolRetryMiddleware` is enabled only for tools listed in
+`retry_tools`; destructive and non-idempotent tools belong in `hitl_tools` and
+are never retried automatically. Protocol-level deadlines and cancellation are
+owned by `RunController`. Business idempotency must be implemented by the
+downstream service rather than simulated by an in-process tool-call journal.
 
 ## License
 

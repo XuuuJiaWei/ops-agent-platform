@@ -12,12 +12,12 @@
 
 **已扎实：** 协议无关统一 Runtime（CopilotKit/AG-UI + Google A2A 复用 factory）、MCP 动态工具加载（并发/超时/降级）、HITL 审批、Langfuse tracing、Eval 体系（dataset + LLM-as-judge + chaos 故障注入）、OpenSandbox 远程沙箱、Postgres checkpoint/A2A task/AG-UI event 分层持久化、自适应推理 + per-call 超时。
 
-**代码实测缺口（提升抓手）：** 可靠执行 P0 的首版实现见 [Agent Runtime 可靠执行设计](reliability-execution.md)。
+**代码实测原则：** 当前 runtime 优先组合 LangChain、DeepAgents、LangGraph 与 MCP adapter 的官方原语；下游幂等、对账和隔离熔断仍是 roadmap，不包装成已实现能力。
 
 | 缺口 | 位置 | 影响 |
 | --- | --- | --- |
-| 可靠性指标尚未输出 | 已实现 deadline/cancel、账本、retry、circuit | 仍需 retry/circuit/cancel latency 的 OTel/Langfuse 信号 |
-| 下游业务幂等键未标准化 | Runtime 已按 tool call 去重；外部 MCP 未统一接收 key | “下游成功、账本写入前崩溃”仍需 reconcile |
+| 可靠性指标尚未输出 | 已实现 deadline/cancel 与官方幂等工具 retry | 仍需 retry/cancel latency 的 OTel/Langfuse 信号 |
+| 下游业务幂等键未标准化 | Runtime 不伪造 exactly-once；外部 MCP 未统一接收 key | 响应丢失时仍需 reconcile |
 | 可靠性故障注入未进 CI | 5 个关键场景已有 deterministic tests | 尚未成为持续 Eval/发布门禁 |
 | 无长期记忆 | runtime 注释 "long-term/semantic memory intentionally not configured" | 与普通 chatbot 无本质差别 |
 | 无 CI | 无 `.github/workflows` | prompt/工具变更无回归门禁 |
@@ -34,8 +34,8 @@
 | 方向 | 现状 → 目标 | 面试收益 | 优先级 |
 | --- | --- | --- | --- |
 | **统一 deadline + cancel** ⭐ | 首版已落地 AG-UI/A2A run controller → 继续传播剩余预算并补 cancel latency | 长任务可终止、资源可回收、状态可恢复 | P0 |
-| **副作用幂等** ⭐ | MCP 执行账本已落地 → 推进下游 idempotency key/reconcile contract | 证明重试和恢复不会重复执行危险动作 | P0 |
-| **分类重试 + 熔断** ⭐ | 首版已按工具语义重试、按 MCP Server 熔断 → 增加指标和多副本策略 | 受控恢复与故障隔离 | P0 |
+| **副作用幂等** ⭐ | 未实现 → 推进下游 idempotency key/reconcile contract | 证明恢复不会重复执行危险动作 | P0 |
+| **分类重试 + 熔断** ⭐ | 官方 ToolRetryMiddleware 已用于显式幂等工具；依赖级熔断未实现 | 受控恢复与故障隔离 | P0 |
 | **分层记忆** | 无 → short-term(checkpointer) + long-term(Store + pgvector 语义检索) | Agent vs Chatbot 分水岭 | P2 |
 | 上下文管理 | 无压缩 → 滑动窗口 + 摘要 + 工具输出结构化去重 | 防 token 爆炸 | P1 |
 | Token 预算/成本控制 | 仅 per-call timeout → 会话/租户级 token 硬上限 | 成本墙意识 | P2 |
@@ -191,8 +191,8 @@ LangGraph 有两个**正交**的持久化概念，不是「短期存哪、长期
 
 | 阶段 | 内容 |
 | --- | --- |
-| **已完成首版** | run deadline/cancel、MCP 工具执行账本、分类重试、Server 级熔断、5 类 deterministic tests |
-| **下一阶段** | 下游 idempotency key/reconcile contract + retry/circuit/cancel 指标 + fault adapter |
+| **已完成首版** | run deadline/cancel、官方幂等工具重试、HITL、安全 grader 与 deterministic tests |
+| **下一阶段** | 下游 idempotency key/reconcile contract + retry/cancel 指标 + fault adapter |
 | **形成闭环** | 把可靠性场景接入 CI Eval；补 OTel 运行指标、上下文预算和 durable queue |
 | **企业扩展** | 按真实部署需要增加 Auth/多租户/审计，不作为个人项目近期主线 |
 

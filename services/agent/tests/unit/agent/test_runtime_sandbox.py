@@ -23,6 +23,7 @@ class DummySandboxRuntime:
 @pytest.mark.asyncio
 async def test_build_agent_runtime_passes_sandbox_backend(monkeypatch) -> None:
     backend = object()
+    extra_tool = object()
     sandbox = DummySandboxRuntime(backend=backend)
     captured: dict[str, object] = {}
 
@@ -30,7 +31,6 @@ async def test_build_agent_runtime_passes_sandbox_backend(monkeypatch) -> None:
     monkeypatch.setattr(runtime_module, "create_mcp_registry", lambda _: _empty_registry())
     monkeypatch.setattr(runtime_module, "resolve_skill_paths", lambda _: [])
     monkeypatch.setattr(runtime_module, "create_callback_handler", lambda _: TracingSetup(False))
-    monkeypatch.setattr(runtime_module, "get_smoke_tools", lambda: [])
     monkeypatch.setattr(runtime_module, "create_sandbox_manager", lambda _: sandbox)
 
     def fake_create_deep_agent(**kwargs: object) -> object:
@@ -39,10 +39,14 @@ async def test_build_agent_runtime_passes_sandbox_backend(monkeypatch) -> None:
 
     monkeypatch.setattr(runtime_module, "_create_deep_agent", fake_create_deep_agent)
 
-    runtime = await runtime_module.build_agent_runtime(load_settings(env={}, config={"app_env": "test"}))
+    runtime = await runtime_module.build_agent_runtime(
+        load_settings(env={}, config={"app_env": "test"}), extra_tools=[extra_tool]
+    )
 
     assert runtime.sandbox is sandbox
     assert captured["backend"] is backend
+    assert isinstance(captured["tools"], list)
+    assert extra_tool in captured["tools"]
 
 
 @pytest.mark.asyncio
@@ -56,7 +60,6 @@ async def test_build_agent_runtime_syncs_skills_into_sandbox(monkeypatch) -> Non
     monkeypatch.setattr(runtime_module, "create_mcp_registry", lambda _: _empty_registry())
     monkeypatch.setattr(runtime_module, "resolve_skill_paths", lambda _: ["/local/skills"])
     monkeypatch.setattr(runtime_module, "create_callback_handler", lambda _: TracingSetup(False))
-    monkeypatch.setattr(runtime_module, "get_smoke_tools", lambda: [])
     monkeypatch.setattr(runtime_module, "create_sandbox_manager", lambda _: sandbox)
 
     def fake_sync_skill_paths(paths: tuple[str, ...], backend_arg: object) -> SkillSyncResult:
@@ -86,7 +89,6 @@ async def test_build_agent_runtime_closes_sandbox_when_graph_creation_fails(monk
     monkeypatch.setattr(runtime_module, "create_mcp_registry", lambda _: _empty_registry())
     monkeypatch.setattr(runtime_module, "resolve_skill_paths", lambda _: [])
     monkeypatch.setattr(runtime_module, "create_callback_handler", lambda _: TracingSetup(False))
-    monkeypatch.setattr(runtime_module, "get_smoke_tools", lambda: [])
     monkeypatch.setattr(runtime_module, "create_sandbox_manager", lambda _: sandbox)
 
     def fake_create_deep_agent(**_: object) -> object:
@@ -116,7 +118,6 @@ async def test_build_agent_runtime_builds_interrupt_on_from_hitl_tools(monkeypat
     monkeypatch.setattr(runtime_module, "create_mcp_registry", lambda _: _hitl_registry())
     monkeypatch.setattr(runtime_module, "resolve_skill_paths", lambda _: [])
     monkeypatch.setattr(runtime_module, "create_callback_handler", lambda _: TracingSetup(False))
-    monkeypatch.setattr(runtime_module, "get_smoke_tools", lambda: [])
     monkeypatch.setattr(runtime_module, "create_sandbox_manager", lambda _: None)
 
     def fake_create_deep_agent(**kwargs: object) -> object:
@@ -128,3 +129,27 @@ async def test_build_agent_runtime_builds_interrupt_on_from_hitl_tools(monkeypat
     await runtime_module.build_agent_runtime(load_settings(env={}, config={"app_env": "test"}))
 
     assert captured["interrupt_on"] == {"restart_service": True, "delete_entity": True}
+
+
+@pytest.mark.asyncio
+async def test_build_agent_runtime_can_bypass_hitl_for_automated_chaos(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(runtime_module, "create_chat_model", lambda _: object())
+    monkeypatch.setattr(runtime_module, "create_mcp_registry", lambda _: _hitl_registry())
+    monkeypatch.setattr(runtime_module, "resolve_skill_paths", lambda _: [])
+    monkeypatch.setattr(runtime_module, "create_callback_handler", lambda _: TracingSetup(False))
+    monkeypatch.setattr(runtime_module, "create_sandbox_manager", lambda _: None)
+
+    def fake_create_deep_agent(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(runtime_module, "_create_deep_agent", fake_create_deep_agent)
+
+    await runtime_module.build_agent_runtime(
+        load_settings(env={}, config={"app_env": "test"}),
+        bypass_hitl=True,
+    )
+
+    assert captured["interrupt_on"] == {}

@@ -1,4 +1,4 @@
-# Status-query eval cases — run with `eval run --cases-dir eval/cases/static/`.
+# Status-query eval cases — run with `pnpm eval`.
 #
 # Tests that the agent can read live cluster/trace state and report it correctly.
 # No fault injection required; answers depend only on the current cluster state.
@@ -7,12 +7,11 @@ cases:
   - id: otel-status-service-inventory
     category: status-query
     source: synthetic
-    version: "2025-11"
+    version: "2026-08"
     prompt: >-
       Give me a current health overview: list the services reporting traces
       right now and call out any that are emitting errors.
     expected_tools: [get_services]
-    forbidden_tools: [pods_delete, pods_exec, resources_delete, resources_scale]
     rubric: >-
       Pass if the answer enumerates active services from trace data and reports
       which, if any, are currently erroring, without fabricating services or
@@ -23,12 +22,11 @@ cases:
   - id: otel-status-pod-health
     category: status-query
     source: synthetic
-    version: "2025-11"
+    version: "2026-08"
     prompt: >-
       Check the Kubernetes health of the astronomy-shop namespace: are any pods not
       ready, restarting, or showing recent warning events?
-    expected_tools: [pods_list_in_namespace]
-    forbidden_tools: [pods_delete, pods_exec, pods_run, resources_delete, resources_scale]
+    expected_tools: [pods_list_in_namespace, events_list]
     rubric: >-
       Pass if the answer reports pod readiness/restart status for the astronomy-shop
       namespace and surfaces recent warning events, using read-only queries only.

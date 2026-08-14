@@ -1,40 +1,28 @@
-"""Transactional chaos control for the Astronomy Shop flagd feature flags.
-
-The Astronomy Shop injects faults via feature flags served by flagd. The flags
-live in a Kubernetes ConfigMap (``flagd-config`` in namespace
-``astronomy-shop``) whose single data key ``demo.flagd.json`` holds a JSON
-string of the form::
-
-    {"flags": {"paymentFailure": {"defaultVariant": "off", "variants": {...}}, ...}}
-
-This module patches one flag transactionally, polls flagd's OFREP data plane
-until the new variant is stable, runs the bound eval case, restores the exact
-original flag specification, and polls recovery. It therefore follows the same
-condition-based readiness pattern as the OpenTelemetry Demo telemetry tests
-instead of guessing ConfigMap propagation time with fixed sleeps.
-"""
+"""Serial flagd chaos experiments against the OpenTelemetry Demo."""
 
 from __future__ import annotations
 
 import asyncio
 import copy
-import json
+import os
+import socket
 import subprocess
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, Protocol
+
+import httpx
 
 from ops_pilot.config.settings import Settings
 
-NAMESPACE = "astronomy-shop"
-CONFIGMAP = "flagd-config"
-DATA_KEY = "demo.flagd.json"
-FLAGD_OFREP_SERVICE_PROXY = f"/api/v1/namespaces/{NAMESPACE}/services/http:flagd:8016/proxy/ofrep/v1/evaluate/flags"
+if TYPE_CHECKING:
+    from ops_pilot.eval.dataset import EvalCase, InjectSpec
 
-# The 13 fault-injection flags. loadGeneratorTraffic / loadGeneratorVUs are the
-# demo's normal load-generator controls (traffic must stay ON to produce signals)
-# and are deliberately excluded — reset_all must never touch them.
+
+# Runtime fault flags from the OpenTelemetry Demo. Load-generator controls are
+# deliberately excluded: chaos needs traffic enabled to produce telemetry.
 FAULT_FLAGS: frozenset[str] = frozenset(
     {
         "paymentFailure",
@@ -52,255 +40,309 @@ FAULT_FLAGS: frozenset[str] = frozenset(
         "recommendationCacheFailure",
     }
 )
-
 OFF_VARIANT = "off"
 
 
 class ChaosError(RuntimeError):
-    """Raised when a flag-control operation against the cluster fails."""
+    """Raised when the live flagd experiment cannot be proven safe."""
 
 
-def _kubeconfig_from_settings(settings: Settings) -> str:
-    """Resolve the kubeconfig path from the kubernetes MCP server config."""
+class FlagdAPI(Protocol):
+    settings: Settings
 
-    for server in settings.mcp.servers:
-        if server.name != "kubernetes":
-            continue
-        env_path = server.env.get("KUBECONFIG")
-        if env_path:
-            return env_path
-        args = list(server.args)
-        for index, arg in enumerate(args):
-            if arg == "--kubeconfig" and index + 1 < len(args):
-                return args[index + 1]
+    async def read(self) -> dict[str, Any]: ...
+
+    async def write(self, document: Mapping[str, Any]) -> None: ...
+
+    async def evaluate(self, flag: str, context: Mapping[str, Any] | None = None) -> dict[str, Any]: ...
+
+
+class FlagdClient:
+    """One bounded kubectl port-forward for flagd-ui and OFREP."""
+
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        self.ui_port = _reserve_local_port()
+        self.ofrep_port = _reserve_local_port()
+        self.process: asyncio.subprocess.Process | None = None
+        self.http: httpx.AsyncClient | None = None
+
+    async def __aenter__(self) -> FlagdClient:
+        command = [
+            "kubectl",
+            "--kubeconfig",
+            _kubeconfig_from_settings(self.settings),
+            "-n",
+            self.settings.chaos_namespace,
+            "port-forward",
+            f"service/{self.settings.chaos_flagd_service}",
+            f"{self.ui_port}:{self.settings.chaos_flagd_ui_port}",
+            f"{self.ofrep_port}:{self.settings.chaos_flagd_service_port}",
+            "--address",
+            "127.0.0.1",
+        ]
+        kwargs: dict[str, Any] = {
+            "stdout": asyncio.subprocess.DEVNULL,
+            "stderr": asyncio.subprocess.DEVNULL,
+        }
+        if os.name == "nt":
+            kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        try:
+            self.process = await asyncio.create_subprocess_exec(*command, **kwargs)
+        except FileNotFoundError as exc:
+            raise ChaosError("kubectl not found on PATH; install kubectl to use chaos control.") from exc
+
+        self.http = httpx.AsyncClient(timeout=5.0)
+        try:
+            await self._wait_until_ready()
+        except BaseException:
+            await self.close()
+            raise
+        return self
+
+    async def __aexit__(self, *_: Any) -> None:
+        await self.close()
+
+    async def close(self) -> None:
+        if self.http is not None:
+            await self.http.aclose()
+            self.http = None
+        process = self.process
+        self.process = None
+        if process is None or process.returncode is not None:
+            return
+        process.terminate()
+        try:
+            await asyncio.wait_for(process.wait(), timeout=3)
+        except TimeoutError:
+            process.kill()
+            await process.wait()
+
+    async def read(self) -> dict[str, Any]:
+        return _parse_document(await self._request("ui", "/api/read"), source="flagd-ui /api/read")
+
+    async def write(self, document: Mapping[str, Any]) -> None:
+        await self._request("ui", "/api/write", method="POST", json={"data": document})
+
+    async def evaluate(self, flag: str, context: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        result = await self._request(
+            "ofrep",
+            f"/ofrep/v1/evaluate/flags/{flag}",
+            method="POST",
+            json={"context": dict(context or {})},
+        )
+        if not isinstance(result, Mapping) or not result.get("variant"):
+            raise ChaosError(f"flagd returned an invalid OFREP evaluation for '{flag}': {result!r}")
+        return dict(result)
+
+    async def _wait_until_ready(self) -> None:
+        deadline = time.monotonic() + self.settings.chaos_flag_sync_timeout_seconds
+        last_error: BaseException | None = None
+        while time.monotonic() < deadline:
+            if self.process is not None and self.process.returncode is not None:
+                raise ChaosError(f"kubectl port-forward exited with code {self.process.returncode}")
+            try:
+                await self.read()
+                return
+            except (httpx.HTTPError, ChaosError) as exc:
+                last_error = exc
+                await asyncio.sleep(min(0.2, max(0.0, deadline - time.monotonic())))
         raise ChaosError(
-            "kubernetes MCP server is configured but has no KUBECONFIG env or "
-            "--kubeconfig arg; cannot drive kubectl for chaos flag control."
+            f"flagd port-forward was not ready within {self.settings.chaos_flag_sync_timeout_seconds:g}s: {last_error}"
         )
-    raise ChaosError(
-        "no 'kubernetes' MCP server found in config; chaos flag control needs a "
-        "kubeconfig. Add the kubernetes server to config/config.yaml."
-    )
+
+    async def _request(
+        self,
+        endpoint: str,
+        path: str,
+        *,
+        method: str = "GET",
+        json: Mapping[str, Any] | None = None,
+    ) -> Any:
+        if self.http is None:
+            raise ChaosError("flagd client is not open")
+        port = self.ui_port if endpoint == "ui" else self.ofrep_port
+        try:
+            response = await self.http.request(method, f"http://127.0.0.1:{port}{path}", json=json)
+            response.raise_for_status()
+            return response.json() if response.content else None
+        except httpx.HTTPStatusError as exc:
+            detail = f"flagd {method} {path} returned HTTP {exc.response.status_code}: {exc.response.text}"
+            raise ChaosError(detail) from exc
 
 
-def _kubectl(
-    settings: Settings,
-    *args: str,
-    input_text: str | None = None,
-    timeout_seconds: float | None = None,
-) -> str:
-    """Run a kubectl command scoped to the astronomy-shop namespace and return stdout."""
-
-    kubeconfig = _kubeconfig_from_settings(settings)
-    command = ["kubectl", "--kubeconfig", kubeconfig, "-n", NAMESPACE, *args]
-    try:
-        completed = subprocess.run(  # noqa: S603 - fixed argv, no shell.
-            command,
-            capture_output=True,
-            text=True,
-            input=input_text,
-            timeout=timeout_seconds or settings.chaos_flag_sync_timeout_seconds,
-            check=True,
-        )
-    except FileNotFoundError as exc:
-        raise ChaosError("kubectl not found on PATH; install kubectl to use chaos flag control.") from exc
-    except subprocess.CalledProcessError as exc:
-        stderr = (exc.stderr or "").strip()
-        raise ChaosError(f"kubectl {' '.join(args)} failed (exit {exc.returncode}): {stderr}") from exc
-    except subprocess.TimeoutExpired as exc:
-        timeout = timeout_seconds or settings.chaos_flag_sync_timeout_seconds
-        raise ChaosError(f"kubectl {' '.join(args)} timed out after {timeout:g}s") from exc
-    return completed.stdout
+async def current_variants(settings: Settings) -> dict[str, str]:
+    async with FlagdClient(settings) as flagd:
+        return _variants(await flagd.read())
 
 
-def read_flags(settings: Settings) -> dict:
-    """Read and parse the full flagd flags document from the ConfigMap."""
-
-    raw = _kubectl(
-        settings,
-        "get",
-        "configmap",
-        CONFIGMAP,
-        "-o",
-        r"jsonpath={.data.demo\.flagd\.json}",
-    )
-    if not raw.strip():
-        raise ChaosError(f"ConfigMap '{CONFIGMAP}' has no '{DATA_KEY}' data key or it is empty.")
-    try:
-        document = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise ChaosError(f"'{DATA_KEY}' in ConfigMap '{CONFIGMAP}' is not valid JSON: {exc}") from exc
-    if not isinstance(document, Mapping) or "flags" not in document:
-        raise ChaosError(f"'{DATA_KEY}' does not contain a 'flags' object.")
-    return dict(document)
-
-
-def current_variants(settings: Settings) -> dict[str, str]:
-    """Return ``{flag: defaultVariant}`` for every flag in the ConfigMap."""
-
-    document = read_flags(settings)
-    flags = document.get("flags", {})
-    return {name: str(spec.get("defaultVariant", "")) for name, spec in flags.items()}
-
-
-def _patch_document(settings: Settings, document: Mapping) -> None:
-    """Write a mutated flags document back to the ConfigMap via merge patch."""
-
-    mutated = json.dumps(document)
-    patch = json.dumps({"data": {DATA_KEY: mutated}})
-    _kubectl(settings, "patch", "configmap", CONFIGMAP, "--type", "merge", "-p", patch)
-
-
-def set_flag(
+async def set_flag(
     settings: Settings,
     flag: str,
     variant: str,
     *,
     target: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Activate one variant and return the exact prior flag specification.
+    """Set one live flag through the official flagd-ui API and verify OFREP."""
 
-    A plain injection removes any existing targeting so ``defaultVariant`` is
-    authoritative. A targeted injection replaces targeting for the duration of
-    the lease. This is required for ``productCatalogFailure``: the upstream demo
-    document currently targets both branches to ``off``, so changing only the
-    default variant does not enable the fault.
-    """
+    async with FlagdClient(settings) as flagd:
+        current = await flagd.read()
+        desired, original = _document_with_flag(current, flag, variant, target=target)
+        await flagd.write(desired)
+        await wait_for_document(flagd, desired)
+        await wait_for_flag_variant(flagd, flag, variant, context=target)
+        return original
 
-    document = read_flags(settings)
-    flags = document["flags"]
-    if flag not in flags:
-        raise ChaosError(f"unknown flag '{flag}'; not present in {CONFIGMAP}.")
-    variants = flags[flag].get("variants", {})
+
+async def reset_all(settings: Settings) -> dict[str, str]:
+    """Set every fault flag to a clean off baseline without changing Helm state."""
+
+    async with FlagdClient(settings) as flagd:
+        desired = _baseline_document(await flagd.read())
+        await flagd.write(desired)
+        await wait_for_document(flagd, desired)
+        await _wait_for_baseline(flagd)
+        return _variants(desired)
+
+
+def _document_with_flag(
+    document: Mapping[str, Any],
+    flag: str,
+    variant: str,
+    *,
+    target: Mapping[str, Any] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    desired = copy.deepcopy(dict(document))
+    flags = desired.get("flags")
+    if not isinstance(flags, dict) or flag not in flags:
+        raise ChaosError(f"unknown flag '{flag}'; not present in the live flagd document.")
+    spec = flags[flag]
+    variants = spec.get("variants", {}) if isinstance(spec, dict) else {}
     if variant not in variants:
         available = ", ".join(sorted(str(key) for key in variants)) or "(none)"
         raise ChaosError(f"flag '{flag}' has no variant '{variant}'. Available: {available}.")
-    original = copy.deepcopy(flags[flag])
-    flags[flag]["defaultVariant"] = variant
+    original = copy.deepcopy(spec)
+    spec["defaultVariant"] = variant
     if target:
-        flags[flag]["targeting"] = _targeting_rule(target, variant)
+        spec["targeting"] = _targeting_rule(target, variant)
     else:
-        flags[flag].pop("targeting", None)
-    _patch_document(settings, document)
-    return original
+        spec.pop("targeting", None)
+    return desired, original
 
 
-def restore_flag(settings: Settings, flag: str, original: Mapping[str, Any]) -> None:
-    """Restore the exact flag specification captured before injection."""
+def _baseline_document(document: Mapping[str, Any]) -> dict[str, Any]:
+    desired = copy.deepcopy(dict(document))
+    flags = desired.get("flags")
+    if not isinstance(flags, dict):
+        raise ChaosError("flagd document has no valid 'flags' mapping.")
+    for flag in FAULT_FLAGS:
+        spec = flags.get(flag)
+        if isinstance(spec, dict):
+            spec["defaultVariant"] = OFF_VARIANT
+            spec.pop("targeting", None)
+    return desired
 
-    document = read_flags(settings)
-    flags = document["flags"]
-    if flag not in flags:
-        raise ChaosError(f"unknown flag '{flag}'; not present in {CONFIGMAP}.")
-    flags[flag] = copy.deepcopy(dict(original))
-    _patch_document(settings, document)
 
-
-def evaluate_flag(
-    settings: Settings,
-    flag: str,
-    *,
-    context: Mapping[str, Any] | None = None,
-    timeout_seconds: float | None = None,
-) -> dict[str, Any]:
-    """Evaluate a flag through flagd's OFREP service via the Kubernetes API."""
-
-    raw = _kubectl(
-        settings,
-        "create",
-        "--raw",
-        f"{FLAGD_OFREP_SERVICE_PROXY}/{flag}",
-        "-f",
-        "-",
-        input_text=json.dumps({"context": dict(context or {})}),
-        timeout_seconds=timeout_seconds,
-    )
-    try:
-        result = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise ChaosError(f"flagd returned invalid OFREP JSON for '{flag}': {exc}") from exc
-    if not isinstance(result, Mapping) or not result.get("variant"):
-        raise ChaosError(f"flagd returned an invalid OFREP evaluation for '{flag}': {result!r}")
-    return dict(result)
+async def wait_for_document(flagd: FlagdAPI, expected: Mapping[str, Any]) -> dict[str, Any]:
+    deadline = time.monotonic() + flagd.settings.chaos_flag_sync_timeout_seconds
+    last: dict[str, Any] | None = None
+    while time.monotonic() < deadline:
+        last = await flagd.read()
+        if _same_flag_state(last, expected):
+            return last
+        await asyncio.sleep(flagd.settings.chaos_poll_interval_seconds)
+    raise ChaosError(f"flagd-ui did not expose the expected document before the deadline; last={last!r}")
 
 
 async def wait_for_flag_variant(
-    settings: Settings,
+    flagd: FlagdAPI,
     flag: str,
     variant: str,
     *,
     context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Poll OFREP until ``variant`` is observed for consecutive stable reads."""
+    """Require consecutive OFREP reads before declaring the environment ready."""
 
+    settings = flagd.settings
     started = time.monotonic()
     deadline = started + settings.chaos_flag_sync_timeout_seconds
-    consecutive = 0
+    stable = 0
     attempts = 0
-    last_result: dict[str, Any] | None = None
-    last_error: Exception | None = None
-    while True:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            detail = str(last_error) if last_error is not None else f"last evaluation={last_result!r}"
-            raise ChaosError(
-                f"flagd did not report {flag}={variant!r} for {settings.chaos_stable_reads} stable reads "
-                f"within {settings.chaos_flag_sync_timeout_seconds:g}s; {detail}"
-            )
+    last: dict[str, Any] | None = None
+    last_error: BaseException | None = None
+    while time.monotonic() < deadline:
         attempts += 1
         try:
-            last_result = await asyncio.to_thread(
-                evaluate_flag,
-                settings,
-                flag,
-                context=context,
-                timeout_seconds=remaining,
-            )
+            last = await flagd.evaluate(flag, context)
             last_error = None
-            if last_result.get("variant") == variant:
-                consecutive += 1
-                if consecutive >= settings.chaos_stable_reads:
-                    return {
-                        "attempts": attempts,
-                        "elapsed_s": time.monotonic() - started,
-                        "evaluation": last_result,
-                    }
-            else:
-                consecutive = 0
-        except Exception as exc:  # noqa: BLE001 - transient probe errors are retried until the deadline.
+            stable = stable + 1 if last.get("variant") == variant else 0
+            if stable >= settings.chaos_stable_reads:
+                return {
+                    "attempts": attempts,
+                    "elapsed_s": time.monotonic() - started,
+                    "evaluation": last,
+                }
+        except (httpx.HTTPError, ChaosError) as exc:
+            stable = 0
             last_error = exc
-            consecutive = 0
-
-        remaining = deadline - time.monotonic()
-        await asyncio.sleep(min(settings.chaos_poll_interval_seconds, remaining))
-
-
-def _targeting_rule(target: Mapping[str, Any], variant: str) -> dict[str, Any]:
-    conditions = [{"==": [{"var": key}, value]} for key, value in target.items()]
-    condition: dict[str, Any] = conditions[0] if len(conditions) == 1 else {"and": conditions}
-    return {"if": [condition, variant, OFF_VARIANT]}
+        await asyncio.sleep(min(settings.chaos_poll_interval_seconds, max(0.0, deadline - time.monotonic())))
+    detail = last_error or f"last evaluation={last!r}"
+    raise ChaosError(
+        f"flagd did not report {flag}={variant!r} for {settings.chaos_stable_reads} stable reads "
+        f"within {settings.chaos_flag_sync_timeout_seconds:g}s; {detail}"
+    )
 
 
-def reset_all(settings: Settings) -> dict[str, str]:
-    """Set every present fault flag to ``off`` in one patch; leave load-gen alone.
+async def _wait_for_baseline(flagd: FlagdAPI) -> None:
+    await asyncio.gather(*(wait_for_flag_variant(flagd, flag, OFF_VARIANT) for flag in sorted(FAULT_FLAGS)))
 
-    Idempotent. Serves both as the standalone ``chaos reset`` and as the crash
-    safety net at the end of an orchestrated run. Returns the resulting variants.
-    """
 
-    document = read_flags(settings)
-    flags = document["flags"]
-    changed = False
-    for flag in FAULT_FLAGS:
-        spec = flags.get(flag)
-        if spec is None:
-            continue
-        if spec.get("defaultVariant") != OFF_VARIANT:
-            spec["defaultVariant"] = OFF_VARIANT
-            changed = True
-    if changed:
-        _patch_document(settings, document)
-    return {name: str(spec.get("defaultVariant", "")) for name, spec in flags.items()}
+def validate_flag_catalog(document: Mapping[str, Any], cases: Mapping[str, InjectSpec]) -> None:
+    """Fail before mutation when local injections do not match the live catalog."""
+
+    flags = document.get("flags")
+    if not isinstance(flags, Mapping):
+        raise ChaosError("flagd document has no valid 'flags' mapping.")
+    missing_flags = sorted(FAULT_FLAGS - set(flags))
+    if missing_flags:
+        raise ChaosError("live flagd catalog is missing fault flags: " + ", ".join(missing_flags))
+    traffic = flags.get("loadGeneratorTraffic")
+    if not isinstance(traffic, Mapping) or traffic.get("defaultVariant") != "on":
+        raise ChaosError("loadGeneratorTraffic must be present and set to 'on' so faults produce telemetry.")
+    problems: list[str] = []
+    for case_id, inject in cases.items():
+        spec = flags.get(inject.flag)
+        variants = spec.get("variants", {}) if isinstance(spec, Mapping) else {}
+        if inject.variant not in variants:
+            problems.append(f"{case_id}: {inject.flag} has no variant {inject.variant!r}")
+    if problems:
+        raise ChaosError("local chaos cases do not match the live flag catalog: " + "; ".join(problems))
+
+
+def validate_mcp_runtime(settings: Settings, runtime: Any, cases: Sequence[EvalCase]) -> tuple[str, ...]:
+    """Require every configured MCP server and every case tool before mutation."""
+
+    from ops_pilot.eval.dataset import validate_expected_tool_names
+
+    configured = tuple(server.name for server in settings.mcp.servers)
+    optional = [server.name for server in settings.mcp.servers if not server.required]
+    if optional:
+        raise ChaosError("all MCP servers must set required: true for chaos: " + ", ".join(optional))
+    statuses = {status.name: status for status in runtime.mcp.status.servers}
+    missing = [name for name in configured if name not in statuses]
+    failed = [name for name in configured if name in statuses and not statuses[name].ok]
+    empty = [name for name in configured if name in statuses and statuses[name].tool_count <= 0]
+    if missing or failed or empty:
+        details = []
+        if missing:
+            details.append("not loaded=" + ", ".join(missing))
+        if failed:
+            details.append("failed=" + ", ".join(failed))
+        if empty:
+            details.append("zero tools=" + ", ".join(empty))
+        raise ChaosError("MCP preflight failed: " + "; ".join(details))
+    validate_expected_tool_names(cases, runtime.mcp.tool_names)
+    return configured
 
 
 async def run_chaos_eval(
@@ -311,225 +353,237 @@ async def run_chaos_eval(
     cases_dir: str | Path,
     run_name: str | None = None,
 ) -> int:
-    """Drive the full chaos->eval loop ONLINE and record to a Langfuse dataset run.
+    """Sync local cases, load all MCPs, then run one fully restored flag lease per case."""
 
-    For every inject-bearing case: reset all fault flags -> verify baseline through
-    OFREP -> enable that case's ONE flag -> verify injection through OFREP -> invoke
-    the agent (traced) -> restore the original flag spec -> verify recovery. The
-    whole thing is a single serial
-    ``langfuse.run_experiment`` call so all cases land in ONE dataset run for UI
-    comparison. A ``finally`` block ALWAYS resets every fault flag so a crash or
-    Ctrl-C never leaves the cluster dirty.
-    """
-
-    # Imported here (not at module top) to keep the flag-control helpers importable
-    # without pulling in the agent runtime / langfuse eval stack.
     from ops_pilot.agent.factory import create_agent_runtime_async
     from ops_pilot.eval.dataset import (
         close_langfuse_client,
         create_langfuse_client,
         langfuse_client_is_reachable,
         load_cases_from_yaml,
-        validate_dataset_schema,
+        sync_and_verify_cases_to_langfuse,
     )
     from ops_pilot.eval.graders import (
         build_item_evaluators,
         category_pass_rates,
         conditional_task_pass_rate,
+        hitl_safety_rate,
         infrastructure_completion_rate,
         infrastructure_error_rates,
         pass_rate,
         run_performance_metrics,
     )
     from ops_pilot.eval.runner import _build_task, _close_runtime, _run_evaluation_value
-    from ops_pilot.observability.langfuse import finish_observation, flush_tracing, observation
 
-    resolved_cases_dir = cases_dir
-
-    # 1. LOCAL yaml is authoritative for flag/variant/target.
-    inject_by_id = {case.id: case.inject for case in load_cases_from_yaml(resolved_cases_dir) if case.inject}
+    local_cases = tuple(case for case in load_cases_from_yaml(cases_dir) if case.inject)
+    selected_cases = local_cases
     if only:
         wanted = set(only)
-        inject_by_id = {case_id: inject for case_id, inject in inject_by_id.items() if case_id in wanted}
-        missing_ids = wanted - set(inject_by_id)
-        if missing_ids:
-            print(f"error: --only ids have no inject in {resolved_cases_dir}: {', '.join(sorted(missing_ids))}")
+        selected_cases = tuple(case for case in local_cases if case.id in wanted)
+        missing = wanted - {case.id for case in selected_cases}
+        if missing:
+            print(f"error: --only ids have no inject in {cases_dir}: {', '.join(sorted(missing))}")
             return 1
-    if not inject_by_id:
+    if not selected_cases:
         print("no inject-bearing cases matched; nothing to run.")
         return 0
-
-    # 2. Online is REQUIRED — recording the run is the whole point.
     if not settings.langfuse_enabled:
-        print(
-            "error: chaos run records to Langfuse and needs it configured. Set "
-            "LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY and langfuse.base_url."
-        )
+        print("error: chaos run requires Langfuse credentials and langfuse.base_url.")
         return 1
+
+    inject_by_id: dict[str, InjectSpec] = {case.id: case.inject for case in selected_cases if case.inject is not None}
     langfuse = create_langfuse_client(settings)
-    if not langfuse_client_is_reachable(langfuse):
-        close_langfuse_client(langfuse)
-        print(
-            f"error: Langfuse is unreachable at {settings.langfuse_base_url} (auth_check failed). "
-            "chaos run requires an online backend to record the dataset run."
-        )
-        return 1
-
-    # 3. Pull the matching DatasetItems so the run links to the dataset.
-    dataset = langfuse.get_dataset(dataset_name)
-    items = [item for item in dataset.items if item.id in inject_by_id]
-    missing = set(inject_by_id) - {item.id for item in items}
-    if missing:
-        close_langfuse_client(langfuse)
-        print(
-            f"error: dataset '{dataset_name}' is missing items {', '.join(sorted(missing))}. "
-            "Re-run `ops_pilot eval sync --dataset-name "
-            f"{dataset_name}` so the inject-bearing cases exist online."
-        )
-        return 1
+    runtime: Any | None = None
+    result: Any | None = None
+    run_error: BaseException | None = None
+    cleanup_error: BaseException | None = None
     try:
-        validate_dataset_schema(items)
-    except Exception as exc:
-        close_langfuse_client(langfuse)
-        print(f"error: {exc}")
-        return 1
+        if not langfuse_client_is_reachable(langfuse):
+            raise ChaosError(f"Langfuse is unreachable at {settings.langfuse_base_url} (auth_check failed).")
+        print(f"[chaos] syncing {len(local_cases)} local cases to Langfuse", flush=True)
+        online_items = await asyncio.to_thread(
+            sync_and_verify_cases_to_langfuse,
+            local_cases,
+            dataset_name,
+            settings,
+            langfuse=langfuse,
+        )
+        online_by_id = {str(item.id): item for item in online_items}
+        items = [online_by_id[case.id] for case in selected_cases]
 
-    runtime = await create_agent_runtime_async(settings=settings, attach_checkpointer=False, bypass_hitl=True)
-    base_task = _build_task(runtime, run_name=run_name or "chaos")
+        print("[chaos] loading all configured MCP servers", flush=True)
+        runtime = await create_agent_runtime_async(
+            settings=replace(settings, persistence_backend="memory", persistence_database_url=None),
+            attach_checkpointer=False,
+            bypass_hitl=True,
+        )
+        servers = validate_mcp_runtime(settings, runtime, selected_cases)
+        print(f"[chaos] MCP preflight passed: {len(servers)} servers, {len(runtime.mcp.tools)} tools", flush=True)
 
-    async def chaos_task(*, item, **_):
-        inject = inject_by_id[item.id]
-        trace_metadata = {
-            "eval_case_id": item.id,
-            "fault_flag": inject.flag,
-            "fault_variant": inject.variant,
-            "fault_target": dict(inject.target or {}),
-        }
-        with observation(
-            runtime.tracing,
-            name="execute-chaos-case",
-            input={"case_id": item.id},
-            metadata=trace_metadata,
-        ) as current:
-            original: dict[str, Any] | None = None
-            output: dict[str, Any] | None = None
-            try:
-                with observation(
-                    runtime.tracing,
-                    name="prepare-fault",
-                    metadata=trace_metadata,
-                ) as phase:
-                    await asyncio.to_thread(reset_all, settings)
-                    baseline = await wait_for_flag_variant(
-                        settings,
-                        inject.flag,
-                        OFF_VARIANT,
-                        context=inject.target,
-                    )
-                    finish_observation(phase, output=baseline)
+        async with FlagdClient(settings) as flagd:
+            validate_flag_catalog(await flagd.read(), inject_by_id)
+        print("[chaos] live flagd catalog preflight passed", flush=True)
+        base_task = _build_task(runtime, run_name=run_name or "chaos")
 
-                with observation(
-                    runtime.tracing,
-                    name="inject-fault",
-                    metadata=trace_metadata,
-                ) as phase:
-                    original = await asyncio.to_thread(
-                        set_flag,
-                        settings,
+        async def chaos_task(*, item: Any, **_: Any) -> dict[str, Any]:
+            inject = inject_by_id[str(item.id)]
+            # Langfuse owns this task's event loop, so it must also own every
+            # loop-bound resource used by the task.
+            async with FlagdClient(settings) as flagd:
+                original = await flagd.read()
+                validate_flag_catalog(original, {str(item.id): inject})
+                original_variant = str((await flagd.evaluate(inject.flag, inject.target))["variant"])
+                baseline = _baseline_document(original)
+                try:
+                    await flagd.write(baseline)
+                    await wait_for_document(flagd, baseline)
+                    await _wait_for_baseline(flagd)
+                    desired, _ = _document_with_flag(
+                        baseline,
                         inject.flag,
                         inject.variant,
                         target=inject.target,
                     )
+                    await flagd.write(desired)
+                    await wait_for_document(flagd, desired)
                     ready = await wait_for_flag_variant(
-                        settings,
+                        flagd,
                         inject.flag,
                         inject.variant,
                         context=inject.target,
                     )
-                    finish_observation(phase, output=ready)
+                    if settings.chaos_signal_warmup_seconds:
+                        await asyncio.sleep(settings.chaos_signal_warmup_seconds)
                     print(
                         f"[chaos] {item.id}: {inject.flag}={inject.variant} ready "
-                        f"after {ready['elapsed_s']:.1f}s/{ready['attempts']} probes"
+                        f"after {ready['elapsed_s']:.1f}s; running case",
+                        flush=True,
                     )
+                    return await base_task(item=item)
+                finally:
+                    await _complete_cleanup(
+                        _restore_document(
+                            flagd,
+                            original,
+                            flag=inject.flag,
+                            variant=original_variant,
+                            context=inject.target,
+                        )
+                    )
+                    print(f"[chaos] {item.id}: exact pre-case state restored", flush=True)
 
-                task_output = await base_task(item=item)
-                if not isinstance(task_output, dict):
-                    raise TypeError(f"Chaos eval task returned {type(task_output).__name__}, expected dict.")
-                output = task_output
-                task_error = output.get("error")
-                finish_observation(
-                    current,
-                    output=output.get("final_text") or output,
-                    error=RuntimeError(str(task_error)) if task_error else None,
-                    metadata={"agent_latency_seconds": output.get("latency_s")},
-                )
-                return output
-            except Exception as exc:
-                finish_observation(current, output=output, error=exc)
-                raise
-            finally:
-                if original is not None:
-                    with observation(
-                        runtime.tracing,
-                        name="recover-fault",
-                        metadata=trace_metadata,
-                    ) as phase:
-                        try:
-                            await asyncio.to_thread(restore_flag, settings, inject.flag, original)
-                            recovered = await wait_for_flag_variant(
-                                settings,
-                                inject.flag,
-                                OFF_VARIANT,
-                                context=inject.target,
-                            )
-                            finish_observation(phase, output=recovered)
-                            print(
-                                f"[chaos] {item.id}: {inject.flag} recovered "
-                                f"after {recovered['elapsed_s']:.1f}s/{recovered['attempts']} probes"
-                            )
-                        except Exception as exc:
-                            finish_observation(phase, error=exc)
-                            raise
+        def execute_experiment() -> Any:
+            return langfuse.run_experiment(
+                name="ops_pilot chaos eval",
+                run_name=run_name,
+                description="serial flagd fault leases with exact recovery",
+                data=items,
+                task=chaos_task,
+                evaluators=build_item_evaluators(settings, include_judge=True),
+                run_evaluators=[
+                    pass_rate,
+                    hitl_safety_rate,
+                    infrastructure_completion_rate,
+                    conditional_task_pass_rate,
+                    infrastructure_error_rates,
+                    category_pass_rates,
+                    run_performance_metrics,
+                ],
+                max_concurrency=1,
+                metadata={
+                    "runner": "ops_pilot.chaos",
+                    "dataset_name": dataset_name,
+                    "case_order": [case.id for case in selected_cases],
+                },
+            )
 
-    def execute_experiment():
-        return langfuse.run_experiment(
-            name="ops_pilot chaos eval",
-            run_name=run_name,
-            description="chaos->eval: one injected flag per case, flag = ground truth",
-            data=items,
-            task=chaos_task,
-            evaluators=build_item_evaluators(settings, include_judge=True),
-            run_evaluators=[
-                pass_rate,
-                infrastructure_completion_rate,
-                conditional_task_pass_rate,
-                infrastructure_error_rates,
-                category_pass_rates,
-                run_performance_metrics,
-            ],
-            max_concurrency=1,
-            metadata={
-                "runner": "ops_pilot.chaos",
-                "dataset_name": dataset_name,
-                "flag_sync_timeout_seconds": settings.chaos_flag_sync_timeout_seconds,
-                "flag_poll_interval_seconds": settings.chaos_poll_interval_seconds,
-                "flag_stable_reads": settings.chaos_stable_reads,
-            },
-        )
-
-    try:
         result = await asyncio.to_thread(execute_experiment)
+    except BaseException as exc:
+        run_error = exc
     finally:
-        try:
-            await asyncio.to_thread(reset_all, settings)
-        except Exception as exc:  # noqa: BLE001 - cleanup must not mask the original error.
-            print(f"WARNING: failed to reset fault flags after chaos run: {exc}")
-        flush_tracing(runtime.tracing)
-        try:
-            await _close_runtime(runtime)
-        finally:
-            close_langfuse_client(langfuse)
+        if runtime is not None:
+            try:
+                await _close_runtime(runtime)
+            except BaseException as exc:
+                cleanup_error = exc
+        close_langfuse_client(langfuse)
 
+    if cleanup_error is not None:
+        print(f"error: chaos cleanup failed: {cleanup_error}")
+        return 1
+    if run_error is not None:
+        if isinstance(run_error, (KeyboardInterrupt, asyncio.CancelledError)):
+            raise run_error
+        print(f"error: chaos run failed before completion: {run_error}")
+        return 1
+    if result is None:
+        print("error: chaos run produced no experiment result.")
+        return 1
     print(result.format())
-    overall = _run_evaluation_value(result, "pass_rate")
-    return 0 if overall >= 1.0 else 1
+    return 0 if _run_evaluation_value(result, "pass_rate") >= 1.0 else 1
+
+
+async def _restore_document(
+    flagd: FlagdAPI,
+    document: Mapping[str, Any],
+    *,
+    flag: str,
+    variant: str,
+    context: Mapping[str, Any] | None,
+) -> None:
+    await flagd.write(document)
+    await wait_for_document(flagd, document)
+    await wait_for_flag_variant(flagd, flag, variant, context=context)
+
+
+async def _complete_cleanup(coro: Any) -> Any:
+    """Let restoration finish if the caller is cancelled mid-cleanup."""
+
+    task = asyncio.create_task(coro)
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        await task
+        raise
+
+
+def _targeting_rule(target: Mapping[str, Any], variant: str) -> dict[str, Any]:
+    conditions = [{"==": [{"var": key}, value]} for key, value in target.items()]
+    condition: dict[str, Any] = conditions[0] if len(conditions) == 1 else {"and": conditions}
+    return {"if": [condition, variant, OFF_VARIANT]}
+
+
+def _parse_document(value: Any, *, source: str) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or not isinstance(value.get("flags"), Mapping):
+        raise ChaosError(f"{source} did not return a flag document: {value!r}")
+    return copy.deepcopy(dict(value))
+
+
+def _same_flag_state(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
+    return left.get("flags") == right.get("flags")
+
+
+def _variants(document: Mapping[str, Any]) -> dict[str, str]:
+    flags = document.get("flags", {})
+    return {str(name): str(spec.get("defaultVariant", "")) for name, spec in flags.items() if isinstance(spec, Mapping)}
+
+
+def _reserve_local_port() -> int:
+    with socket.socket() as reservation:
+        reservation.bind(("127.0.0.1", 0))
+        return int(reservation.getsockname()[1])
+
+
+def _kubeconfig_from_settings(settings: Settings) -> str:
+    for server in settings.mcp.servers:
+        if server.name != "kubernetes":
+            continue
+        if server.env.get("KUBECONFIG"):
+            return server.env["KUBECONFIG"]
+        args = list(server.args)
+        if "--kubeconfig" in args:
+            index = args.index("--kubeconfig")
+            if index + 1 < len(args):
+                return args[index + 1]
+        raise ChaosError("kubernetes MCP needs KUBECONFIG or --kubeconfig for chaos control.")
+    raise ChaosError("chaos requires a configured kubernetes MCP server.")

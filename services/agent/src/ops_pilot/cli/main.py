@@ -13,10 +13,12 @@ from typing import Any
 import uvicorn
 
 from ops_pilot.agent.factory import create_agent_runtime_async
+from ops_pilot.config.mcp_schema import MCPConfig
 from ops_pilot.config.settings import load_settings
 from ops_pilot.eval.cli import add_chaos_subcommands, add_eval_subcommands, run_chaos_command, run_eval_command
 from ops_pilot.health.status import build_runtime_status, health_snapshot
 from ops_pilot.models.smoke import smoke_bind_tools, smoke_invoke, smoke_model_invocation
+from ops_pilot.tools.smoke_tools import get_smoke_tools
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -83,7 +85,6 @@ def _print_settings() -> int:
         "mcp_servers": [server.name for server in settings.mcp.servers],
         "mcp_hitl_tools": sorted(settings.mcp.hitl_tool_names()),
         "skills_paths": [str(path) for path in settings.skills_paths],
-        "enable_smoke_tools": settings.enable_smoke_tools,
         "langfuse_enabled": settings.langfuse_enabled,
         "chat_base_path": settings.chat_base_path,
         "chat_host": settings.chat_host,
@@ -146,14 +147,18 @@ def _smoke_model() -> int:
 
 
 async def _smoke_agent() -> int:
-    runtime = await create_agent_runtime_async()
-    response = await runtime.ainvoke_text(
-        "Reply with OK.",
-        protocol="smoke",
-        thread_id="smoke-agent",
-    )
-    print(response)
-    return 0
+    settings = replace(load_settings(), mcp=MCPConfig())
+    runtime = await create_agent_runtime_async(settings=settings, extra_tools=get_smoke_tools())
+    try:
+        response = await runtime.ainvoke_text(
+            "Use add_numbers to compute 2 + 3, then reply with the result.",
+            protocol="smoke",
+            thread_id="smoke-agent",
+        )
+        print(response)
+        return 0
+    finally:
+        await runtime.aclose()
 
 
 async def _smoke_a2a() -> int:
