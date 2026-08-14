@@ -355,7 +355,7 @@ async def run_chaos_eval(
 ) -> int:
     """Sync local cases, load all MCPs, then run one fully restored flag lease per case."""
 
-    from ops_pilot.agent.factory import create_agent_runtime_async
+    from ops_pilot.agent.runtime import build_agent_runtime
     from ops_pilot.eval.dataset import (
         create_langfuse_client,
         flush_langfuse_client,
@@ -412,7 +412,7 @@ async def run_chaos_eval(
         items = [online_by_id[case.id] for case in selected_cases]
 
         print("[chaos] loading all configured MCP servers", flush=True)
-        runtime = await create_agent_runtime_async(
+        runtime = await build_agent_runtime(
             settings=replace(settings, persistence_backend="memory", persistence_database_url=None),
             attach_checkpointer=False,
             bypass_hitl=True,

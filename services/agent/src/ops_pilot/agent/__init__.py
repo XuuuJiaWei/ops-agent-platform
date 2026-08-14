@@ -1,6 +1,5 @@
-"""DeepAgent runtime factory and graph export."""
+"""DeepAgent runtime construction."""
 
-from ops_pilot.agent.factory import create_agent_runtime, create_agent_runtime_async
-from ops_pilot.agent.runtime import AgentRuntime
+from ops_pilot.agent.runtime import AgentRuntime, build_agent_runtime
 
-__all__ = ["AgentRuntime", "create_agent_runtime", "create_agent_runtime_async"]
+__all__ = ["AgentRuntime", "build_agent_runtime"]

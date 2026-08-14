@@ -207,7 +207,7 @@ load_cases_from_yaml(cases_dir)
     → filter(--only)
     → smoke case 独占文件：清空 MCP，仅显式注入 add_numbers/local_echo
     → validate_expected_tool_names()   # 工具名校验，防止数据集与运行时工具目录漂移
-    → create_agent_runtime_async()
+    → build_agent_runtime()
     → langfuse.run_experiment(
           data=items,                  # 始终来自本地 YAML
           task=task(),                 # 每个 case 并发执行 agent 调用

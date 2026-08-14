@@ -13,7 +13,7 @@ from typing import Any
 from langfuse import get_client
 from langfuse.experiment import ExperimentResult
 
-from ops_pilot.agent.factory import create_agent_runtime_async
+from ops_pilot.agent.runtime import build_agent_runtime
 from ops_pilot.config.mcp_schema import MCPConfig
 from ops_pilot.config.settings import Settings, load_settings
 from ops_pilot.eval.dataset import (
@@ -95,7 +95,7 @@ async def run_eval(
         persistence_backend="memory",
         persistence_database_url=None,
     )
-    runtime = await create_agent_runtime_async(
+    runtime = await build_agent_runtime(
         settings=runtime_settings,
         attach_checkpointer=False,
         bypass_hitl=True,
