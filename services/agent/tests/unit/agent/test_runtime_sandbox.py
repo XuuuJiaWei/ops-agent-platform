@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pytest
+from langchain.agents.middleware import ModelCallLimitMiddleware, ToolCallLimitMiddleware, ToolRetryMiddleware
 
 from ops_pilot.agent import runtime as runtime_module
 from ops_pilot.config.settings import load_settings
@@ -108,6 +109,37 @@ async def _empty_registry() -> MCPRegistry:
 
 async def _hitl_registry() -> MCPRegistry:
     return MCPRegistry(hitl_tools=("restart_service", "delete_entity"))
+
+
+def test_runtime_uses_official_call_limits_and_retry_middleware() -> None:
+    settings = load_settings(
+        env={},
+        config={
+            "reliability": {
+                "model_call_limit": 7,
+                "tool_call_limit": 11,
+                "tool_retry_max_retries": 3,
+                "tool_retry_jitter": False,
+            }
+        },
+    )
+
+    middleware = runtime_module._create_runtime_middleware(settings, ("series",))
+
+    assert [type(item) for item in middleware] == [
+        ModelCallLimitMiddleware,
+        ToolCallLimitMiddleware,
+        ToolRetryMiddleware,
+    ]
+    assert middleware[0].run_limit == 7
+    assert middleware[1].run_limit == 11
+    assert middleware[2].max_retries == 3
+
+
+def test_runtime_disables_all_optional_guardrails_together() -> None:
+    settings = load_settings(env={}, config={"reliability": {"enabled": False}})
+
+    assert runtime_module._create_runtime_middleware(settings, ("series",)) == []
 
 
 @pytest.mark.asyncio

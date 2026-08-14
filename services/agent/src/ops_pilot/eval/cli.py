@@ -99,8 +99,8 @@ async def run_eval_command(args: argparse.Namespace) -> int:
 def _run_sync_command(args: argparse.Namespace) -> int:
     from ops_pilot.config.settings import load_settings
     from ops_pilot.eval.dataset import (
-        close_langfuse_client,
         create_langfuse_client,
+        flush_langfuse_client,
         langfuse_client_is_reachable,
         load_cases_from_yaml,
         sync_cases_to_langfuse,
@@ -125,7 +125,7 @@ def _run_sync_command(args: argparse.Namespace) -> int:
             return 1
         count = sync_cases_to_langfuse(cases, args.dataset_name, settings, langfuse=langfuse)
     finally:
-        close_langfuse_client(langfuse)
+        flush_langfuse_client(langfuse)
 
     print(f"uploaded {count} eval cases to Langfuse dataset '{args.dataset_name}' at {settings.langfuse_base_url}.")
     return 0

@@ -70,10 +70,15 @@ reliability:
   # Fallback for interactive/API runs. Eval case timeout_s overrides this value
   # through the same RunController, so there is only one effective deadline.
   run_deadline_seconds: 600
-  max_attempts: 3
-  initial_backoff_seconds: 0.25
-  backoff_multiplier: 2.0
-  jitter_ratio: 0.2
+  # Official LangChain run-level loop guards recommended for production agents.
+  model_call_limit: 50
+  tool_call_limit: 200
+  # Official ToolRetryMiddleware options; applied only to retry_tools.
+  tool_retry_max_retries: 2
+  tool_retry_initial_delay_seconds: 0.25
+  tool_retry_backoff_factor: 2.0
+  tool_retry_max_delay_seconds: 60
+  tool_retry_jitter: true
 
 # Chaos readiness/recovery policy. Runtime changes use the official flagd-ui API;
 # the Helm ConfigMap remains the safe restart baseline.

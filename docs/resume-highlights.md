@@ -16,7 +16,7 @@
 
 2. **MCP 动态工具编排**：支持 `stdio` 与带认证的 `streamable_http`，接入 Kubernetes、Prometheus、Jaeger、OpenSearch；直接使用官方 `MultiServerMCPClient.get_tools()` 的按调用 session 生命周期，并保留并发发现、工具白名单、HITL/重试策略及 required/optional 加载语义。
 
-3. **工具安全与生命周期**：只对 `retry_tools` 中显式幂等工具使用 LangChain 官方 `ToolRetryMiddleware`；破坏性和非幂等工具统一进入 DeepAgents HITL；`RunController` 负责运行截止时间和取消。项目不伪造 exactly-once 或自研熔断能力。
+3. **工具安全与生命周期**：使用 LangChain 官方 model/tool call limits；只对 `retry_tools` 中显式幂等工具使用 `ToolRetryMiddleware`；破坏性和非幂等工具统一进入 DeepAgents HITL；`RunController` 只负责协议级运行截止时间和取消。项目不伪造 exactly-once 或自研熔断能力。
 
 4. **可恢复状态与安全边界**：使用 PostgreSQL 分层保存 LangGraph 检查点、A2A 任务、AG-UI 事件与智能体空间，使图执行、协议任务和浏览器会话可跨进程重启恢复；通过运行截止时间、取消传播、人工审批和 OpenSandbox 隔离高风险命令及文件操作。
 

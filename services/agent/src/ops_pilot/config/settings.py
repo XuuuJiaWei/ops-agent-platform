@@ -63,10 +63,13 @@ class Settings:
     spaces_resolver_poll_seconds: float = 30.0
     reliability_enabled: bool = True
     run_deadline_seconds: float | None = 600.0
-    tool_retry_max_attempts: int = 3
-    tool_retry_initial_backoff_seconds: float = 0.25
-    tool_retry_backoff_multiplier: float = 2.0
-    tool_retry_jitter_ratio: float = 0.2
+    model_call_limit: int = 50
+    tool_call_limit: int = 200
+    tool_retry_max_retries: int = 2
+    tool_retry_initial_delay_seconds: float = 0.25
+    tool_retry_backoff_factor: float = 2.0
+    tool_retry_max_delay_seconds: float = 60.0
+    tool_retry_jitter: bool = True
     chaos_namespace: str = "otel-demo"
     chaos_flagd_service: str = "flagd"
     chaos_flagd_service_port: int = 8016
@@ -264,10 +267,13 @@ def load_settings(env: Mapping[str, str] | None = None, *, config: Mapping[str, 
         spaces_resolver_poll_seconds=_positive_float(spaces.get("resolver_poll_seconds"), 30.0),
         reliability_enabled=_bool(reliability.get("enabled"), True),
         run_deadline_seconds=_optional_positive_float(reliability.get("run_deadline_seconds"), 600.0),
-        tool_retry_max_attempts=_positive_int(reliability.get("max_attempts"), 3),
-        tool_retry_initial_backoff_seconds=_nonnegative_float(reliability.get("initial_backoff_seconds"), 0.25),
-        tool_retry_backoff_multiplier=_positive_float(reliability.get("backoff_multiplier"), 2.0),
-        tool_retry_jitter_ratio=_ratio(reliability.get("jitter_ratio"), 0.2),
+        model_call_limit=_positive_int(reliability.get("model_call_limit"), 50),
+        tool_call_limit=_positive_int(reliability.get("tool_call_limit"), 200),
+        tool_retry_max_retries=_nonnegative_int(reliability.get("tool_retry_max_retries"), 2),
+        tool_retry_initial_delay_seconds=_nonnegative_float(reliability.get("tool_retry_initial_delay_seconds"), 0.25),
+        tool_retry_backoff_factor=_positive_float(reliability.get("tool_retry_backoff_factor"), 2.0),
+        tool_retry_max_delay_seconds=_positive_float(reliability.get("tool_retry_max_delay_seconds"), 60.0),
+        tool_retry_jitter=_bool(reliability.get("tool_retry_jitter"), True),
         chaos_namespace=_str(chaos.get("namespace"), "otel-demo"),
         chaos_flagd_service=_str(chaos.get("flagd_service"), "flagd"),
         chaos_flagd_service_port=_positive_int(chaos.get("flagd_service_port"), 8016),
@@ -364,6 +370,13 @@ def _positive_int(value: Any, default: int) -> int:
     parsed = _int(value, default)
     if parsed < 1:
         raise SettingsError(f"Expected a positive integer, got: {value!r}")
+    return parsed
+
+
+def _nonnegative_int(value: Any, default: int) -> int:
+    parsed = _int(value, default)
+    if parsed < 0:
+        raise SettingsError(f"Expected a non-negative integer, got: {value!r}")
     return parsed
 
 

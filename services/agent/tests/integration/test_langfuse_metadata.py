@@ -26,14 +26,14 @@ def test_trace_metadata_contains_protocol_ids():
         a2a_task_id="task-1",
     )
 
-    assert metadata["environment"] == "test"
+    assert "environment" not in metadata
     assert metadata["assistant_id"] == "agent-test"
     assert metadata["protocol"] == "a2a"
     assert metadata["thread_id"] == "thread-1"
     assert metadata["a2a_task_id"] == "task-1"
     assert metadata["langfuse_session_id"] == "thread-1"
     assert metadata["langfuse_trace_name"] == "handle-a2a-task"
-    assert metadata["langfuse_tags"] == ["ops_pilot", "a2a", "test"]
+    assert metadata["langfuse_tags"] == ["ops_pilot", "a2a"]
 
 
 def test_trace_metadata_maps_user_id_to_langfuse_user_id():

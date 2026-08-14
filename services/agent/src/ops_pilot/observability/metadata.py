@@ -21,14 +21,13 @@ def build_trace_metadata(
 ) -> dict[str, Any]:
     session_id = thread_id or a2a_context_id
     metadata: dict[str, Any] = {
-        "environment": settings.app_env,
         "assistant_id": settings.assistant_id,
         "protocol": protocol,
         "model_provider": settings.model_provider,
         "model_name": settings.model_name,
         "sap_model_name": settings.sap_model_name,
         "langfuse_trace_name": _trace_name(protocol),
-        "langfuse_tags": _trace_tags(settings, protocol),
+        "langfuse_tags": _trace_tags(protocol),
     }
     if session_id:
         metadata["langfuse_session_id"] = session_id[:200]
@@ -133,5 +132,5 @@ def build_model_metadata(settings: Settings, model: Any) -> dict[str, Any]:
     }
 
 
-def _trace_tags(settings: Settings, protocol: str) -> list[str]:
-    return ["ops_pilot", protocol, settings.app_env]
+def _trace_tags(protocol: str) -> list[str]:
+    return ["ops_pilot", protocol]

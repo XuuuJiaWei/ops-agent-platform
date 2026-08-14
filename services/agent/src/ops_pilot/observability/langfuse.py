@@ -60,7 +60,7 @@ def create_callback_handler(settings: Settings) -> TracingSetup:
 
     return TracingSetup(
         enabled=True,
-        callbacks=(CallbackHandler(public_key=settings.langfuse_public_key),),
+        callbacks=(CallbackHandler(),),
         client=client,
     )
 

@@ -227,6 +227,11 @@ load_cases_from_yaml(cases_dir)
 
 **Langfuse 可选性**：`get_client()` 在未配置 Langfuse 凭据时返回 no-op 单例，`run_experiment` 仍然在本地执行所有 task 和 evaluator，只是不上传 trace。
 
+**观测数据模型**：一个 experiment item 对应一条自包含 trace；`run-eval-case` agent observation
+嵌套 LangChain 自动生成的 `generation` 与 `tool` observations。item evaluator 产生 item score，
+run evaluator 只产生聚合 score。稳定的 observation name/type/input/output 是 evaluator 和 dashboard
+的依赖，不再用手工 span 包装复制框架 callback 已经记录的步骤。
+
 ---
 
 ## 6. Chaos 注入循环

@@ -33,7 +33,7 @@ def test_runnable_config_forwards_deepagents_recursion_limit_as_top_level_key() 
     assert metadata["langfuse_session_id"] == "thread-1"
     assert metadata["langfuse_trace_name"] == "handle-copilotkit-run"
     assert config.get("run_name") == "handle-copilotkit-run"
-    assert config.get("tags") == ["ops_pilot", "copilotkit-agui", "test"]
+    assert config.get("tags") == ["ops_pilot", "copilotkit-agui"]
 
 
 def test_runnable_config_does_not_invent_recursion_limit_when_graph_has_no_bound_config() -> None:

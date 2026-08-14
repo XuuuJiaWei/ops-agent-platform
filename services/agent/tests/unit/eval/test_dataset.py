@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from langfuse.api import NotFoundError
 
 from ops_pilot.eval.dataset import (
     EvalDatasetError,
@@ -214,17 +215,51 @@ def test_sync_and_verify_uses_local_truth_and_order(tmp_path) -> None:
     assert [item.input for item in result] == ["one", "two"]
 
 
-def test_langfuse_reachability_retries_transient_failures() -> None:
-    outcomes = iter((TimeoutError("TLS"), False, True))
-
+def test_langfuse_reachability_fails_closed_without_a_second_retry_layer() -> None:
     class FakeLangfuse:
         def auth_check(self):
-            outcome = next(outcomes)
-            if isinstance(outcome, BaseException):
-                raise outcome
-            return outcome
+            raise TimeoutError("TLS")
 
-    assert langfuse_client_is_reachable(FakeLangfuse(), attempts=3, backoff_seconds=0) is True
+    assert langfuse_client_is_reachable(FakeLangfuse()) is False
+
+
+def test_sync_and_verify_creates_a_missing_dataset_via_sdk_not_found(tmp_path) -> None:
+    path = tmp_path / "cases.yaml"
+    path.write_text("- id: first\n  prompt: one\n  category: diagnosis\n", encoding="utf-8")
+    cases = load_cases_from_yaml(path)
+
+    class FakeLangfuse:
+        gets = 0
+        creates = 0
+        items: dict[str, SimpleNamespace] = {}
+
+        def get_dataset(self, _name):
+            self.gets += 1
+            if self.gets == 1:
+                raise NotFoundError(body={"message": "missing"})
+            return SimpleNamespace(items=list(self.items.values()))
+
+        def create_dataset(self, **_kwargs):
+            self.creates += 1
+
+        def create_dataset_item(self, **kwargs):
+            self.items[kwargs["id"]] = SimpleNamespace(
+                id=kwargs["id"],
+                input=kwargs["input"],
+                expected_output=kwargs["expected_output"],
+                metadata=kwargs["metadata"],
+            )
+
+        def flush(self):
+            pass
+
+    client = FakeLangfuse()
+
+    result = sync_and_verify_cases_to_langfuse(cases, "new", langfuse=client)
+
+    assert [item.id for item in result] == ["first"]
+    assert client.gets == 3
+    assert client.creates == 1
 
 
 def test_sync_skips_items_that_already_match_local_truth(tmp_path) -> None:

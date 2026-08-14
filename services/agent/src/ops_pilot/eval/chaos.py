@@ -357,8 +357,8 @@ async def run_chaos_eval(
 
     from ops_pilot.agent.factory import create_agent_runtime_async
     from ops_pilot.eval.dataset import (
-        close_langfuse_client,
         create_langfuse_client,
+        flush_langfuse_client,
         langfuse_client_is_reachable,
         load_cases_from_yaml,
         sync_and_verify_cases_to_langfuse,
@@ -506,7 +506,11 @@ async def run_chaos_eval(
                 await _close_runtime(runtime)
             except BaseException as exc:
                 cleanup_error = exc
-        close_langfuse_client(langfuse)
+        try:
+            flush_langfuse_client(langfuse)
+        except BaseException as exc:
+            if cleanup_error is None:
+                cleanup_error = exc
 
     if cleanup_error is not None:
         print(f"error: chaos cleanup failed: {cleanup_error}")

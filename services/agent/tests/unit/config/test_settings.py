@@ -24,7 +24,9 @@ def test_load_settings_defaults_with_empty_config():
     assert settings.mcp.servers == ()
     assert settings.reliability_enabled is True
     assert settings.run_deadline_seconds == 600.0
-    assert settings.tool_retry_max_attempts == 3
+    assert settings.model_call_limit == 50
+    assert settings.tool_call_limit == 200
+    assert settings.tool_retry_max_retries == 2
     assert settings.chaos_namespace == "otel-demo"
     assert settings.chaos_flagd_service == "flagd"
     assert settings.chaos_flagd_service_port == 8016
@@ -41,19 +43,25 @@ def test_load_settings_reads_reliability_policy() -> None:
         config={
             "reliability": {
                 "run_deadline_seconds": 90,
-                "max_attempts": 2,
-                "initial_backoff_seconds": 0,
-                "backoff_multiplier": 3,
-                "jitter_ratio": 0,
+                "model_call_limit": 12,
+                "tool_call_limit": 34,
+                "tool_retry_max_retries": 4,
+                "tool_retry_initial_delay_seconds": 0,
+                "tool_retry_backoff_factor": 3,
+                "tool_retry_max_delay_seconds": 15,
+                "tool_retry_jitter": False,
             }
         },
     )
 
     assert settings.run_deadline_seconds == 90
-    assert settings.tool_retry_max_attempts == 2
-    assert settings.tool_retry_initial_backoff_seconds == 0
-    assert settings.tool_retry_backoff_multiplier == 3
-    assert settings.tool_retry_jitter_ratio == 0
+    assert settings.model_call_limit == 12
+    assert settings.tool_call_limit == 34
+    assert settings.tool_retry_max_retries == 4
+    assert settings.tool_retry_initial_delay_seconds == 0
+    assert settings.tool_retry_backoff_factor == 3
+    assert settings.tool_retry_max_delay_seconds == 15
+    assert settings.tool_retry_jitter is False
 
 
 def test_load_settings_reads_reasoning_policy():

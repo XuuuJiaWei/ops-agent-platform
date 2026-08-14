@@ -7,9 +7,9 @@
 | 领域 | 官方能力 | 本项目保留 | 已删除 |
 | --- | --- | --- | --- |
 | MCP | `MultiServerMCPClient.get_tools()`；每次工具调用创建 session；`isError` 默认作为错误 ToolMessage 返回模型 | 配置解析、并发发现、required/optional、allowlist、HITL/retry 策略映射 | persistent session manager、generation/reconnect proxy、session owner/close 聚合、启动重试 |
-| 工具重试 | LangChain `ToolRetryMiddleware` | 仅对 `retry_tools` 启用有界退避；run deadline/cancel | 自研 execution journal、Postgres advisory lock、retry middleware、circuit breaker、serde |
+| 运行保护 | LangChain `ModelCallLimitMiddleware`、`ToolCallLimitMiddleware`、`ToolRetryMiddleware` | 仅对 `retry_tools` 重试；协议级 run deadline/cancel | 自研 execution journal、Postgres advisory lock、retry middleware、circuit breaker、serde、无输入来源的 system-message 补丁 |
 | HITL | DeepAgents `interrupt_on` + checkpointer；LangGraph v2 `result.interrupts` / `Command(resume=...)` | 生产 runtime 使用 HITL；自动 eval/chaos 显式 bypass；v2 结果遇 interrupt 不会被当最终回答 | 把 v1 `__interrupt__` 前的模型过渡文本当最终输出的隐式行为 |
-| Langfuse | `get_client()` 单例、LangChain `CallbackHandler`、原生 async task/evaluator、SDK trace 传播 | 本地 YAML 同步为 dataset mirror；SDK experiment 与 evaluator；进程边界 flush/shutdown | 多 client、手工 OTel provider 引用计数、手工 span 包装、`run_coroutine_threadsafe` 跨 loop 桥 |
+| Langfuse | `get_client()` 单例、无参数 `CallbackHandler()`、原生 async task/evaluator、SDK trace 属性传播 | 本地 YAML 同步为 dataset mirror；SDK experiment 与 evaluator；短进程边界 flush | 多 client、手工 OTel provider 引用计数、手工 span 包装、`run_coroutine_threadsafe` 跨 loop 桥、共享 client 提前 shutdown |
 | OTel Demo chaos | flagd-ui `/feature/api/read` 与 `/feature/api/write` 完整文档 API；OFREP 数据面 | 每个 case 一个有界 port-forward、完整文档 lease、OFREP 连续稳定读、串行 case、精确恢复 | ConfigMap/live file 双写、kubectl 重试状态机、主动执行 MCP “健康探针”、重复恢复检查 |
 
 ## 为什么 MCP 不需要本地长连接层
@@ -22,17 +22,61 @@ runtime 的 event loop。
 
 来源：[langchain-mcp-adapters README](https://github.com/langchain-ai/langchain-mcp-adapters#multiple-mcp-servers)
 
+需要注意文档版本差异：DeepAgents customization 页面当前示例仍写成
+`async with MultiServerMCPClient(...)`，但本项目锁定的 `langchain-mcp-adapters 0.3.1`
+已经明确让 `__aenter__` 抛出 `NotImplementedError`，`get_tools()` 的 docstring 则明确每次
+tool call 创建新 session。因此实现以已安装 adapter 的公开接口为准，不重新引入 context
+manager 或本地 session owner。
+
+## DeepAgents customization 审计
+
+`create_deep_agent` 已经内置 filesystem、subagent、summarization、dangling tool-call repair、
+prompt caching、skills、memory 与 HITL 的固定 middleware stack。项目不应复制这些能力。
+本轮进一步做了两类替换：
+
+- 删除 `NormalizeSystemMessagesMiddleware`。仓库没有任何生产代码向历史消息插入额外
+  `SystemMessage`，它只有自己的构造型单测；DeepAgents 内置 middleware 已通过
+  `request.system_message` 组合提示词。
+- 使用官方 `ModelCallLimitMiddleware` 与 `ToolCallLimitMiddleware` 限制一次 run 的 model/tool
+  调用次数；`ToolRetryMiddleware` 配置直接采用官方字段，并只重试显式 `retry_tools` 的
+  `TimeoutError` / `ConnectionError`。
+
+仍保留的 `RunController` 不是 agent middleware 的重复实现：它属于 CopilotKit/A2A 协议 seam，
+负责外部 run id、整体 wall-clock deadline 和用户取消。远程 sandbox 的租约、工作区映射和 skill
+上传同样没有 DeepAgents 的一一对应组件；底层文件/执行能力已经直接使用官方
+`OpensandboxBackend`。
+
+来源：
+
+- [DeepAgents customization](https://docs.langchain.com/oss/python/deepagents/customization)
+- [LangChain prebuilt middleware](https://docs.langchain.com/oss/python/langchain/middleware/built-in)
+- [DeepAgents production guardrails](https://docs.langchain.com/oss/python/deepagents/going-to-production)
+
 ## 为什么 Langfuse 不需要线程桥和私有 OTel 管理
 
 Langfuse Experiment SDK 原生接受 async task 和 async evaluator，并通过 `max_concurrency`
-控制并发。SDK v3+ 使用 `get_client()` 单例，LangChain 集成由官方 `CallbackHandler` 完成。
+控制并发。SDK 使用 `get_client()` 单例，LangChain 集成由无参数 `CallbackHandler()` 完成。
 因此 eval task 可以直接是 async 函数；SDK 选择执行 loop，本项目不再把 coroutine 派发回
 runtime 创建 loop，也不直接 shutdown 全局 OpenTelemetry provider。
+
+数据模型按官方约定收敛为：一次 agent 请求/一次 eval item 是一条 trace；model call 是
+`generation`，tool call 是 `tool`，由 LangChain callback 自动嵌套；`thread_id` / A2A context
+映射为 `session_id`。trace name 与 tags 保持稳定，environment 由 Langfuse client 的专用
+`environment` 属性设置，不再同时塞进 tag 和普通 metadata。SDK callback 会把
+`langfuse_session_id`、`langfuse_user_id`、`langfuse_trace_name`、`langfuse_tags` 转换为
+trace-level attributes 并传播给所有 observations。
+
+evaluation 保持官方三层语义：本地 YAML 是可审查的测试源，Langfuse Dataset 是协作镜像，
+`run_experiment` 负责 offline experiment；item evaluators 产生 item scores，run evaluators 只做
+聚合。线上 trace evaluator 不混入离线 chaos runner。
 
 来源：
 
 - [Langfuse Experiments via SDK](https://langfuse.com/docs/evaluation/experiments/experiments-via-sdk)
 - [Langfuse LangChain integration](https://langfuse.com/docs/integrations/langchain/tracing)
+- [Langfuse data model](https://langfuse.com/docs/observability/data-model)
+- [Langfuse trace best practices](https://langfuse.com/docs/observability/best-practices)
+- [Langfuse evaluation overview](https://langfuse.com/docs/evaluation/overview)
 
 ## 为什么 Chaos 只写 flagd-ui
 

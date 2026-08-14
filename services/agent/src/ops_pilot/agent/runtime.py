@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Any
 
 from langchain_core.runnables import RunnableConfig
 
-from ops_pilot.agent.middleware import NormalizeSystemMessagesMiddleware
 from ops_pilot.config.settings import Settings, load_settings
 from ops_pilot.mcp.registry import MCPRegistry, create_mcp_registry
 from ops_pilot.models import create_chat_model
@@ -200,7 +199,7 @@ async def build_agent_runtime(
     space_repository: SpaceRepository | None = None
     space_repository_closer: Callable[[], Awaitable[None]] | None = None
     try:
-        retry_middleware = _create_tool_retry_middleware(resolved_settings, mcp_registry.retry_tools)
+        middleware = _create_runtime_middleware(resolved_settings, mcp_registry.retry_tools)
         space_repository, space_repository_closer = await create_space_repository(resolved_settings)
         tools = [*mcp_registry.tools, *build_space_tools(space_repository), *extra_tools]
         checkpointer, checkpointer_closer = (
@@ -218,7 +217,7 @@ async def build_agent_runtime(
             checkpointer=checkpointer,
             backend=sandbox.backend if sandbox is not None else None,
             interrupt_on=interrupt_on,
-            retry_middleware=retry_middleware,
+            middleware=middleware,
         )
     except Exception:
         if checkpointer_closer is not None:
@@ -278,19 +277,36 @@ def _resolve_backend_skill_paths(
     return sync_result.remote_paths
 
 
-def _create_tool_retry_middleware(settings: Settings, retry_tools: tuple[str, ...]) -> Any | None:
-    if not settings.reliability_enabled or not retry_tools:
-        return None
-    from langchain.agents.middleware import ToolRetryMiddleware
+def _create_runtime_middleware(settings: Settings, retry_tools: tuple[str, ...]) -> list[Any]:
+    """Build the production guardrails from LangChain's official middleware."""
 
-    return ToolRetryMiddleware(
-        tools=list(retry_tools),
-        max_retries=max(0, settings.tool_retry_max_attempts - 1),
-        initial_delay=settings.tool_retry_initial_backoff_seconds,
-        backoff_factor=settings.tool_retry_backoff_multiplier,
-        jitter=settings.tool_retry_jitter_ratio > 0,
-        on_failure="continue",
+    if not settings.reliability_enabled:
+        return []
+
+    from langchain.agents.middleware import (
+        ModelCallLimitMiddleware,
+        ToolCallLimitMiddleware,
+        ToolRetryMiddleware,
     )
+
+    middleware: list[Any] = [
+        ModelCallLimitMiddleware(run_limit=settings.model_call_limit, exit_behavior="error"),
+        ToolCallLimitMiddleware(run_limit=settings.tool_call_limit, exit_behavior="error"),
+    ]
+    if retry_tools:
+        middleware.append(
+            ToolRetryMiddleware(
+                tools=list(retry_tools),
+                max_retries=settings.tool_retry_max_retries,
+                retry_on=(TimeoutError, ConnectionError),
+                initial_delay=settings.tool_retry_initial_delay_seconds,
+                backoff_factor=settings.tool_retry_backoff_factor,
+                max_delay=settings.tool_retry_max_delay_seconds,
+                jitter=settings.tool_retry_jitter,
+                on_failure="continue",
+            )
+        )
+    return middleware
 
 
 def _create_deep_agent(
@@ -303,7 +319,7 @@ def _create_deep_agent(
     checkpointer: Any | None,
     backend: Any | None,
     interrupt_on: dict[str, Any] | None = None,
-    retry_middleware: Any | None = None,
+    middleware: Sequence[Any] = (),
 ) -> Any:
     try:
         from deepagents import create_deep_agent
@@ -324,12 +340,10 @@ def _create_deep_agent(
         kwargs["interrupt_on"] = interrupt_on
 
     copilotkit_middleware = _create_copilotkit_middleware()
-    middleware = [NormalizeSystemMessagesMiddleware()]
-    if retry_middleware is not None:
-        middleware.insert(0, retry_middleware)
+    configured_middleware = list(middleware)
     if copilotkit_middleware is not None:
-        middleware.insert(0, copilotkit_middleware)
-    kwargs["middleware"] = middleware
+        configured_middleware.insert(0, copilotkit_middleware)
+    kwargs["middleware"] = configured_middleware
 
     if checkpointer is not None:
         kwargs["checkpointer"] = checkpointer

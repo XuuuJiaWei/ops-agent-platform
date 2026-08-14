@@ -27,8 +27,8 @@ The product currently exposes three primary surfaces:
 - CopilotKit-compatible chat streaming through AG-UI.
 - A2A agent card discovery and JSON-RPC execution through the official Python SDK.
 - Durable LangGraph checkpoints, A2A tasks, CopilotKit event replay, and agent-authored Spaces through PostgreSQL.
-- Official `MultiServerMCPClient` tool lifecycle, bounded retry for explicitly
-  idempotent tools, run deadlines, and cancellation.
+- Official `MultiServerMCPClient` tool lifecycle, LangChain model/tool call
+  limits, bounded retry for explicitly idempotent tools, run deadlines, and cancellation.
 - Human-in-the-loop approval for configured high-risk tools and optional remote
   sandbox isolation for filesystem and command execution.
 - Optional Langfuse tracing when credentials are configured.
@@ -177,8 +177,9 @@ model credentials.
 The runtime does not claim exactly-once execution across external systems.
 LangChain's official `ToolRetryMiddleware` is enabled only for tools listed in
 `retry_tools`; destructive and non-idempotent tools belong in `hitl_tools` and
-are never retried automatically. Protocol-level deadlines and cancellation are
-owned by `RunController`. Business idempotency must be implemented by the
+are never retried automatically. Official model/tool call-limit middleware caps
+agent loops; protocol-level deadlines and cancellation are owned by
+`RunController`. Business idempotency must be implemented by the
 downstream service rather than simulated by an in-process tool-call journal.
 
 ## License

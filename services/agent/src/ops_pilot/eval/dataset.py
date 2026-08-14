@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import time
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from langfuse.api import NotFoundError
 from langfuse.experiment import LocalExperimentItem
 
 from ops_pilot.config.paths import SERVICE_ROOT, resolve_path
@@ -293,7 +293,7 @@ def sync_cases_to_langfuse(
     """Upsert local cases into a Langfuse dataset and return the item count."""
 
     client = langfuse or create_langfuse_client(settings)
-    _ensure_langfuse_dataset(client, dataset_name)
+    _get_or_create_langfuse_dataset(client, dataset_name)
     count = 0
     for case in cases:
         client.create_dataset_item(
@@ -320,8 +320,7 @@ def sync_and_verify_cases_to_langfuse(
     """Push local truth, read it back, verify exact equality, and preserve local order."""
 
     local_cases = tuple(cases)
-    _ensure_langfuse_dataset(langfuse, dataset_name)
-    dataset = langfuse.get_dataset(dataset_name)
+    dataset = _get_or_create_langfuse_dataset(langfuse, dataset_name)
     existing_by_id = {str(item.id): item for item in dataset.items}
     dirty = tuple(
         case
@@ -365,46 +364,34 @@ def create_langfuse_client(settings: Settings | None = None) -> Any:
 
 def langfuse_client_is_reachable(
     langfuse: Any,
-    *,
-    attempts: int = 3,
-    backoff_seconds: float = 1.0,
 ) -> bool:
-    """Verify connectivity to a (self-hosted) Langfuse instance before running an experiment."""
+    """Use the SDK authentication check as the single bounded preflight."""
 
     auth_check = getattr(langfuse, "auth_check", None)
     if not callable(auth_check):
         return True
-    for attempt in range(1, attempts + 1):
-        try:
-            if auth_check():
-                return True
-        except Exception:  # noqa: BLE001 - unreachable host / bad creds remain fail-closed after retries.
-            pass
-        if attempt < attempts:
-            time.sleep(backoff_seconds * attempt)
-    return False
-
-
-def close_langfuse_client(langfuse: Any) -> None:
-    """Flush and shut down a Langfuse client so short-lived runs upload before exit."""
-
     try:
-        langfuse.shutdown()
-    except Exception:  # noqa: BLE001 - best-effort teardown at process boundary.
-        pass
+        return bool(auth_check())
+    except Exception:  # noqa: BLE001 - SDK-specific connectivity/authentication failures fail closed.
+        return False
 
 
-def _ensure_langfuse_dataset(langfuse: Any, dataset_name: str) -> None:
+def flush_langfuse_client(langfuse: Any) -> None:
+    """Flush buffered observations without shutting down the shared singleton."""
+
+    langfuse.flush()
+
+
+def _get_or_create_langfuse_dataset(langfuse: Any, dataset_name: str) -> Any:
     try:
+        return langfuse.get_dataset(dataset_name)
+    except NotFoundError:
         langfuse.create_dataset(
             name=dataset_name,
             description="ops_pilot agent evaluation dataset",
             metadata={"source": "ops_pilot local YAML eval cases"},
         )
-    except Exception as exc:  # noqa: BLE001 - SDK raises generated API exception classes.
-        message = str(exc).lower()
-        if "already" not in message and "exists" not in message and "409" not in message:
-            raise
+        return langfuse.get_dataset(dataset_name)
 
 
 def _required_string(data: Mapping[str, Any], key: str, source: str) -> str:
