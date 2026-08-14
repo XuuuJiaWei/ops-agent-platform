@@ -4,6 +4,40 @@ import { dirname, join } from "node:path";
 
 const WINDOWS_COMMAND_SHIMS = new Set(["pnpm"]);
 
+export function buildLangGraphCommand(agentDir, env = process.env) {
+  const args = [
+    "run",
+    "--with",
+    "langgraph-cli[inmem]>=0.4.31,<1",
+    "langgraph",
+    "dev",
+    "--host",
+    env.LANGGRAPH_HOST ?? "127.0.0.1",
+    "--port",
+    env.LANGGRAPH_PORT ?? "2024",
+    "--studio-url",
+    env.LANGGRAPH_STUDIO_URL ?? "http://localhost:3000",
+    "--no-browser",
+  ];
+  if (!isEnabled(env.LANGGRAPH_RELOAD ?? "false")) {
+    args.push("--no-reload");
+  }
+  return [
+    "uv",
+    args,
+    {
+      cwd: agentDir,
+      env: {
+        ...env,
+        LANGCHAIN_TRACING_V2: env.LANGCHAIN_TRACING_V2 ?? "false",
+        LANGGRAPH_NO_VERSION_CHECK: env.LANGGRAPH_NO_VERSION_CHECK ?? "true",
+        LANGSMITH_TRACING: env.LANGSMITH_TRACING ?? "false",
+      },
+      stdio: "inherit",
+    },
+  ];
+}
+
 export function resolveCommandInvocation(command, args, options = {}) {
   const platform = options.platform ?? process.platform;
   const env = options.env ?? process.env;
@@ -28,4 +62,8 @@ export function resolvePackageBinary(packageName, binaryName, fromDir) {
     throw new Error(`Package '${packageName}' does not define the '${binaryName}' binary.`);
   }
   return join(dirname(packageJsonPath), binaryPath);
+}
+
+function isEnabled(value) {
+  return ["1", "true", "yes"].includes(String(value).toLowerCase());
 }

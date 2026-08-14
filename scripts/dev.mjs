@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { pipeBackendStderr } from "./dev-output.mjs";
-import { resolveCommandInvocation, resolvePackageBinary } from "./dev-command.mjs";
+import { buildLangGraphCommand, resolveCommandInvocation, resolvePackageBinary } from "./dev-command.mjs";
 import { DevProcessSupervisor, processResultExitCode } from "./dev-process.mjs";
 
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -14,7 +14,7 @@ const agentDir = join(rootDir, "services", "agent");
 const copilotDir = join(rootDir, "apps", "copilot-runtime");
 const webDir = join(rootDir, "apps", "web");
 const mode = process.argv[2] ?? "all";
-const supportedModes = new Set(["all", "backend", "check", "copilot", "web"]);
+const supportedModes = new Set(["all", "backend", "check", "copilot", "langgraph", "web"]);
 
 if (!supportedModes.has(mode)) {
   console.error(`Unknown dev mode '${mode}'. Expected one of: ${[...supportedModes].join(", ")}.`);
@@ -24,7 +24,7 @@ if (!supportedModes.has(mode)) {
 if (process.env.OPS_PILOT_DEV_ENV_READY !== "1") {
   assertWorkspace();
 }
-const devEnv = resolveDevEnvironment();
+const devEnv = mode === "langgraph" ? { ...process.env } : resolveDevEnvironment();
 
 if (mode === "check") {
   console.log("Local development preflight passed.");
@@ -74,6 +74,9 @@ async function runMode(processes, env, signal) {
   }
   if (mode === "copilot") {
     return processResultExitCode(await processes.start("copilot", ...copilotCommand(env)).closed);
+  }
+  if (mode === "langgraph") {
+    return processResultExitCode(await processes.start("langgraph", ...buildLangGraphCommand(agentDir, env)).closed);
   }
 
   await waitForBackends(env, signal);
@@ -134,6 +137,7 @@ function assertWorkspace() {
     "apps/web/package.json",
     "apps/copilot-runtime/package.json",
     "services/agent/pyproject.toml",
+    "services/agent/langgraph.json",
   ];
   const missingFiles = requiredFiles.filter((path) => !existsSync(join(rootDir, path)));
   if (missingFiles.length > 0) {

@@ -6,7 +6,7 @@
     "dev": "node ./scripts/dev.mjs",
     "dev:web": "node ./scripts/dev.mjs web",
     "dev:backend": "node ./scripts/dev.mjs backend",
-    "dev:langgraph": "sh ./scripts/dev-langgraph.sh",
+    "dev:langgraph": "node ./scripts/dev.mjs langgraph",
     "dev:copilot": "node ./scripts/dev.mjs copilot",
     "dev:check": "node ./scripts/dev.mjs check",
     "lint": "pnpm run lint:backend && pnpm run lint:web",
