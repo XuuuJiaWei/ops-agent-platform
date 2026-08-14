@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import sys
 from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any
@@ -19,6 +20,7 @@ from ops_pilot.models.smoke import smoke_bind_tools, smoke_invoke, smoke_model_i
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    _configure_event_loop_policy()
     parser = argparse.ArgumentParser(prog="ops_pilot")
     subcommands = parser.add_subparsers(dest="command", required=True)
 
@@ -56,6 +58,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "chaos":
         return _run_server(run_chaos_command(args))
     return 2
+
+
+def _configure_event_loop_policy() -> None:
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 
 def _run_server(coro: Any) -> int:
@@ -112,7 +119,7 @@ def _serve_backend(host: str | None, port: int | None) -> int:
     # KeyboardInterrupt surfaces from run() and we swallow it at this CLI boundary
     # for a clean exit (the same thing uvicorn's own CLI does).
     app = asyncio.run(create_backend_app(settings))
-    config = uvicorn.Config(app, host=settings.chat_host, port=settings.chat_port, log_level="info")
+    config = uvicorn.Config(app, host=settings.chat_host, port=settings.chat_port, log_level="info", loop="none")
     try:
         uvicorn.Server(config).run()
     except KeyboardInterrupt:
