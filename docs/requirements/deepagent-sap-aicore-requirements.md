@@ -24,7 +24,7 @@ Sources: [DeepAgents customization](https://docs.langchain.com/oss/python/deepag
 - [ ] Frontend package manager: `pnpm`.
 - [ ] Frontend framework: Vite + React + Tailwind.
 - [ ] Frontend SDK: official `@langchain/react` `useStream`.
-- [ ] Local dev orchestration: `pnpm` scripts + `concurrently`.
+- [ ] Local dev orchestration: `pnpm` scripts + a cross-platform Node process supervisor.
 - [ ] Agent runtime: LangChain DeepAgents / LangGraph-compatible graph.
 - [ ] Model provider: SAP AI Core via SAP Cloud SDK for AI / `sap-ai-sdk-gen` LangChain integration.
 - [ ] Primary SAP model initialization path: `gen_ai_hub.proxy.langchain.init_llm(model_name=...)`.
@@ -74,7 +74,7 @@ Python 3.12 satisfies the current DeepAgents Python 3.11+ requirement identified
 - [ ] Python dependencies must use major-version-compatible top-level ranges and be resolved to exact versions in `uv.lock`.
 - [ ] Frontend dependencies must be resolved from latest stable releases at scaffold time and locked in `pnpm-lock.yaml`.
 - [ ] The local dev workflow must provide a single command, preferably `pnpm dev`, that starts all required local services.
-- [ ] The default local workflow must use `pnpm` scripts and `concurrently` for orchestration.
+- [ ] The default local workflow must use `pnpm` scripts and terminate the complete service process tree on one interrupt.
 - [ ] The backend must avoid relying on the system Python version.
 
 Acceptance criteria:
@@ -433,7 +433,7 @@ VITE_ASSISTANT_ID=agent
 
 - [ ] Initialize `uv` Python 3.12 backend project.
 - [ ] Initialize Vite + React + Tailwind frontend managed by `pnpm`.
-- [ ] Add `concurrently`-based `pnpm dev` script.
+- [ ] Add a cross-platform `pnpm dev` process supervisor.
 - [ ] Add `.env.example` and config loader.
 - [ ] Add health/startup checks.
 

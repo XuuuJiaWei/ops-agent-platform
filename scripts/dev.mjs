@@ -1,14 +1,18 @@
 #!/usr/bin/env node
 
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { pipeBackendStderr } from "./dev-output.mjs";
+import { resolveCommandInvocation, resolvePackageBinary } from "./dev-command.mjs";
+import { DevProcessSupervisor, processResultExitCode } from "./dev-process.mjs";
 
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const agentDir = join(rootDir, "services", "agent");
+const copilotDir = join(rootDir, "apps", "copilot-runtime");
+const webDir = join(rootDir, "apps", "web");
 const mode = process.argv[2] ?? "all";
 const supportedModes = new Set(["all", "backend", "check", "copilot", "web"]);
 
@@ -27,44 +31,99 @@ if (mode === "check") {
   process.exit(0);
 }
 
-if (mode === "all") {
-  process.exitCode = await run(
-    "pnpm",
-    [
-      "exec",
-      "concurrently",
-      "--names",
-      "web,backend,copilot",
-      "--prefix-colors",
-      "cyan,green,yellow",
-      "--kill-others-on-fail",
-      "node ./scripts/dev.mjs web",
-      "node ./scripts/dev.mjs backend",
-      "node ./scripts/dev.mjs copilot",
-    ],
-    { cwd: rootDir, env: devEnv },
-  );
-} else if (mode === "backend") {
-  process.exitCode = await run(
+const supervisor = new DevProcessSupervisor();
+const shutdownController = new AbortController();
+let interrupted = false;
+const handleSignal = (signal) => {
+  interrupted = true;
+  shutdownController.abort(new Error(`Received ${signal}`));
+  void supervisor.shutdown(signal);
+};
+const onSigint = () => handleSignal("SIGINT");
+const onSigterm = () => handleSignal("SIGTERM");
+const onSigbreak = () => handleSignal("SIGTERM");
+process.once("SIGINT", onSigint);
+process.once("SIGTERM", onSigterm);
+if (process.platform === "win32") {
+  process.once("SIGBREAK", onSigbreak);
+}
+
+try {
+  process.exitCode = await runMode(supervisor, devEnv, shutdownController.signal);
+} catch (error) {
+  if (!interrupted) {
+    throw error;
+  }
+  process.exitCode = 0;
+} finally {
+  process.removeListener("SIGINT", onSigint);
+  process.removeListener("SIGTERM", onSigterm);
+  process.removeListener("SIGBREAK", onSigbreak);
+  if (!shutdownController.signal.aborted) {
+    shutdownController.abort(new Error("Development stack stopped."));
+  }
+  await supervisor.shutdown(interrupted ? "SIGINT" : "SIGTERM");
+}
+
+async function runMode(processes, env, signal) {
+  if (mode === "all") {
+    return runAll(processes, env, signal);
+  }
+  if (mode === "backend") {
+    return processResultExitCode(await startBackend(processes, env).closed);
+  }
+  if (mode === "copilot") {
+    return processResultExitCode(await processes.start("copilot", ...copilotCommand(env)).closed);
+  }
+
+  await waitForBackends(env, signal);
+  return processResultExitCode(await processes.start("web", ...webCommand(env)).closed);
+}
+
+async function runAll(processes, env, signal) {
+  const backend = startBackend(processes, env);
+  const copilot = processes.start("copilot", ...copilotCommand(env));
+  const startup = await Promise.race([
+    waitForBackends(env, signal).then(() => null),
+    processes.waitForAny([backend, copilot]),
+  ]);
+  if (startup !== null) {
+    return processResultExitCode(startup);
+  }
+
+  const web = processes.start("web", ...webCommand(env));
+  return processResultExitCode(await processes.waitForAny([backend, copilot, web]));
+}
+
+function startBackend(processes, env) {
+  const backend = processes.start("backend", ...backendCommand(env));
+  if (backend.child.stderr !== null) {
+    pipeBackendStderr(backend.child.stderr, process.stderr, {
+      verboseMcp: isEnabled(env.OPS_PILOT_DEV_VERBOSE_MCP ?? "false"),
+    });
+  }
+  return backend;
+}
+
+function backendCommand(env) {
+  return [
     "uv",
-    ["run", "ops_pilot", "serve", "--host", devEnv.BACKEND_HOST, "--port", devEnv.BACKEND_PORT],
+    ["run", "ops_pilot", "serve", "--host", env.BACKEND_HOST, "--port", env.BACKEND_PORT],
     {
       cwd: agentDir,
-      env: devEnv,
-      formatBackendStderr: true,
+      env,
+      stdio: ["inherit", "inherit", "pipe"],
     },
-  );
-} else if (mode === "copilot") {
-  process.exitCode = await run("pnpm", ["--filter", "./apps/copilot-runtime", "dev"], {
-    cwd: rootDir,
-    env: devEnv,
-  });
-} else {
-  await waitForBackends(devEnv);
-  process.exitCode = await run("pnpm", ["--filter", "./apps/web", "dev:vite"], {
-    cwd: rootDir,
-    env: devEnv,
-  });
+  ];
+}
+
+function copilotCommand(env) {
+  return [process.execPath, [join(copilotDir, "src", "index.mjs")], { cwd: copilotDir, env, stdio: "inherit" }];
+}
+
+function webCommand(env) {
+  const viteBinary = resolvePackageBinary("vite", "vite", webDir);
+  return [process.execPath, [viteBinary], { cwd: webDir, env, stdio: "inherit" }];
 }
 
 function assertWorkspace() {
@@ -81,7 +140,8 @@ function assertWorkspace() {
     throw new Error(`Local stack is incomplete; missing: ${missingFiles.join(", ")}`);
   }
   for (const command of ["pnpm", "uv"]) {
-    const result = spawnSync(command, ["--version"], { stdio: "ignore" });
+    const invocation = resolveCommandInvocation(command, ["--version"]);
+    const result = spawnSync(invocation.command, invocation.args, { stdio: "ignore" });
     if (result.error || result.status !== 0) {
       throw new Error(`Missing command: ${command}`);
     }
@@ -136,7 +196,7 @@ function normalizePath(value) {
   return withLeadingSlash === "/" ? withLeadingSlash : withLeadingSlash.replace(/\/+$/, "");
 }
 
-async function waitForBackends(env) {
+async function waitForBackends(env, signal) {
   if (!isEnabled(env.WEB_WAIT_FOR_BACKENDS ?? "true")) {
     return;
   }
@@ -146,73 +206,55 @@ async function waitForBackends(env) {
   const copilotUrl = env.WEB_WAIT_COPILOT_INFO_URL ?? `http://127.0.0.1:${copilotPort}/api/copilotkit`;
   const healthUrl = env.WEB_WAIT_CHAT_HEALTH_URL ?? `${env.BACKEND_URL}/health`;
 
-  await waitForUrl("Copilot runtime", copilotUrl, timeoutSeconds, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ method: "info" }),
-  });
-  await waitForUrl("Backend", healthUrl, timeoutSeconds);
+  await waitForUrl(
+    "Copilot runtime",
+    copilotUrl,
+    timeoutSeconds,
+    signal,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ method: "info" }),
+    },
+  );
+  await waitForUrl("Backend", healthUrl, timeoutSeconds, signal);
 }
 
-async function waitForUrl(label, url, timeoutSeconds, options = {}) {
+async function waitForUrl(label, url, timeoutSeconds, shutdownSignal, options = {}) {
   console.log(`Waiting for ${label} at ${url} ...`);
   const deadline = Date.now() + timeoutSeconds * 1000;
   while (Date.now() < deadline) {
+    shutdownSignal.throwIfAborted();
     try {
-      const response = await fetch(url, { ...options, signal: AbortSignal.timeout(2_000) });
+      const requestSignal = AbortSignal.any([shutdownSignal, AbortSignal.timeout(2_000)]);
+      const response = await fetch(url, { ...options, signal: requestSignal });
       if (response.ok) {
         console.log(`${label} is ready.`);
         return;
       }
     } catch {
+      shutdownSignal.throwIfAborted();
       // The sibling process is still starting.
     }
-    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    await abortableDelay(1_000, shutdownSignal);
   }
   throw new Error(`Timed out waiting for ${label} at ${url} after ${timeoutSeconds}s.`);
 }
 
-function isEnabled(value) {
-  return ["1", "true", "yes"].includes(String(value).toLowerCase());
+function abortableDelay(milliseconds, signal) {
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timeout);
+      reject(signal.reason);
+    };
+    const timeout = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, milliseconds);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
-function run(command, args, options) {
-  return new Promise((resolve, reject) => {
-    const { formatBackendStderr = false, ...spawnOptions } = options;
-    const child = spawn(command, args, {
-      ...spawnOptions,
-      stdio: formatBackendStderr ? ["inherit", "inherit", "pipe"] : "inherit",
-    });
-    if (formatBackendStderr && child.stderr !== null) {
-      pipeBackendStderr(child.stderr, process.stderr, {
-        verboseMcp: isEnabled(spawnOptions.env.OPS_PILOT_DEV_VERBOSE_MCP ?? "false"),
-      });
-    }
-    let forwardedSignal;
-    const forward = (signal) => {
-      forwardedSignal = signal;
-      if (child.exitCode === null && child.signalCode === null) {
-        child.kill(signal);
-      }
-    };
-    const onSigint = () => forward("SIGINT");
-    const onSigterm = () => forward("SIGTERM");
-    process.once("SIGINT", onSigint);
-    process.once("SIGTERM", onSigterm);
-
-    child.once("error", reject);
-    child.once("close", (code, signal) => {
-      process.removeListener("SIGINT", onSigint);
-      process.removeListener("SIGTERM", onSigterm);
-      if (forwardedSignal) {
-        resolve(0);
-        return;
-      }
-      if (code !== null) {
-        resolve(code);
-        return;
-      }
-      resolve(signal === "SIGINT" || forwardedSignal === "SIGINT" ? 130 : 143);
-    });
-  });
+function isEnabled(value) {
+  return ["1", "true", "yes"].includes(String(value).toLowerCase());
 }

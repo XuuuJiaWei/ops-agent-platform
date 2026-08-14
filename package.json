@@ -37,7 +37,6 @@
     "eval:chaos": "cd services/agent && uv run ops_pilot chaos run --dataset-name otel_scenarios --run-name local"
   },
   "devDependencies": {
-    "concurrently": "^10.0.4",
     "eslint-config-prettier": "^10.1.8",
     "prettier": "^3.9.6"
   }
