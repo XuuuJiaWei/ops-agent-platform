@@ -151,35 +151,6 @@ class Settings(BaseSettings):
         True,
         validation_alias=_alias("tool_retry_jitter", "reliability", "tool_retry_jitter"),
     )
-    chaos_namespace: str = Field("otel-demo", validation_alias=_alias("chaos_namespace", "chaos", "namespace"))
-    chaos_flagd_service: str = Field(
-        "flagd",
-        validation_alias=_alias("chaos_flagd_service", "chaos", "flagd_service"),
-    )
-    chaos_flagd_service_port: Port = Field(
-        8016,
-        validation_alias=_alias("chaos_flagd_service_port", "chaos", "flagd_service_port"),
-    )
-    chaos_flagd_ui_port: Port = Field(
-        4000,
-        validation_alias=_alias("chaos_flagd_ui_port", "chaos", "flagd_ui_port"),
-    )
-    chaos_flag_sync_timeout_seconds: PositiveFloat = Field(
-        90.0,
-        validation_alias=_alias("chaos_flag_sync_timeout_seconds", "chaos", "flag_sync_timeout_seconds"),
-    )
-    chaos_poll_interval_seconds: PositiveFloat = Field(
-        1.0,
-        validation_alias=_alias("chaos_poll_interval_seconds", "chaos", "poll_interval_seconds"),
-    )
-    chaos_stable_reads: PositiveInt = Field(
-        2,
-        validation_alias=_alias("chaos_stable_reads", "chaos", "stable_reads"),
-    )
-    chaos_signal_warmup_seconds: NonNegativeFloat = Field(
-        15.0,
-        validation_alias=_alias("chaos_signal_warmup_seconds", "chaos", "signal_warmup_seconds"),
-    )
     open_sandbox_enabled: bool = False
     open_sandbox_domain: str | None = None
     open_sandbox_api_key: str | None = None

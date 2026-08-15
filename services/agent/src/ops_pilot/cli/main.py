@@ -11,9 +11,9 @@ from typing import Any
 import uvicorn
 
 from ops_pilot.agent.runtime import build_agent_runtime
+from ops_pilot.benchmark.aiopslab import run_aiopslab_problem
 from ops_pilot.config.mcp_schema import MCPConfig
 from ops_pilot.config.settings import load_settings
-from ops_pilot.eval.cli import add_chaos_subcommands, add_eval_subcommands, run_chaos_command, run_eval_command
 from ops_pilot.health.status import build_runtime_status, health_snapshot
 from ops_pilot.mcp.status import MCPLoadStatus
 from ops_pilot.models.smoke import smoke_bind_tools, smoke_invoke, smoke_model_invocation
@@ -35,12 +35,18 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     smoke = subcommands.add_parser("smoke", help="Run local smoke checks.")
     smoke_subcommands = smoke.add_subparsers(dest="smoke_command", required=True)
-    smoke_subcommands.add_parser("model", help="Run SAP model invocation and bind_tools checks.")
+    smoke_subcommands.add_parser("model", help="Run model invocation and bind_tools checks.")
     smoke_subcommands.add_parser("agent", help="Build the DeepAgent and invoke a simple prompt.")
     smoke_subcommands.add_parser("a2a", help="Build the A2A agent card and app route table.")
 
-    add_eval_subcommands(subcommands)
-    add_chaos_subcommands(subcommands)
+    benchmark = subcommands.add_parser("benchmark", help="Run the AIOpsLab benchmark.")
+    benchmark.add_argument("--problem", required=True, help="AIOpsLab problem id.")
+    benchmark.add_argument(
+        "--base-url",
+        default="http://127.0.0.1:1819",
+        help="AIOpsLab bridge URL (default: http://127.0.0.1:1819).",
+    )
+    benchmark.add_argument("--deadline-seconds", type=float, default=300.0)
 
     args = parser.parse_args(argv)
     if args.command == "settings":
@@ -54,11 +60,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _serve_backend(args.host, args.port)
     if args.command == "smoke":
         return _smoke(args.smoke_command)
-    if args.command == "eval":
-        return _run_server(run_eval_command(args))
-    if args.command == "chaos":
-        return _run_server(run_chaos_command(args))
+    if args.command == "benchmark":
+        return _run_server(_run_benchmark(args))
     return 2
+
+
+async def _run_benchmark(args: argparse.Namespace) -> int:
+    result = await run_aiopslab_problem(
+        args.problem,
+        base_url=args.base_url,
+        deadline_seconds=args.deadline_seconds,
+    )
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
 
 
 def _run_server(coro: Any) -> int:
@@ -107,13 +121,6 @@ def _serve_backend(host: str | None, port: int | None) -> int:
     settings = settings.model_copy(
         update={"chat_host": host or settings.chat_host, "chat_port": port or settings.chat_port}
     )
-    # Runtime-owned resources such as MCP stdio sessions and sandboxes are
-    # created by the app lifespan inside uvicorn's event loop and cleaned up
-    # from the same loop.
-    # Uvicorn owns SIGINT through its capture_signals() contextmanager, runs a
-    # graceful shutdown, then re-raises the captured signal by design — so
-    # KeyboardInterrupt surfaces from run() and we swallow it at this CLI boundary
-    # for a clean exit (the same thing uvicorn's own CLI does).
     app = create_backend_app(settings)
     config = uvicorn.Config(app, host=settings.chat_host, port=settings.chat_port, log_level="info", loop="none")
     try:

@@ -30,13 +30,7 @@
     "smoke:local": "pnpm run smoke:model && pnpm run smoke:agent && pnpm run smoke:a2a",
     "smoke:model": "cd services/agent && uv run ops_pilot smoke model",
     "smoke:agent": "cd services/agent && uv run ops_pilot smoke agent",
-    "smoke:a2a": "cd services/agent && uv run ops_pilot smoke a2a",
-    "eval": "cd services/agent && uv run ops_pilot eval run --dataset-name otel_status --cases-dir eval/cases/static/status.yaml --run-name local",
-    "eval:quick": "cd services/agent && uv run ops_pilot eval run --dataset-name local_smoke --cases-dir eval/cases/static/smoke.yaml --run-name quick",
-    "eval:smoke": "cd services/agent && uv run ops_pilot eval run --dataset-name local_smoke --cases-dir eval/cases/static/smoke.yaml --run-name smoke",
-    "eval:calibration": "cd services/agent && uv run ops_pilot eval calibration --cases-dir eval/cases/static/calibration.yaml --run-name calibration",
-    "eval:sync:chaos": "cd services/agent && uv run ops_pilot eval sync --dataset-name otel_chaos --cases-dir eval/cases/chaos",
-    "eval:chaos": "cd services/agent && uv run ops_pilot chaos run --dataset-name otel_chaos --cases-dir eval/cases/chaos --run-name local"
+    "smoke:a2a": "cd services/agent && uv run ops_pilot smoke a2a"
   },
   "devDependencies": {
     "eslint-config-prettier": "^10.1.8",

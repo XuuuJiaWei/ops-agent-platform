@@ -1,67 +1,96 @@
-# ops_pilot
+# OpsPilot
 
 [![CI](https://github.com/XuuuJiaWei/ops-agent-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/XuuuJiaWei/ops-agent-platform/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-ops_pilot is an agentic operations assistant built on DeepAgents, SAP AI Core / Generative AI Hub, CopilotKit, AG-UI, and Google Agent2Agent. It provides a standard CopilotKit chat experience while keeping agent behavior, tool access, prompts, protocol adapters, and data boundaries under backend control.
+**OpsPilot is a tool-using incident-localization agent evaluated on Microsoft AIOpsLab.**
 
-This is an independent personal engineering project, not an SAP product or an
-official implementation from any dependency vendor. Committed configuration
-contains examples only; never use production credentials, company data, or
-internal endpoints in a public checkout.
-
-## Product Overview
-
-ops_pilot is designed for operations workflows that need a conversational interface backed by controlled enterprise integrations. The frontend stays intentionally thin: users interact through CopilotKit chat, while the backend owns the DeepAgent runtime, SAP model configuration, MCP tool loading, observability, and protocol surfaces.
-
-The product currently exposes three primary surfaces:
-
-- CopilotKit chat UI for human interaction.
-- AG-UI/FastAPI backend consumed by the CopilotKit Runtime.
-- Google Agent2Agent JSON-RPC endpoint for programmatic agent access.
-
-## Capabilities
-
-- DeepAgents runtime with SAP AI Core / Generative AI Hub model integration.
-- MCP tool loading from deployment configuration (`config/config.yaml`).
-- CopilotKit-compatible chat streaming through AG-UI.
-- A2A agent card discovery and JSON-RPC execution through the official Python SDK.
-- Durable LangGraph checkpoints, A2A tasks, CopilotKit event replay, and agent-authored Spaces through PostgreSQL.
-- Official `MultiServerMCPClient` tool lifecycle, LangChain model/tool call
-  limits, bounded retry for explicitly idempotent tools, run deadlines, and cancellation.
-- Human-in-the-loop approval for configured high-risk tools and optional remote
-  sandbox isolation for filesystem and command execution.
-- Optional Langfuse tracing when credentials are configured.
-- Local development stack with frontend, Copilot runtime, and one unified backend started from one command.
-
-## Architecture
+AIOpsLab owns the reproducible cloud environment, workload, injected fault, ground truth, and task evaluator. OpsPilot owns the agent runtime: it investigates the same cluster through configured Kubernetes and observability MCP tools, submits a structured localization result, and records runtime behavior separately from task quality.
 
 ```text
-Browser
-  -> Vite / CopilotKit chat frontend
-  -> local CopilotKit Runtime
-  -> unified FastAPI backend
-  -> ops_pilot DeepAgent runtime
-  -> SAP AI Core / Generative AI Hub + configured MCP tools
-
-A2A client
-  -> unified FastAPI backend
-  -> ops_pilot DeepAgent runtime
+AIOpsLab
+  deploy app -> inject fault -> start workload
+                         |
+                         v
+                    OpsPilot
+             Kubernetes / metrics / traces
+                         |
+                         v
+              submit_localization([...])
+                         |
+                         v
+              AIOpsLab task evaluator
 ```
 
-The frontend does not implement agent policy or tool orchestration. It renders the standard CopilotKit chat experience and forwards requests to the runtime. Backend code in `services/agent/src/ops_pilot` is the source of truth for agent construction, prompts, SAP model setup, MCP tools, tracing, and protocol adapters.
+This split is intentional: **AIOpsLab answers whether the agent solved the incident; runtime tests answer whether execution stayed bounded and recoverable.**
 
-## Interfaces
+## Benchmark
 
-| Interface | Default local URL | Purpose |
-| --- | --- | --- |
-| Web app | `http://localhost:3000` | CopilotKit chat frontend |
-| Copilot runtime | `http://127.0.0.1:4001/api/copilotkit` | Runtime bridge between browser and AG-UI |
-| Backend | `http://127.0.0.1:8123` | AG-UI, A2A, and health |
-| A2A agent card | `http://127.0.0.1:8123/a2a/.well-known/agent-card.json` | Agent discovery metadata |
-| A2A JSON-RPC | `http://127.0.0.1:8123/a2a/jsonrpc` | Programmatic agent execution |
+The first supported benchmark slice is **fault localization**. The bridge is a thin wrapper around AIOpsLab's official `Orchestrator`, `Session`, problem lifecycle, and evaluator; it runs in the AIOpsLab environment so AIOpsLab does not become a dependency of the production Agent service.
 
-## Local Development
+Run the bridge from an AIOpsLab checkout/environment:
+
+```bash
+python /path/to/ops-agent-platform/benchmarks/aiopslab_bridge/app.py
+```
+
+Then run OpsPilot against one AIOpsLab problem:
+
+```bash
+cd services/agent
+uv run ops_pilot benchmark \
+  --base-url http://127.0.0.1:1819 \
+  --problem astronomy_shop_payment_service_failure-localization-1
+```
+
+The benchmark path deliberately does not reuse AIOpsLab's built-in agent actions. OpsPilot continues to use its own configured MCP tools, so the evaluation measures the actual runtime and tool surface used by the project.
+
+Example result shape:
+
+```json
+{
+  "problem_id": "astronomy_shop_payment_service_failure-localization-1",
+  "solution": ["payment"],
+  "task_metrics": {
+    "Localization Accuracy": 100.0,
+    "success": true
+  },
+  "runtime_metrics": {
+    "tool_calls": 6,
+    "steps": 14,
+    "latency_s": 31.2
+  }
+}
+```
+
+The numbers above illustrate the output schema only; benchmark claims should use results from real runs.
+
+## Runtime
+
+OpsPilot builds one DeepAgents runtime over the configured model and MCP tools. Production guardrails prefer official framework primitives over custom control logic:
+
+- LangChain `ModelCallLimitMiddleware` and `ToolCallLimitMiddleware` bound agent loops.
+- LangChain `ToolRetryMiddleware` is applied only to explicitly retry-safe tools.
+- DeepAgents/LangGraph provide the agent loop and checkpoint integration.
+- PostgreSQL can back durable LangGraph checkpoints.
+- Configured high-risk MCP tools require human approval.
+- Optional sandboxing isolates filesystem and command execution.
+- `RunController` owns the outer run deadline and cooperative cancellation boundary.
+
+The runtime does **not** claim exactly-once execution across external systems. A checkpoint cannot prove whether an external side effect succeeded after a response was lost; downstream business idempotency and reconciliation remain downstream responsibilities.
+
+## Tool configuration
+
+Regular configuration lives in `config/config.yaml` (copy `config/config.example.yaml`). Secrets stay in `.env`.
+
+The benchmark environment is not configured here. This file only describes the Agent's own tool surface and runtime policy. A typical localization setup enables Kubernetes plus read-only metrics/tracing tools that can reach the AIOpsLab-managed cluster.
+
+```bash
+cp .env.example .env
+cp config/config.example.yaml config/config.yaml
+```
+
+## Local development
 
 Install dependencies:
 
@@ -70,87 +99,17 @@ pnpm install
 cd services/agent && uv sync
 ```
 
-Create local configuration:
-
-```bash
-cp .env.example .env
-cp config/config.example.yaml config/config.yaml
-# Frontend / Copilot runtime config (non-secret; optional for `pnpm dev`):
-cp apps/web/.env.example apps/web/.env
-cp apps/copilot-runtime/.env.example apps/copilot-runtime/.env
-```
-
-The root `.env` holds backend secrets only. Frontend and Copilot-runtime
-config lives next to each process (`apps/web/.env`, `apps/copilot-runtime/.env`).
-During `pnpm dev` the backend host/port and assistant id are derived from
-`config/config.yaml` (server section) and injected into the web and copilot
-processes, so those `.env` files only matter when a process is started on its
-own. Regular configuration (including MCP servers) lives in `config/config.yaml`. Fill SAP AI Core / Generative AI Hub values in `.env` as needed. If the SAP SDK is already configured through local SDK configuration or `VCAP_SERVICES`, the `AICORE_*` values can stay empty.
-
-For a non-SAP environment, select an OpenAI-compatible provider such as
-DeepSeek in `config/config.yaml` and put only its API key in `.env`; the example
-configuration documents both provider shapes.
-
-Start the full development stack:
+Start the interactive product stack:
 
 ```bash
 pnpm dev
 ```
 
-`pnpm dev` uses the single `scripts/dev.mjs` orchestrator to resolve backend settings once, run the preflight, and start the web app, unified backend, and CopilotKit Runtime. The web process waits for the Copilot runtime and backend health endpoints before Vite starts, so the browser does not call `/api/copilotkit` before the runtime is ready. One `Ctrl+C` stops the complete service process tree on Windows, macOS, and Linux.
-
-| Process | Script | Default command |
-| --- | --- | --- |
-| Frontend | `pnpm run dev:web` | Vite after readiness checks |
-| Backend | `pnpm run dev:backend` | `uv run ops_pilot serve --host 127.0.0.1 --port 8123` from `services/agent` |
-| Copilot runtime | `pnpm run dev:copilot` | `node apps/copilot-runtime/src/index.mjs` |
-
-After backend startup, inspect the effective MCP server and tool registry without invoking the model:
-
-```bash
-curl -fsS http://127.0.0.1:8123/status | jq '.mcp'
-```
-
-Optional MCP failures are logged during startup and are also reported by this endpoint.
-
-The Vite development server proxies `/api/copilotkit/*` to the Copilot runtime and `/a2a/*` to the unified backend.
-
-## Configuration
-
-Regular (non-secret) configuration lives in `config/config.yaml` (copy from `config/config.example.yaml`); secrets live in `.env`. `OPS_PILOT_CONFIG` can point the backend at a different config file.
-
-- `config/config.yaml` holds app, model, server, sandbox, and inline MCP server configuration. Each MCP server may declare `allow_tools` (allowlist; empty = allow all) and `hitl_tools` (tools that require human-in-the-loop approval before running).
-- The `model:` section selects the chat backend via `provider`: `sap` (default, SAP Generative AI Hub) or an OpenAI-compatible provider such as `deepseek` (set `base_url` and the `MODEL_API_KEY` secret in `.env`).
-
-Useful development overrides:
-
-```bash
-CHAT_PORT=8130 pnpm run dev:backend
-WEB_WAIT_TIMEOUT=180 pnpm dev
-OPS_PILOT_DEV_VERBOSE_MCP=1 pnpm dev # show full structured MCP diagnostics
-OPS_PILOT_DEV_VERBOSE_BROWSER=1 pnpm dev # forward browser console.warn/error to the terminal
-```
-
-`pnpm run dev:langgraph` is available for optional LangGraph API / Studio debugging. It is not part of the default product path. The wrapper runs `langgraph-cli[inmem]` on demand through `uv run --with` and starts `langgraph dev` on `http://127.0.0.1:2024`.
-
-## Data And Observability
-
-The default development stack uses a self-hosted CopilotKit Runtime and a local AG-UI/FastAPI backend. CopilotKit anonymous telemetry is disabled in the runtime. Do not enable Copilot Cloud / Enterprise Intelligence Platform features for company data unless that path is explicitly approved.
-
-Langfuse tracing is optional. If `LANGFUSE_PUBLIC_KEY` or `LANGFUSE_SECRET_KEY` (in `.env`) or the `langfuse.base_url` (in `config/config.yaml`) is missing, the backend starts with tracing disabled.
+The web UI and protocol adapters are secondary interfaces over the same backend runtime: CopilotKit/AG-UI serve human interaction, and the A2A endpoint serves programmatic clients. They do not own agent policy or benchmark logic.
 
 ## Validation
 
-Run smoke checks:
-
-```bash
-pnpm run smoke:model
-pnpm run smoke:agent
-pnpm run smoke:a2a
-pnpm run smoke:local
-```
-
-Run backend tests:
+Runtime correctness is tested independently from live AIOpsLab task quality:
 
 ```bash
 cd services/agent
@@ -159,28 +118,22 @@ uv run ruff format --check src tests
 uv run pytest
 ```
 
-Run frontend checks:
+Smoke checks:
 
 ```bash
-pnpm --filter "./apps/web" typecheck
-pnpm --filter "./apps/web" lint
-pnpm --filter "./apps/web" build
+pnpm run smoke:model
+pnpm run smoke:agent
+pnpm run smoke:a2a
+pnpm run smoke:local
 ```
 
-The same secret-free checks run in [GitHub Actions](.github/workflows/ci.yml).
-The workflow grants only `contents: read`, pins third-party actions to commit
-SHAs, installs dependencies from lockfiles, and receives no deployment or
-model credentials.
+The secret-free checks also run in GitHub Actions.
 
-## Reliability Semantics
+## Project boundary
 
-The runtime does not claim exactly-once execution across external systems.
-LangChain's official `ToolRetryMiddleware` is enabled only for tools listed in
-`retry_tools`; destructive and non-idempotent tools belong in `hitl_tools` and
-are never retried automatically. Official model/tool call-limit middleware caps
-agent loops; protocol-level deadlines and cancellation are owned by
-`RunController`. Business idempotency must be implemented by the
-downstream service rather than simulated by an in-process tool-call journal.
+OpsPilot intentionally does not implement its own cloud fault benchmark, feature-flag chaos controller, benchmark dataset registry, or AIOps ground-truth graders. Those concerns belong to AIOpsLab. The repository focuses on the Agent runtime and a small adapter needed to evaluate that runtime against an external benchmark.
+
+This is an independent personal engineering project, not an SAP product, Microsoft product, or official implementation from any dependency vendor.
 
 ## License
 

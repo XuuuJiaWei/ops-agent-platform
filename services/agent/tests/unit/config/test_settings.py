@@ -25,14 +25,6 @@ def test_load_settings_defaults_with_empty_config():
     assert settings.model_call_limit == 50
     assert settings.tool_call_limit == 200
     assert settings.tool_retry_max_retries == 2
-    assert settings.chaos_namespace == "otel-demo"
-    assert settings.chaos_flagd_service == "flagd"
-    assert settings.chaos_flagd_service_port == 8016
-    assert settings.chaos_flagd_ui_port == 4000
-    assert settings.chaos_flag_sync_timeout_seconds == 90
-    assert settings.chaos_poll_interval_seconds == 1
-    assert settings.chaos_stable_reads == 2
-    assert settings.chaos_signal_warmup_seconds == 15
 
 
 def test_load_settings_reads_reliability_policy() -> None:
@@ -74,25 +66,6 @@ def test_load_settings_reads_reasoning_policy():
 
     assert settings.model_reasoning_mode == "adaptive"
     assert settings.model_reasoning_effort == "medium"
-
-
-def test_load_settings_reads_chaos_readiness_policy():
-    settings = load_settings(
-        env={},
-        config={
-            "chaos": {
-                "flag_sync_timeout_seconds": 12,
-                "poll_interval_seconds": 0.2,
-                "stable_reads": 3,
-                "signal_warmup_seconds": 0,
-            }
-        },
-    )
-
-    assert settings.chaos_flag_sync_timeout_seconds == 12
-    assert settings.chaos_poll_interval_seconds == 0.2
-    assert settings.chaos_stable_reads == 3
-    assert settings.chaos_signal_warmup_seconds == 0
 
 
 def test_load_settings_reads_model_request_timeout():
@@ -334,8 +307,6 @@ def test_mcp_missing_var_fails_fast_at_settings_load():
 
 
 def test_process_spec_fields_are_not_interpolated():
-    # command/args/cwd are process-spec fields excluded from the whitelist:
-    # a literal ${...} must survive verbatim and never trigger a missing-var error.
     settings = load_settings(
         env={},
         config={
@@ -398,7 +369,6 @@ def test_sqlalchemy_and_psycopg_urls_normalize_driver_suffix():
         config={"persistence": {"backend": "postgres"}},
     )
 
-    # SQLAlchemy keeps the explicit async driver; psycopg wants it stripped.
     assert settings.sqlalchemy_database_url() == "postgresql+asyncpg://u:p@h/db"
     assert settings.psycopg_database_url() == "postgresql://u:p@h/db"
 
