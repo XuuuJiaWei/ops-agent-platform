@@ -12,9 +12,11 @@ from ops_pilot.mcp.loader import RequiredMCPServerError, load_mcp_tools
 
 class _FakeClient:
     results: dict[str, Any] = {}
+    last_connections: dict[str, Any] = {}
 
     def __init__(self, connections, **kwargs):
         self.connections = connections
+        type(self).last_connections = connections
         self.kwargs = kwargs
 
     async def get_tools(self, *, server_name):
@@ -114,6 +116,62 @@ async def test_required_server_failure_fails_startup(monkeypatch) -> None:
 
     with pytest.raises(RequiredMCPServerError, match="required.*TLS EOF"):
         await load_mcp_tools(config)
+
+
+@pytest.mark.asyncio
+async def test_required_server_recovers_from_transient_connection_failure(monkeypatch) -> None:
+    attempts = 0
+
+    async def flaky_load() -> list[Any]:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise ConnectionError("TLS EOF")
+        return []
+
+    _install_client(monkeypatch, {"required": flaky_load})
+    config = MCPConfig.from_mapping(
+        {
+            "mcpServers": {
+                "required": {
+                    "required": True,
+                    "transport": "stdio",
+                    "command": "required",
+                }
+            }
+        }
+    )
+
+    result = await load_mcp_tools(config)
+
+    assert result.status.servers[0].ok is True
+    assert attempts == 2
+
+
+@pytest.mark.asyncio
+async def test_streamable_http_uses_transport_connect_retries(monkeypatch) -> None:
+    _install_client(monkeypatch, {"remote": []})
+    config = MCPConfig.from_mapping(
+        {
+            "mcpServers": {
+                "remote": {
+                    "transport": "streamable_http",
+                    "url": "https://example.test/mcp",
+                }
+            }
+        }
+    )
+
+    await load_mcp_tools(config)
+
+    factory = _FakeClient.last_connections["remote"]["httpx_client_factory"]
+    client = factory(headers={"X-Test": "yes"}, timeout=None, auth=None)
+    try:
+        assert client.follow_redirects is True
+        assert client.headers["X-Test"] == "yes"
+        assert client._transport._pool._retries == 2
+    finally:
+        await client.aclose()
 
 
 @pytest.mark.asyncio

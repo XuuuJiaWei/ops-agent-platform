@@ -14,6 +14,61 @@ from ops_pilot.eval.dataset import EvalCase, InjectSpec
 from ops_pilot.mcp.status import MCPLoadStatus, MCPServerLoadStatus
 
 
+@pytest.mark.asyncio
+async def test_flagd_client_retries_an_early_port_forward_exit(monkeypatch) -> None:
+    class Stderr:
+        async def read(self) -> bytes:
+            return b"TLS handshake timeout"
+
+    class Process:
+        def __init__(self, returncode: int | None) -> None:
+            self.returncode = returncode
+            self.stderr = Stderr()
+
+        def terminate(self) -> None:
+            self.returncode = 0
+
+        def kill(self) -> None:
+            self.returncode = 1
+
+        async def wait(self) -> int:
+            return self.returncode or 0
+
+    class Response:
+        content = b"{}"
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, Any]:
+            return {"flags": {"paymentFailure": {"defaultVariant": "off"}}}
+
+    class HttpClient:
+        async def request(self, *_args, **_kwargs) -> Response:
+            return Response()
+
+        async def aclose(self) -> None:
+            return None
+
+    processes = [Process(1), Process(None)]
+    starts = 0
+
+    async def start_process(*_args, **_kwargs) -> Process:
+        nonlocal starts
+        process = processes[starts]
+        starts += 1
+        return process
+
+    monkeypatch.setattr(chaos, "_kubeconfig_from_settings", lambda _settings: "test-kubeconfig")
+    monkeypatch.setattr(chaos.asyncio, "create_subprocess_exec", start_process)
+    monkeypatch.setattr(chaos.httpx, "AsyncClient", lambda **_kwargs: HttpClient())
+
+    variants = await chaos.current_variants(Settings.model_validate({}))
+
+    assert variants == {"paymentFailure": "off"}
+    assert starts == 2
+
+
 def _document() -> dict:
     return {
         "flags": {

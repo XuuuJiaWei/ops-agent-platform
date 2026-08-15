@@ -40,10 +40,15 @@ FAULT_FLAGS: frozenset[str] = frozenset(
     }
 )
 OFF_VARIANT = "off"
+PORT_FORWARD_MAX_ATTEMPTS = 3
 
 
 class ChaosError(RuntimeError):
     """Raised when the live flagd experiment cannot be proven safe."""
+
+
+class _PortForwardExited(ChaosError):
+    pass
 
 
 class FlagdAPI(Protocol):
@@ -82,22 +87,32 @@ class FlagdClient:
         ]
         kwargs: dict[str, Any] = {
             "stdout": asyncio.subprocess.DEVNULL,
-            "stderr": asyncio.subprocess.DEVNULL,
+            "stderr": asyncio.subprocess.PIPE,
         }
         if os.name == "nt":
             kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        try:
-            self.process = await asyncio.create_subprocess_exec(*command, **kwargs)
-        except FileNotFoundError as exc:
-            raise ChaosError("kubectl not found on PATH; install kubectl to use chaos control.") from exc
-
         self.http = httpx.AsyncClient(timeout=5.0)
         try:
-            await self._wait_until_ready()
+            failures: list[str] = []
+            for attempt in range(1, PORT_FORWARD_MAX_ATTEMPTS + 1):
+                try:
+                    self.process = await asyncio.create_subprocess_exec(*command, **kwargs)
+                except FileNotFoundError as exc:
+                    raise ChaosError("kubectl not found on PATH; install kubectl to use chaos control.") from exc
+                try:
+                    await self._wait_until_ready()
+                    return self
+                except _PortForwardExited as exc:
+                    failures.append(str(exc))
+                    await self._stop_process()
+                    if attempt < PORT_FORWARD_MAX_ATTEMPTS:
+                        await asyncio.sleep(0.5)
+            raise ChaosError(
+                f"kubectl port-forward failed after {PORT_FORWARD_MAX_ATTEMPTS} attempts: " + "; ".join(failures)
+            )
         except BaseException:
             await self.close()
             raise
-        return self
 
     async def __aexit__(self, *_: Any) -> None:
         await self.close()
@@ -106,9 +121,15 @@ class FlagdClient:
         if self.http is not None:
             await self.http.aclose()
             self.http = None
+        await self._stop_process()
+
+    async def _stop_process(self) -> None:
         process = self.process
         self.process = None
-        if process is None or process.returncode is not None:
+        if process is None:
+            return
+        if process.returncode is not None:
+            await process.wait()
             return
         process.terminate()
         try:
@@ -139,7 +160,12 @@ class FlagdClient:
         last_error: BaseException | None = None
         while time.monotonic() < deadline:
             if self.process is not None and self.process.returncode is not None:
-                raise ChaosError(f"kubectl port-forward exited with code {self.process.returncode}")
+                detail = ""
+                if self.process.stderr is not None:
+                    raw_stderr = await self.process.stderr.read()
+                    detail = raw_stderr.decode(errors="replace").strip()[-2000:]
+                suffix = f": {detail}" if detail else ""
+                raise _PortForwardExited(f"kubectl port-forward exited with code {self.process.returncode}{suffix}")
             try:
                 await self.read()
                 return
@@ -522,7 +548,7 @@ async def run_chaos_eval(
     if result is None:
         print("error: chaos run produced no experiment result.")
         return 1
-    print(result.format())
+    print(result.format(include_item_results=True))
     return 0 if _run_evaluation_value(result, "pass_rate") >= 1.0 else 1
 
 

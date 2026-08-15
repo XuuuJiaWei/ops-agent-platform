@@ -229,7 +229,7 @@ cases:
     source: synthetic
     version: "2026-08"
     prompt: >-
-      Kubernetes reports that a workload in the astronomy-shop namespace is not
+      Kubernetes reports that a workload in the otel-demo namespace is not
       ready even though most storefront pods are running. Identify the affected
       service and correlate pod readiness with recent warning events.
     expected_output: cart

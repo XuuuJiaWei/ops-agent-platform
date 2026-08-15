@@ -213,17 +213,37 @@ def _build_task(runtime: Any, *, run_name: str) -> Any:
             )
             return trace.as_output()
         except Exception as exc:  # noqa: BLE001 - task errors are scored by no_error.
+            error_type, error = _exception_details(exc)
             return {
                 "final_text": "",
                 "tool_calls": [],
                 "steps": 0,
                 "latency_s": time.perf_counter() - started,
-                "error": str(exc) or type(exc).__name__,
-                "error_type": type(exc).__name__,
+                "error": error,
+                "error_type": error_type,
                 "recursion_limit_hit": _is_recursion_limit_exception(exc),
             }
 
     return task
+
+
+def _exception_details(exc: Exception) -> tuple[str, str]:
+    if isinstance(exc, BaseExceptionGroup):
+        leaves = list(_exception_leaves(exc))
+        if len(leaves) == 1:
+            leaf = leaves[0]
+            return type(leaf).__name__, f"{type(leaf).__name__}: {str(leaf) or type(leaf).__name__}"
+        details = "; ".join(f"{type(leaf).__name__}: {str(leaf) or type(leaf).__name__}" for leaf in leaves)
+        return type(exc).__name__, details
+    return type(exc).__name__, str(exc) or type(exc).__name__
+
+
+def _exception_leaves(group: BaseExceptionGroup) -> Any:
+    for nested in group.exceptions:
+        if isinstance(nested, BaseExceptionGroup):
+            yield from _exception_leaves(nested)
+        else:
+            yield nested
 
 
 async def _close_runtime(runtime: Any) -> None:

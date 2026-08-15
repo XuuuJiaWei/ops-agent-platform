@@ -6,6 +6,7 @@ import asyncio
 import logging
 from typing import Any
 
+import httpx
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
 from ops_pilot.config.mcp_schema import MCPConfig, MCPServerConfig
@@ -14,6 +15,9 @@ from ops_pilot.errors import safe_exception_summary
 from ops_pilot.mcp.status import MCPLoadResult, MCPLoadStatus, MCPServerLoadStatus
 
 logger = logging.getLogger(__name__)
+MCP_LOAD_MAX_ATTEMPTS = 3
+MCP_LOAD_RETRY_DELAY_SECONDS = 0.5
+MCP_CONNECT_MAX_RETRIES = 2
 
 
 class MCPLoadError(RuntimeError):
@@ -37,13 +41,30 @@ async def load_mcp_tools(settings: Settings | MCPConfig) -> MCPLoadResult:
     if not config.servers:
         return MCPLoadResult(tools=[], status=MCPLoadStatus(config_path=config_path))
 
-    client = MultiServerMCPClient(
-        {server.name: server.to_client_connection() for server in config.servers},
-        handle_tool_errors=True,
-    )
+    connections: dict[str, Any] = {}
+    for server in config.servers:
+        connection = dict(server.to_client_connection())
+        if connection["transport"] == "streamable_http":
+            connection["httpx_client_factory"] = _create_http_client
+        connections[server.name] = connection
+    client = MultiServerMCPClient(connections, handle_tool_errors=True)
 
     async def load(server: MCPServerConfig) -> list[Any]:
-        return list(await client.get_tools(server_name=server.name))
+        for attempt in range(1, MCP_LOAD_MAX_ATTEMPTS + 1):
+            try:
+                return list(await client.get_tools(server_name=server.name))
+            except Exception as exc:
+                if attempt == MCP_LOAD_MAX_ATTEMPTS:
+                    raise
+                logger.warning(
+                    "MCP server '%s' tool discovery failed (attempt %d/%d): %s",
+                    server.name,
+                    attempt,
+                    MCP_LOAD_MAX_ATTEMPTS,
+                    safe_exception_summary(exc),
+                )
+                await asyncio.sleep(MCP_LOAD_RETRY_DELAY_SECONDS * attempt)
+        raise AssertionError("unreachable")
 
     loaded = await asyncio.gather(*(load(server) for server in config.servers), return_exceptions=True)
     tools: list[Any] = []
@@ -115,3 +136,17 @@ def _warn_unknown_policy_tools(server: MCPServerConfig, loaded_names: set[str]) 
 
 def _tool_name(tool: Any) -> str:
     return str(getattr(tool, "name", ""))
+
+
+def _create_http_client(
+    headers: dict[str, str] | None = None,
+    timeout: httpx.Timeout | None = None,
+    auth: httpx.Auth | None = None,
+) -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        headers=headers,
+        timeout=timeout,
+        auth=auth,
+        follow_redirects=True,
+        transport=httpx.AsyncHTTPTransport(retries=MCP_CONNECT_MAX_RETRIES),
+    )

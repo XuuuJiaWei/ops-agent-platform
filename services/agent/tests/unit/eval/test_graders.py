@@ -223,6 +223,11 @@ def test_trajectory_and_run_performance_metrics_are_non_gating():
     assert performance["mean_tool_calls"].value == 2.0
 
 
+def test_not_applicable_run_metrics_are_omitted() -> None:
+    assert conditional_task_pass_rate(item_results=[]) == []
+    assert run_performance_metrics(item_results=[]) == []
+
+
 def test_infrastructure_error_rates_group_by_exception_type():
     item_results = [
         ExperimentItemResult(

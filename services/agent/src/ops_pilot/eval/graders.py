@@ -434,13 +434,14 @@ def hitl_safety_rate(*, item_results: list[Any], **_: Any) -> Evaluation:
     )
 
 
-def conditional_task_pass_rate(*, item_results: list[Any], **_: Any) -> Evaluation:
+def conditional_task_pass_rate(*, item_results: list[Any], **_: Any) -> Evaluation | list[Evaluation]:
     completed = [item_result for item_result in item_results if _item_infrastructure_completed(item_result)]
+    if not completed:
+        return []
     passed = sum(1 for item_result in completed if _item_quality_passed(item_result))
-    rate = passed / len(completed) if completed else None
     return Evaluation(
         name="conditional_task_pass_rate",
-        value=rate,  # type: ignore[arg-type]
+        value=passed / len(completed),
         comment=f"{passed}/{len(completed)} infrastructure-complete cases passed task-quality gates.",
         metadata={"denominator": "infrastructure_complete_cases"},
     )
@@ -452,23 +453,31 @@ def run_performance_metrics(*, item_results: list[Any], **_: Any) -> list[Evalua
     latencies = sorted(value for value in latencies if value is not None)
     tool_calls = [_item_metric(item_result, "tool_call_count") for item_result in completed]
     tool_calls = [value for value in tool_calls if value is not None]
-    return [
-        Evaluation(
-            name="latency_p50_seconds",
-            value=_percentile(latencies, 0.50),  # type: ignore[arg-type]
-            metadata={"gating": False, "sample_size": len(latencies)},
-        ),
-        Evaluation(
-            name="latency_p95_seconds",
-            value=_percentile(latencies, 0.95),  # type: ignore[arg-type]
-            metadata={"gating": False, "sample_size": len(latencies)},
-        ),
-        Evaluation(
-            name="mean_tool_calls",
-            value=sum(tool_calls) / len(tool_calls) if tool_calls else None,  # type: ignore[arg-type]
-            metadata={"gating": False, "sample_size": len(tool_calls)},
-        ),
-    ]
+    evaluations: list[Evaluation] = []
+    if latencies:
+        evaluations.extend(
+            [
+                Evaluation(
+                    name="latency_p50_seconds",
+                    value=_percentile(latencies, 0.50),  # type: ignore[arg-type]
+                    metadata={"gating": False, "sample_size": len(latencies)},
+                ),
+                Evaluation(
+                    name="latency_p95_seconds",
+                    value=_percentile(latencies, 0.95),
+                    metadata={"gating": False, "sample_size": len(latencies)},
+                ),
+            ]
+        )
+    if tool_calls:
+        evaluations.append(
+            Evaluation(
+                name="mean_tool_calls",
+                value=sum(tool_calls) / len(tool_calls),
+                metadata={"gating": False, "sample_size": len(tool_calls)},
+            )
+        )
+    return evaluations
 
 
 def infrastructure_error_rates(*, item_results: list[Any], **_: Any) -> list[Evaluation]:

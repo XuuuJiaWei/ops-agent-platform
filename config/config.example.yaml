@@ -162,7 +162,15 @@ mcpServers:
       Authorization: ${MCP_BASIC_AUTH_HEADER}
     allow_tools: []
     hitl_tools: []
-    retry_tools: []
+    retry_tools:
+      - get_critical_path
+      - get_service_dependencies
+      - get_services
+      - get_span_details
+      - get_span_names
+      - get_trace_errors
+      - get_trace_topology
+      - search_traces
   # Deploy the official prometheus/prometheus-mcp chart next to Prometheus and
   # expose /mcp through the authenticated reverse proxy.
   prometheus:

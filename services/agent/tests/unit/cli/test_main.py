@@ -1,34 +1,21 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from types import SimpleNamespace
 
 from ops_pilot.cli import main as cli
 from ops_pilot.config.settings import Settings
 
 
-def test_configures_selector_event_loop_policy_on_windows(monkeypatch) -> None:
-    policy = object()
-    configured: list[object] = []
+def test_chaos_cli_can_launch_subprocess(monkeypatch) -> None:
+    async def run_with_subprocess(_args) -> int:
+        process = await asyncio.create_subprocess_exec(sys.executable, "-c", "pass")
+        return await process.wait()
 
-    monkeypatch.setattr(cli.sys, "platform", "win32")
-    monkeypatch.setattr(cli.asyncio, "WindowsSelectorEventLoopPolicy", lambda: policy)
-    monkeypatch.setattr(cli.asyncio, "set_event_loop_policy", configured.append)
+    monkeypatch.setattr(cli, "run_chaos_command", run_with_subprocess)
 
-    cli._configure_event_loop_policy()
-
-    assert configured == [policy]
-
-
-def test_keeps_default_event_loop_policy_on_non_windows(monkeypatch) -> None:
-    configured: list[asyncio.AbstractEventLoopPolicy] = []
-
-    monkeypatch.setattr(cli.sys, "platform", "darwin")
-    monkeypatch.setattr(cli.asyncio, "set_event_loop_policy", configured.append)
-
-    cli._configure_event_loop_policy()
-
-    assert configured == []
+    assert cli.main(["chaos", "status"]) == 0
 
 
 def test_serve_backend_lets_the_configured_event_loop_policy_select_the_loop(monkeypatch) -> None:

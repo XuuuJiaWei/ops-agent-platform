@@ -59,6 +59,23 @@ async def test_eval_timeout_is_returned_as_a_scored_infrastructure_error() -> No
 
 
 @pytest.mark.asyncio
+async def test_eval_exception_group_exposes_leaf_failure() -> None:
+    class Runtime:
+        async def ainvoke_trace(self, *_args, **_kwargs) -> _Trace:
+            raise ExceptionGroup(
+                "MCP tool call failed",
+                [ConnectionError("Jaeger connection closed during search")],
+            )
+
+    task = runner._build_task(Runtime(), run_name="exception-group-test")
+
+    output = await task(item={"input": "diagnose", "metadata": {"id": "diagnose"}})
+
+    assert output["error_type"] == "ConnectionError"
+    assert output["error"] == "ConnectionError: Jaeger connection closed during search"
+
+
+@pytest.mark.asyncio
 async def test_eval_task_runs_natively_on_the_sdk_worker_loop() -> None:
 
     class Runtime:
