@@ -10,12 +10,10 @@ def test_load_settings_defaults_with_empty_config():
     assert settings.app_env == "local"
     assert settings.assistant_id == "agent"
     assert settings.model_provider == "sap"
-    assert settings.uses_sap_ai_core is True
-    assert settings.sap_model_name == "anthropic--claude-4.6-sonnet"
     assert settings.model_name == "anthropic--claude-4.6-sonnet"
-    assert settings.sap_temperature == 0.0
-    assert settings.sap_top_p is None
-    assert settings.sap_max_tokens == 16384
+    assert settings.model_temperature == 0.0
+    assert settings.model_top_p is None
+    assert settings.model_max_tokens == 16384
     assert settings.model_request_timeout_seconds == 120
     assert settings.model_reasoning_mode == "adaptive"
     assert settings.model_reasoning_effort == "medium"
@@ -122,26 +120,10 @@ def test_load_settings_reads_model_section_for_deepseek():
     )
 
     assert settings.model_provider == "deepseek"
-    assert settings.uses_sap_ai_core is False
     assert settings.model_name == "deepseek-chat"
     assert settings.model_base_url == "https://api.deepseek.com"
     assert settings.model_api_key == "sk-test"
-    assert settings.sap_max_tokens == 4096
-
-
-def test_load_settings_ignores_removed_sap_alias_section():
-    settings = load_settings(
-        env={},
-        config={
-            "sap": {"model_name": "legacy-model", "max_tokens": 1024},
-            "model": {"provider": "openai", "model_name": "gpt-4o-mini"},
-        },
-    )
-
-    assert settings.model_provider == "openai"
-    assert settings.model_name == "gpt-4o-mini"
-    # The deprecated ``sap:`` section is no longer read; defaults apply.
-    assert settings.sap_max_tokens == 16384
+    assert settings.model_max_tokens == 4096
 
 
 def test_load_settings_rejects_unknown_model_provider():
@@ -161,9 +143,9 @@ def test_load_settings_reads_nested_regular_config():
     )
 
     assert settings.app_env == "test"
-    assert settings.sap_model_name == "custom-model"
-    assert settings.sap_max_tokens == 4096
-    assert settings.sap_top_p == 0.9
+    assert settings.model_name == "custom-model"
+    assert settings.model_max_tokens == 4096
+    assert settings.model_top_p == 0.9
     assert len(settings.skills_paths) == 2
     assert settings.chat_port == 8130
 
@@ -273,11 +255,27 @@ def test_load_settings_raises_when_config_file_missing(tmp_path):
         load_settings(env={"OPS_PILOT_CONFIG": str(missing)})
 
 
+def test_load_settings_reads_yaml_through_pydantic_settings(tmp_path):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "app_env: integration\nmodel:\n  provider: openai\n  model_name: gpt-test\n",
+        encoding="utf-8",
+    )
+
+    settings = load_settings(
+        env={"OPS_PILOT_CONFIG": str(config_path), "MODEL_API_KEY": "secret"},
+    )
+
+    assert settings.app_env == "integration"
+    assert settings.model_provider == "openai"
+    assert settings.model_name == "gpt-test"
+    assert settings.model_api_key == "secret"
+
+
 def test_load_settings_defaults_to_memory_persistence():
     settings = load_settings(env={}, config={})
 
     assert settings.persistence_backend == "memory"
-    assert settings.persistence_enabled is False
     assert settings.persistence_setup_on_start is True
 
 
@@ -368,7 +366,6 @@ def test_load_settings_reads_postgres_persistence():
     )
 
     assert settings.persistence_backend == "postgres"
-    assert settings.persistence_enabled is True
     assert settings.persistence_setup_on_start is False
     assert settings.psycopg_database_url() == "postgresql://u:p@h:5433/db"
     assert settings.sqlalchemy_database_url() == "postgresql+asyncpg://u:p@h:5433/db"
@@ -384,7 +381,6 @@ def test_sqlalchemy_url_translates_libpq_sslmode_for_asyncpg():
     assert settings.persistence_database_url == database_url
     assert settings.psycopg_database_url() == database_url
     assert settings.sqlalchemy_database_url() == "postgresql+asyncpg://u:p@h:5432/db?ssl=require"
-    assert settings.configured_system_prompt() is None
 
 
 def test_sqlalchemy_url_prefers_an_explicit_asyncpg_ssl_parameter():
@@ -405,16 +401,6 @@ def test_sqlalchemy_and_psycopg_urls_normalize_driver_suffix():
     # SQLAlchemy keeps the explicit async driver; psycopg wants it stripped.
     assert settings.sqlalchemy_database_url() == "postgresql+asyncpg://u:p@h/db"
     assert settings.psycopg_database_url() == "postgresql://u:p@h/db"
-
-
-def test_load_settings_normalizes_legacy_postgres_scheme():
-    settings = load_settings(
-        env={"DATABASE_URL": "postgres://u:p@h/db"},
-        config={"persistence": {"backend": "postgres"}},
-    )
-
-    assert settings.psycopg_database_url() == "postgresql://u:p@h/db"
-    assert settings.sqlalchemy_database_url() == "postgresql+asyncpg://u:p@h/db"
 
 
 def test_load_settings_rejects_postgres_backend_without_database_url():

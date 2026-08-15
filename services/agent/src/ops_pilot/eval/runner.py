@@ -6,7 +6,7 @@ import asyncio
 import hashlib
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -89,11 +89,12 @@ async def run_eval(
         )
 
     extra_tools = _extra_tools_for_cases(cases)
-    runtime_settings = replace(
-        resolved_settings,
-        mcp=MCPConfig() if extra_tools else resolved_settings.mcp,
-        persistence_backend="memory",
-        persistence_database_url=None,
+    runtime_settings = resolved_settings.model_copy(
+        update={
+            "mcp": MCPConfig() if extra_tools else resolved_settings.mcp,
+            "persistence_backend": "memory",
+            "persistence_database_url": None,
+        }
     )
     runtime = await build_agent_runtime(
         settings=runtime_settings,

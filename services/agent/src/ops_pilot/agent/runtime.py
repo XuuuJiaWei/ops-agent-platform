@@ -8,8 +8,11 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from deepagents import create_deep_agent
 from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.memory import MemorySaver
 
+from ops_pilot.agent.results import extract_result_text
 from ops_pilot.config.settings import Settings, load_settings
 from ops_pilot.mcp.registry import MCPRegistry, create_mcp_registry
 from ops_pilot.models import create_chat_model
@@ -74,7 +77,6 @@ class AgentRuntime:
             self.settings,
             callbacks=self.tracing.callbacks,
             protocol=protocol,
-            recursion_limit=_graph_recursion_limit(self.graph),
             thread_id=thread_id,
             run_id=run_id,
             a2a_task_id=a2a_task_id,
@@ -115,7 +117,7 @@ class AgentRuntime:
             )
 
         result = await self.run_controller.run(effective_run_id, invoke)
-        return _extract_result_text(_unwrap_graph_result(result))
+        return extract_result_text(_unwrap_graph_result(result))
 
     async def ainvoke_trace(
         self,
@@ -212,8 +214,7 @@ async def build_agent_runtime(
             model=model,
             tools=tools,
             skills=list(skills),
-            system_prompt=_system_prompt(resolved_settings.configured_system_prompt()),
-            tracing=tracing,
+            system_prompt=_system_prompt(resolved_settings.system_prompt),
             checkpointer=checkpointer,
             backend=sandbox.backend if sandbox is not None else None,
             interrupt_on=interrupt_on,
@@ -315,17 +316,11 @@ def _create_deep_agent(
     tools: list[Any],
     skills: list[str],
     system_prompt: str | None,
-    tracing: TracingSetup,
     checkpointer: Any | None,
     backend: Any | None,
     interrupt_on: dict[str, Any] | None = None,
     middleware: Sequence[Any] = (),
 ) -> Any:
-    try:
-        from deepagents import create_deep_agent
-    except ImportError as exc:
-        raise RuntimeError("deepagents is not installed. Run 'uv sync' in services/agent.") from exc
-
     kwargs: dict[str, Any] = {
         "model": model,
         "tools": tools,
@@ -348,10 +343,7 @@ def _create_deep_agent(
     if checkpointer is not None:
         kwargs["checkpointer"] = checkpointer
 
-    graph = create_deep_agent(**kwargs)
-    if tracing.callbacks:
-        graph = graph.with_config({"callbacks": list(tracing.callbacks)})
-    return graph
+    return create_deep_agent(**kwargs)
 
 
 def _create_copilotkit_middleware() -> Any | None:
@@ -377,11 +369,7 @@ async def _create_checkpointer(
     return _create_memory_checkpointer(), None
 
 
-def _create_memory_checkpointer() -> Any | None:
-    try:
-        from langgraph.checkpoint.memory import MemorySaver
-    except ImportError:
-        return None
+def _create_memory_checkpointer() -> MemorySaver:
     return MemorySaver()
 
 
@@ -428,59 +416,9 @@ async def _create_postgres_checkpointer(
     return checkpointer, _close
 
 
-def _graph_recursion_limit(graph: Any) -> int | None:
-    config = getattr(graph, "config", None)
-    if isinstance(config, dict):
-        value = config.get("recursion_limit")
-        if isinstance(value, int):
-            return value
-    return None
-
-
-def _extract_result_text(result: Any) -> str:
-    if isinstance(result, str):
-        return result
-    if isinstance(result, dict):
-        messages = result.get("messages")
-        if isinstance(messages, list) and messages:
-            return _message_content(messages[-1])
-        for key in ("output", "content"):
-            value = result.get(key)
-            if value is not None:
-                return str(value)
-    return _message_content(result)
-
-
 def _unwrap_graph_result(result: Any) -> Any:
     """Normalize LangGraph v2 output and never present an interrupt as a final answer."""
 
     if getattr(result, "interrupts", ()):
         raise RuntimeError("Agent execution paused for human approval.")
     return getattr(result, "value", result)
-
-
-def _message_content(message: Any) -> str:
-    content = getattr(message, "content", None)
-    if content is not None:
-        return _stringify_content(content)
-    if isinstance(message, dict) and "content" in message:
-        return _stringify_content(message["content"])
-    return str(message)
-
-
-def _stringify_content(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, dict):
-                text = item.get("text") or item.get("content")
-                if text is not None:
-                    parts.append(str(text))
-            else:
-                parts.append(str(item))
-        return "\n".join(part for part in parts if part)
-    return str(content)

@@ -278,7 +278,7 @@ async def test_dimension_judge_returns_binary_pass(monkeypatch):
     monkeypatch.setattr("ops_pilot.eval.graders.create_chat_model", lambda _s: fake)
 
     spec = {"name": "judge_root_cause", "gating": True, "requires_rubric": True, "criterion": "root cause?"}
-    judge = make_dimension_judge(spec, settings=Settings())
+    judge = make_dimension_judge(spec, settings=Settings.model_validate({}))
     evaluation = await judge(
         input="incident prompt",
         output={"final_text": "The payment service is failing."},
@@ -297,7 +297,7 @@ async def test_dimension_judge_returns_binary_fail(monkeypatch):
     monkeypatch.setattr("ops_pilot.eval.graders.create_chat_model", lambda _s: fake)
 
     spec = {"name": "judge_root_cause", "gating": True, "requires_rubric": True, "criterion": "root cause?"}
-    judge = make_dimension_judge(spec, settings=Settings())
+    judge = make_dimension_judge(spec, settings=Settings.model_validate({}))
     evaluation = await judge(
         input="incident prompt",
         output={"final_text": "Everything looks fine."},
@@ -315,7 +315,7 @@ async def test_dimension_judge_skips_when_rubric_required_but_missing(monkeypatc
         lambda _s: (_ for _ in ()).throw(AssertionError("model must not be built when skipping")),
     )
     spec = {"name": "judge_root_cause", "gating": True, "requires_rubric": True, "criterion": "root cause?"}
-    judge = make_dimension_judge(spec, settings=Settings())
+    judge = make_dimension_judge(spec, settings=Settings.model_validate({}))
 
     evaluation = await judge(input="p", output={"final_text": "x"}, metadata={})
 
@@ -329,7 +329,7 @@ async def test_safety_dimension_runs_without_rubric(monkeypatch):
     monkeypatch.setattr("ops_pilot.eval.graders.create_chat_model", lambda _s: fake)
 
     spec = {"name": "judge_safety", "gating": True, "requires_rubric": False, "criterion": "safe?"}
-    judge = make_dimension_judge(spec, settings=Settings())
+    judge = make_dimension_judge(spec, settings=Settings.model_validate({}))
     evaluation = await judge(
         input="delete the pod",
         output={"final_text": "Run kubectl delete pod paymentservice."},
@@ -347,7 +347,7 @@ async def test_dimension_judge_fails_closed_when_agent_errored(monkeypatch):
         lambda _s: (_ for _ in ()).throw(AssertionError("model must not be built for errored output")),
     )
     spec = {"name": "judge_root_cause", "gating": True, "requires_rubric": True, "criterion": "root cause?"}
-    judge = make_dimension_judge(spec, settings=Settings())
+    judge = make_dimension_judge(spec, settings=Settings.model_validate({}))
 
     evaluation = await judge(input="p", output={"error": "boom", "final_text": ""}, metadata={"rubric": "r"})
 

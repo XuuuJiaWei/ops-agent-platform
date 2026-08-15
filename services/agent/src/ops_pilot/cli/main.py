@@ -7,7 +7,6 @@ import asyncio
 import json
 import sys
 from collections.abc import Sequence
-from dataclasses import replace
 from typing import Any
 
 import uvicorn
@@ -81,8 +80,8 @@ def _print_settings() -> int:
     payload = {
         "app_env": settings.app_env,
         "assistant_id": settings.assistant_id,
-        "sap_max_tokens": settings.sap_max_tokens,
-        "sap_model_name": settings.sap_model_name,
+        "model_max_tokens": settings.model_max_tokens,
+        "model_name": settings.model_name,
         "system_prompt_configured": bool(settings.system_prompt),
         "mcp_servers": [server.name for server in settings.mcp.servers],
         "mcp_hitl_tools": sorted(settings.mcp.hitl_tool_names()),
@@ -112,10 +111,8 @@ def _serve_backend(host: str | None, port: int | None) -> int:
     from ops_pilot.backend import create_backend_app
 
     settings = load_settings()
-    settings = replace(
-        settings,
-        chat_host=host or settings.chat_host,
-        chat_port=port or settings.chat_port,
+    settings = settings.model_copy(
+        update={"chat_host": host or settings.chat_host, "chat_port": port or settings.chat_port}
     )
     # Runtime-owned resources such as MCP stdio sessions and sandboxes are
     # created by the app lifespan inside uvicorn's event loop and cleaned up
@@ -152,7 +149,7 @@ def _smoke_model() -> int:
 
 
 async def _smoke_agent() -> int:
-    settings = replace(load_settings(), mcp=MCPConfig())
+    settings = load_settings().model_copy(update={"mcp": MCPConfig()})
     runtime = await build_agent_runtime(settings=settings, extra_tools=get_smoke_tools())
     try:
         response = await runtime.ainvoke_text(
@@ -170,11 +167,7 @@ async def _smoke_a2a() -> int:
     from ops_pilot.a2a.agent_card import build_agent_card
     from ops_pilot.backend import create_backend_app
 
-    settings = replace(
-        load_settings(),
-        persistence_backend="memory",
-        spaces_resolver_enabled=False,
-    )
+    settings = load_settings().model_copy(update={"persistence_backend": "memory", "spaces_resolver_enabled": False})
     card = build_agent_card(settings)
     print(card)
     app = create_backend_app(settings, runtime=_DummyRuntime())

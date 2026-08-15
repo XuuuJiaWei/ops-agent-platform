@@ -9,7 +9,6 @@ import socket
 import subprocess
 import time
 from collections.abc import Mapping, Sequence
-from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -413,7 +412,7 @@ async def run_chaos_eval(
 
         print("[chaos] loading all configured MCP servers", flush=True)
         runtime = await build_agent_runtime(
-            settings=replace(settings, persistence_backend="memory", persistence_database_url=None),
+            settings=settings.model_copy(update={"persistence_backend": "memory", "persistence_database_url": None}),
             attach_checkpointer=False,
             bypass_hitl=True,
         )

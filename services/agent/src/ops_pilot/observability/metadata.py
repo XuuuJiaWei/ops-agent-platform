@@ -25,7 +25,6 @@ def build_trace_metadata(
         "protocol": protocol,
         "model_provider": settings.model_provider,
         "model_name": settings.model_name,
-        "sap_model_name": settings.sap_model_name,
         "langfuse_trace_name": _trace_name(protocol),
         "langfuse_tags": _trace_tags(protocol),
     }
@@ -52,7 +51,6 @@ def build_runnable_config(
     *,
     callbacks: tuple[Any, ...] = (),
     protocol: str,
-    recursion_limit: int | None = None,
     thread_id: str | None = None,
     run_id: str | None = None,
     a2a_task_id: str | None = None,
@@ -76,8 +74,6 @@ def build_runnable_config(
     }
     if callbacks:
         config["callbacks"] = list(callbacks)
-    if recursion_limit is not None:
-        config["recursion_limit"] = recursion_limit
     effective_configurable = dict(configurable or {})
     if thread_id:
         effective_configurable.setdefault("thread_id", thread_id)
@@ -123,7 +119,7 @@ def build_model_metadata(settings: Settings, model: Any) -> dict[str, Any]:
         "model_request_name": request_model,
         "model_context_window_tokens": profile.get("max_input_tokens"),
         "model_max_output_tokens": profile.get("max_output_tokens"),
-        "model_configured_max_output_tokens": settings.sap_max_tokens,
+        "model_configured_max_output_tokens": settings.model_max_tokens,
         "model_request_timeout_seconds": settings.model_request_timeout_seconds,
         "model_reasoning_supported": bool(profile.get("reasoning_output", False)),
         "model_reasoning_mode": settings.model_reasoning_mode,

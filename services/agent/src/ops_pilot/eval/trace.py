@@ -6,6 +6,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from ops_pilot.agent.results import extract_result_text
+
 
 @dataclass(frozen=True)
 class ToolCallRecord:
@@ -38,7 +40,7 @@ class AgentTrace:
 def build_agent_trace(result: Any, *, latency_s: float) -> AgentTrace:
     messages = _result_messages(result)
     return AgentTrace(
-        final_text=_extract_result_text(result),
+        final_text=extract_result_text(result),
         tool_calls=_extract_tool_calls(messages),
         steps=len(messages),
         raw_messages=tuple(messages),
@@ -97,44 +99,3 @@ def _parse_tool_call(raw_call: Any) -> ToolCallRecord | None:
     if args is None:
         args = getattr(raw_call, "arguments", None)
     return ToolCallRecord(name=str(name), args=args)
-
-
-def _extract_result_text(result: Any) -> str:
-    if isinstance(result, str):
-        return result
-    if isinstance(result, dict):
-        messages = result.get("messages")
-        if isinstance(messages, list) and messages:
-            return _message_content(messages[-1])
-        for key in ("output", "content"):
-            value = result.get(key)
-            if value is not None:
-                return str(value)
-    return _message_content(result)
-
-
-def _message_content(message: Any) -> str:
-    content = getattr(message, "content", None)
-    if content is not None:
-        return _stringify_content(content)
-    if isinstance(message, dict) and "content" in message:
-        return _stringify_content(message["content"])
-    return str(message)
-
-
-def _stringify_content(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, dict):
-                text = item.get("text") or item.get("content")
-                if text is not None:
-                    parts.append(str(text))
-            else:
-                parts.append(str(item))
-        return "\n".join(part for part in parts if part)
-    return str(content)

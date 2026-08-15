@@ -28,7 +28,7 @@ class ModelInitializationError(RuntimeError):
 def create_chat_model(settings: Settings) -> Any:
     """Create a LangChain tool-calling chat model for the configured provider."""
 
-    if settings.uses_sap_ai_core:
+    if settings.model_provider == "sap":
         return _create_sap_chat_model(settings)
     return _create_langchain_chat_model(settings)
 
@@ -41,12 +41,12 @@ def _create_langchain_chat_model(settings: Settings) -> Any:
 
     provider = _init_chat_model_provider(settings.model_provider)
     kwargs: dict[str, Any] = {
-        "model": settings.sap_model_name,
+        "model": settings.model_name,
         "model_provider": provider,
         **_sampling_kwargs(settings),
     }
-    if settings.sap_max_tokens is not None:
-        kwargs["max_tokens"] = settings.sap_max_tokens
+    if settings.model_max_tokens is not None:
+        kwargs["max_tokens"] = settings.model_max_tokens
     if settings.model_base_url:
         kwargs["base_url"] = settings.model_base_url
     if settings.model_api_key:
@@ -56,7 +56,7 @@ def _create_langchain_chat_model(settings: Settings) -> Any:
         model = init_chat_model(**kwargs)
     except Exception as exc:  # noqa: BLE001 - normalize provider/init errors.
         raise ModelInitializationError(
-            f"Unable to initialize '{settings.model_provider}' chat model '{settings.sap_model_name}': {exc!r}."
+            f"Unable to initialize '{settings.model_provider}' chat model '{settings.model_name}': {exc!r}."
         ) from exc
 
     try:

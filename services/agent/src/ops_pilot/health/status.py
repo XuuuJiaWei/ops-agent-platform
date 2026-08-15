@@ -36,7 +36,7 @@ def health_snapshot(settings: Settings) -> dict[str, Any]:
         "status": "ok",
         "environment": settings.app_env,
         "assistant_id": settings.assistant_id,
-        "model": settings.sap_model_name,
+        "model": settings.model_name,
         "chat_base_path": settings.chat_base_path,
         "a2a_base_path": settings.a2a_base_path,
         "sandbox": _settings_sandbox_status(settings),

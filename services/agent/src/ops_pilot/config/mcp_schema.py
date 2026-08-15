@@ -118,9 +118,6 @@ class MCPServerConfig:
             }
         return cast("Connection", connection)
 
-    def to_langchain_config(self) -> Connection:
-        return self.to_client_connection()
-
 
 @dataclass(frozen=True)
 class MCPConfig:
@@ -168,9 +165,6 @@ class MCPConfig:
         for server in self.servers:
             names.update(server.hitl_tools)
         return names
-
-    def to_langchain_config(self) -> dict[str, Connection]:
-        return {server.name: server.to_client_connection() for server in self.servers}
 
 
 def _optional_string(value: Any) -> str | None:

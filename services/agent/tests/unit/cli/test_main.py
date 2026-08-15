@@ -33,7 +33,7 @@ def test_keeps_default_event_loop_policy_on_non_windows(monkeypatch) -> None:
 
 def test_serve_backend_lets_the_configured_event_loop_policy_select_the_loop(monkeypatch) -> None:
     captured_config: dict[str, object] = {}
-    settings = Settings(chat_host="127.0.0.1", chat_port=8123)
+    settings = Settings.model_validate({"chat_host": "127.0.0.1", "chat_port": 8123})
 
     monkeypatch.setattr(cli, "load_settings", lambda: settings)
     monkeypatch.setattr(cli.asyncio, "run", lambda coroutine: coroutine.close() or object())

@@ -30,7 +30,7 @@ def create_chat_model(settings: Settings) -> Any:
     except Exception as fallback_error:  # noqa: BLE001
         raise SAPModelInitializationError(
             "Unable to initialize SAP AI Core / Generative AI Hub chat model "
-            f"'{settings.sap_model_name}'. Primary init_llm error: {primary_error!r}. "
+            f"'{settings.model_name}'. Primary init_llm error: {primary_error!r}. "
             f"Fallback ChatOpenAI error: {fallback_error!r}."
         ) from fallback_error
 
@@ -45,11 +45,11 @@ def _create_with_init_llm(settings: Settings) -> Any:
         ) from exc
 
     proxy_client = get_proxy_client("gen-ai-hub")
-    if _is_bedrock_model(settings.sap_model_name):
+    if _is_bedrock_model(settings.model_name):
         return _create_bedrock_chat_model(settings, proxy_client)
 
     return init_llm(
-        settings.sap_model_name,
+        settings.model_name,
         proxy_client=proxy_client,
         **_generation_kwargs(settings),
     )
@@ -66,7 +66,7 @@ def _create_with_proxy_chat_openai(settings: Settings) -> Any:
 
     proxy_client = get_proxy_client("gen-ai-hub")
     return ChatOpenAI(
-        proxy_model_name=settings.sap_model_name,
+        proxy_model_name=settings.model_name,
         proxy_client=proxy_client,
         **_generation_kwargs(settings),
     )
@@ -81,7 +81,7 @@ def _create_bedrock_chat_model(settings: Settings, proxy_client: Any) -> Any:
             "SAP SDK Bedrock LangChain integration is not installed. Run 'uv sync' in services/agent."
         ) from exc
 
-    deployment = proxy_client.select_deployment(model_name=settings.sap_model_name)
+    deployment = proxy_client.select_deployment(model_name=settings.model_name)
     # The SAP SDK's ChatBedrock intentionally moves `client_params` into
     # `model_kwargs` and emits a UserWarning about it on every construction.
     # It is expected here, so suppress that one warning to keep startup clean.
@@ -109,8 +109,8 @@ def _create_bedrock_chat_model(settings: Settings, proxy_client: Any) -> Any:
 
 def _generation_kwargs(settings: Settings) -> dict[str, Any]:
     kwargs: dict[str, Any] = {} if settings.model_reasoning_mode == "adaptive" else dict(_sampling_kwargs(settings))
-    if settings.sap_max_tokens is not None:
-        kwargs["max_tokens"] = settings.sap_max_tokens
+    if settings.model_max_tokens is not None:
+        kwargs["max_tokens"] = settings.model_max_tokens
     kwargs["thinking"] = {"type": settings.model_reasoning_mode}
     if settings.model_reasoning_mode == "adaptive":
         kwargs["output_config"] = {"effort": settings.model_reasoning_effort}
@@ -118,9 +118,9 @@ def _generation_kwargs(settings: Settings) -> dict[str, Any]:
 
 
 def _sampling_kwargs(settings: Settings) -> dict[str, float]:
-    if settings.sap_top_p is not None:
-        return {"top_p": settings.sap_top_p}
-    return {"temperature": settings.sap_temperature}
+    if settings.model_top_p is not None:
+        return {"top_p": settings.model_top_p}
+    return {"temperature": settings.model_temperature}
 
 
 def _is_bedrock_model(model_name: str) -> bool:

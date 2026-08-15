@@ -8,17 +8,17 @@ from ops_pilot.models.sap_genai import (
 
 
 def test_sampling_kwargs_defaults_to_temperature_only():
-    assert _sampling_kwargs(Settings()) == {"temperature": 0.0}
+    assert _sampling_kwargs(Settings.model_validate({})) == {"temperature": 0.0}
 
 
 def test_sampling_kwargs_uses_top_p_only_when_configured():
-    settings = Settings(sap_temperature=0.2, sap_top_p=0.8)
+    settings = Settings.model_validate({"model_temperature": 0.2, "model_top_p": 0.8})
 
     assert _sampling_kwargs(settings) == {"top_p": 0.8}
 
 
 def test_generation_kwargs_sets_project_default_token_limit():
-    assert _generation_kwargs(Settings()) == {
+    assert _generation_kwargs(Settings.model_validate({})) == {
         "max_tokens": 16384,
         "thinking": {"type": "adaptive"},
         "output_config": {"effort": "medium"},
@@ -26,7 +26,7 @@ def test_generation_kwargs_sets_project_default_token_limit():
 
 
 def test_generation_kwargs_includes_token_limit_only_when_configured():
-    settings = Settings(sap_max_tokens=4096)
+    settings = Settings.model_validate({"model_max_tokens": 4096})
 
     assert _generation_kwargs(settings) == {
         "max_tokens": 4096,
@@ -36,7 +36,7 @@ def test_generation_kwargs_includes_token_limit_only_when_configured():
 
 
 def test_generation_kwargs_can_disable_reasoning():
-    settings = Settings(model_reasoning_mode="disabled")
+    settings = Settings.model_validate({"model_reasoning_mode": "disabled"})
 
     assert _generation_kwargs(settings) == {
         "temperature": 0.0,
@@ -66,7 +66,7 @@ def test_bedrock_client_uses_explicit_request_timeout_without_retries(monkeypatc
 
     monkeypatch.setattr("gen_ai_hub.proxy.langchain.amazon.ChatBedrock", fake_chat_bedrock)
 
-    _create_bedrock_chat_model(Settings(model_request_timeout_seconds=180), ProxyClient())
+    _create_bedrock_chat_model(Settings.model_validate({"model_request_timeout_seconds": 180}), ProxyClient())
 
     assert captured["config"].read_timeout == 180
     assert captured["config"].retries == {"mode": "standard", "total_max_attempts": 1}

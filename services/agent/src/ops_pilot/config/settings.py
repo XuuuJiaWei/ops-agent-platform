@@ -1,14 +1,17 @@
-"""Layered service settings: regular config from YAML, secrets from the environment."""
+"""Typed service settings loaded from YAML with environment-backed secrets."""
 
 from __future__ import annotations
 
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any, Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+from dotenv import load_dotenv
+from pydantic import AliasChoices, AliasPath, Field, ValidationError, field_validator, model_validator
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict, YamlConfigSettingsSource
 
 from ops_pilot.config.interpolation import expand_optional
 from ops_pilot.config.mcp_schema import MCPConfig
@@ -16,123 +19,271 @@ from ops_pilot.config.paths import REPO_ROOT, resolve_path
 
 DEFAULT_CONFIG_PATH = REPO_ROOT / "config" / "config.yaml"
 
-SUPPORTED_MODEL_PROVIDERS = {"sap", "openai", "deepseek", "anthropic", "google_genai", "ollama"}
-
-SUPPORTED_PERSISTENCE_BACKENDS = {"memory", "postgres"}
+PositiveInt = Annotated[int, Field(gt=0)]
+NonNegativeInt = Annotated[int, Field(ge=0)]
+PositiveFloat = Annotated[float, Field(gt=0)]
+NonNegativeFloat = Annotated[float, Field(ge=0)]
+Ratio = Annotated[float, Field(ge=0, le=1)]
+Port = Annotated[int, Field(ge=1, le=65535)]
+ModelProvider = Literal["sap", "openai", "deepseek", "anthropic", "google_genai", "ollama"]
+PersistenceBackend = Literal["memory", "postgres"]
+ReasoningMode = Literal["adaptive", "disabled"]
+ReasoningEffort = Literal["low", "medium", "high"]
+SandboxScope = Literal["process", "thread", "run"]
 
 
 class SettingsError(RuntimeError):
-    """Raised when regular configuration cannot be loaded."""
+    """Raised when service configuration cannot be loaded or validated."""
 
 
-@dataclass(frozen=True)
-class Settings:
-    """Validated runtime settings consumed by backend modules.
+def _alias(field_name: str, *path: str) -> AliasChoices:
+    return AliasChoices(field_name, AliasPath(*path))
 
-    Regular (non-secret) values come from ``config/config.yaml``; secrets come
-    from the process environment (``.env``).
-    """
+
+class Settings(BaseSettings):
+    """Validated runtime settings consumed by backend modules."""
+
+    model_config = SettingsConfigDict(
+        extra="ignore",
+        frozen=True,
+        populate_by_name=True,
+        str_strip_whitespace=True,
+    )
 
     app_env: str = "local"
     assistant_id: str = "agent"
-    model_provider: str = "sap"
-    model_base_url: str | None = None
+    model_provider: ModelProvider = Field("sap", validation_alias=_alias("model_provider", "model", "provider"))
+    model_base_url: str | None = Field(None, validation_alias=_alias("model_base_url", "model", "base_url"))
     model_api_key: str | None = None
-    sap_model_name: str = "anthropic--claude-4.6-sonnet"
-    sap_temperature: float = 0.0
-    sap_top_p: float | None = None
-    sap_max_tokens: int | None = 16384
-    model_request_timeout_seconds: int = 120
-    model_reasoning_mode: str = "adaptive"
-    model_reasoning_effort: str = "medium"
+    model_name: str = Field(
+        "anthropic--claude-4.6-sonnet",
+        validation_alias=_alias("model_name", "model", "model_name"),
+    )
+    model_temperature: float = Field(0.0, validation_alias=_alias("model_temperature", "model", "temperature"))
+    model_top_p: Ratio | None = Field(None, validation_alias=_alias("model_top_p", "model", "top_p"))
+    model_max_tokens: PositiveInt | None = Field(
+        16384,
+        validation_alias=_alias("model_max_tokens", "model", "max_tokens"),
+    )
+    model_request_timeout_seconds: PositiveInt = Field(
+        120,
+        validation_alias=_alias("model_request_timeout_seconds", "model", "request_timeout_seconds"),
+    )
+    model_reasoning_mode: ReasoningMode = Field(
+        "adaptive",
+        validation_alias=_alias("model_reasoning_mode", "model", "reasoning", "mode"),
+    )
+    model_reasoning_effort: ReasoningEffort = Field(
+        "medium",
+        validation_alias=_alias("model_reasoning_effort", "model", "reasoning", "effort"),
+    )
     system_prompt: str | None = None
-    mcp: MCPConfig = field(default_factory=MCPConfig)
-    skills_paths: tuple[Path, ...] = field(default_factory=tuple)
+    mcp: MCPConfig = Field(default_factory=MCPConfig)
+    skills_paths: tuple[Path, ...] = ()
     langfuse_public_key: str | None = None
     langfuse_secret_key: str | None = None
-    langfuse_base_url: str | None = "https://cloud.langfuse.com"
-    langfuse_timeout_seconds: int = 30
-    chat_base_path: str = "/chat"
-    chat_host: str = "127.0.0.1"
-    chat_port: int = 8123
-    a2a_base_path: str = "/a2a"
-    persistence_backend: str = "memory"
+    langfuse_base_url: str | None = Field(
+        "https://cloud.langfuse.com",
+        validation_alias=_alias("langfuse_base_url", "langfuse", "base_url"),
+    )
+    langfuse_timeout_seconds: PositiveInt = Field(
+        30,
+        validation_alias=_alias("langfuse_timeout_seconds", "langfuse", "timeout_seconds"),
+    )
+    chat_base_path: str = Field("/chat", validation_alias=_alias("chat_base_path", "server", "chat_base_path"))
+    chat_host: str = Field("127.0.0.1", validation_alias=_alias("chat_host", "server", "chat_host"))
+    chat_port: Port = Field(8123, validation_alias=_alias("chat_port", "server", "chat_port"))
+    a2a_base_path: str = Field("/a2a", validation_alias=_alias("a2a_base_path", "server", "a2a_base_path"))
+    persistence_backend: PersistenceBackend = Field(
+        "memory",
+        validation_alias=_alias("persistence_backend", "persistence", "backend"),
+    )
     persistence_database_url: str | None = None
-    persistence_setup_on_start: bool = True
-    spaces_resolver_enabled: bool = True
-    spaces_resolver_poll_seconds: float = 30.0
-    reliability_enabled: bool = True
-    run_deadline_seconds: float | None = 600.0
-    model_call_limit: int = 50
-    tool_call_limit: int = 200
-    tool_retry_max_retries: int = 2
-    tool_retry_initial_delay_seconds: float = 0.25
-    tool_retry_backoff_factor: float = 2.0
-    tool_retry_max_delay_seconds: float = 60.0
-    tool_retry_jitter: bool = True
-    chaos_namespace: str = "otel-demo"
-    chaos_flagd_service: str = "flagd"
-    chaos_flagd_service_port: int = 8016
-    chaos_flagd_ui_port: int = 4000
-    chaos_flag_sync_timeout_seconds: float = 90.0
-    chaos_poll_interval_seconds: float = 1.0
-    chaos_stable_reads: int = 2
-    chaos_signal_warmup_seconds: float = 15.0
+    persistence_setup_on_start: bool = Field(
+        True,
+        validation_alias=_alias("persistence_setup_on_start", "persistence", "setup_on_start"),
+    )
+    spaces_resolver_enabled: bool = Field(
+        True,
+        validation_alias=_alias("spaces_resolver_enabled", "spaces", "resolver_enabled"),
+    )
+    spaces_resolver_poll_seconds: PositiveFloat = Field(
+        30.0,
+        validation_alias=_alias("spaces_resolver_poll_seconds", "spaces", "resolver_poll_seconds"),
+    )
+    reliability_enabled: bool = Field(
+        True,
+        validation_alias=_alias("reliability_enabled", "reliability", "enabled"),
+    )
+    run_deadline_seconds: PositiveFloat | None = Field(
+        600.0,
+        validation_alias=_alias("run_deadline_seconds", "reliability", "run_deadline_seconds"),
+    )
+    model_call_limit: PositiveInt = Field(
+        50,
+        validation_alias=_alias("model_call_limit", "reliability", "model_call_limit"),
+    )
+    tool_call_limit: PositiveInt = Field(
+        200,
+        validation_alias=_alias("tool_call_limit", "reliability", "tool_call_limit"),
+    )
+    tool_retry_max_retries: NonNegativeInt = Field(
+        2,
+        validation_alias=_alias("tool_retry_max_retries", "reliability", "tool_retry_max_retries"),
+    )
+    tool_retry_initial_delay_seconds: NonNegativeFloat = Field(
+        0.25,
+        validation_alias=_alias(
+            "tool_retry_initial_delay_seconds",
+            "reliability",
+            "tool_retry_initial_delay_seconds",
+        ),
+    )
+    tool_retry_backoff_factor: PositiveFloat = Field(
+        2.0,
+        validation_alias=_alias("tool_retry_backoff_factor", "reliability", "tool_retry_backoff_factor"),
+    )
+    tool_retry_max_delay_seconds: PositiveFloat = Field(
+        60.0,
+        validation_alias=_alias("tool_retry_max_delay_seconds", "reliability", "tool_retry_max_delay_seconds"),
+    )
+    tool_retry_jitter: bool = Field(
+        True,
+        validation_alias=_alias("tool_retry_jitter", "reliability", "tool_retry_jitter"),
+    )
+    chaos_namespace: str = Field("otel-demo", validation_alias=_alias("chaos_namespace", "chaos", "namespace"))
+    chaos_flagd_service: str = Field(
+        "flagd",
+        validation_alias=_alias("chaos_flagd_service", "chaos", "flagd_service"),
+    )
+    chaos_flagd_service_port: Port = Field(
+        8016,
+        validation_alias=_alias("chaos_flagd_service_port", "chaos", "flagd_service_port"),
+    )
+    chaos_flagd_ui_port: Port = Field(
+        4000,
+        validation_alias=_alias("chaos_flagd_ui_port", "chaos", "flagd_ui_port"),
+    )
+    chaos_flag_sync_timeout_seconds: PositiveFloat = Field(
+        90.0,
+        validation_alias=_alias("chaos_flag_sync_timeout_seconds", "chaos", "flag_sync_timeout_seconds"),
+    )
+    chaos_poll_interval_seconds: PositiveFloat = Field(
+        1.0,
+        validation_alias=_alias("chaos_poll_interval_seconds", "chaos", "poll_interval_seconds"),
+    )
+    chaos_stable_reads: PositiveInt = Field(
+        2,
+        validation_alias=_alias("chaos_stable_reads", "chaos", "stable_reads"),
+    )
+    chaos_signal_warmup_seconds: NonNegativeFloat = Field(
+        15.0,
+        validation_alias=_alias("chaos_signal_warmup_seconds", "chaos", "signal_warmup_seconds"),
+    )
     open_sandbox_enabled: bool = False
     open_sandbox_domain: str | None = None
     open_sandbox_api_key: str | None = None
-    open_sandbox_protocol: str = "https"
-    open_sandbox_use_server_proxy: bool = True
-    open_sandbox_disable_metrics: bool = True
-    open_sandbox_image: str = "python:3.11"
-    open_sandbox_timeout_seconds: int | None = 600
-    open_sandbox_ready_timeout_seconds: int = 240
-    open_sandbox_cpu_limit: str = "250m"
-    open_sandbox_memory_limit: str = "256Mi"
-    open_sandbox_cpu_request: str = "100m"
-    open_sandbox_memory_request: str = "128Mi"
-    open_sandbox_scope: str = "thread"
-    open_sandbox_max_active: int = 16
-    open_sandbox_workspace_path: str = "/workspace"
-    open_sandbox_internal_root: str = "/workspace/.ops-pilot"
+    open_sandbox_protocol: str = Field(
+        "https",
+        validation_alias=_alias("open_sandbox_protocol", "open_sandbox", "protocol"),
+    )
+    open_sandbox_use_server_proxy: bool = Field(
+        True,
+        validation_alias=_alias("open_sandbox_use_server_proxy", "open_sandbox", "use_server_proxy"),
+    )
+    open_sandbox_disable_metrics: bool = Field(
+        True,
+        validation_alias=_alias("open_sandbox_disable_metrics", "open_sandbox", "disable_metrics"),
+    )
+    open_sandbox_image: str = Field(
+        "python:3.11",
+        validation_alias=_alias("open_sandbox_image", "open_sandbox", "image"),
+    )
+    open_sandbox_timeout_seconds: PositiveInt | None = Field(
+        600,
+        validation_alias=_alias("open_sandbox_timeout_seconds", "open_sandbox", "timeout_seconds"),
+    )
+    open_sandbox_ready_timeout_seconds: PositiveInt = Field(
+        240,
+        validation_alias=_alias("open_sandbox_ready_timeout_seconds", "open_sandbox", "ready_timeout_seconds"),
+    )
+    open_sandbox_cpu_limit: str = Field(
+        "250m",
+        validation_alias=_alias("open_sandbox_cpu_limit", "open_sandbox", "cpu_limit"),
+    )
+    open_sandbox_memory_limit: str = Field(
+        "256Mi",
+        validation_alias=_alias("open_sandbox_memory_limit", "open_sandbox", "memory_limit"),
+    )
+    open_sandbox_cpu_request: str = Field(
+        "100m",
+        validation_alias=_alias("open_sandbox_cpu_request", "open_sandbox", "cpu_request"),
+    )
+    open_sandbox_memory_request: str = Field(
+        "128Mi",
+        validation_alias=_alias("open_sandbox_memory_request", "open_sandbox", "memory_request"),
+    )
+    open_sandbox_scope: SandboxScope = Field(
+        "thread",
+        validation_alias=_alias("open_sandbox_scope", "open_sandbox", "scope"),
+    )
+    open_sandbox_max_active: PositiveInt = Field(
+        16,
+        validation_alias=_alias("open_sandbox_max_active", "open_sandbox", "max_active"),
+    )
+    open_sandbox_workspace_path: str = Field(
+        "/workspace",
+        validation_alias=_alias("open_sandbox_workspace_path", "open_sandbox", "workspace_path"),
+    )
+    open_sandbox_internal_root: str = Field(
+        "/workspace/.ops-pilot",
+        validation_alias=_alias("open_sandbox_internal_root", "open_sandbox", "internal_root"),
+    )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        del settings_cls, env_settings, dotenv_settings, file_secret_settings
+        return (init_settings,)
+
+    @field_validator("skills_paths", mode="after")
+    @classmethod
+    def _resolve_skill_paths(cls, paths: tuple[Path, ...]) -> tuple[Path, ...]:
+        return tuple(resolve_path(path) for path in paths)
+
+    @field_validator("system_prompt", mode="after")
+    @classmethod
+    def _empty_prompt_is_unset(cls, prompt: str | None) -> str | None:
+        return prompt or None
+
+    @field_validator("open_sandbox_workspace_path", "open_sandbox_internal_root")
+    @classmethod
+    def _validate_absolute_posix_path(cls, path: str) -> str:
+        normalized = path.rstrip("/") or "/"
+        if not normalized.startswith("/") or "//" in normalized or "/../" in f"{normalized}/":
+            raise ValueError("must be an absolute POSIX path without parent traversal")
+        return normalized
+
+    @model_validator(mode="after")
+    def _require_database_url(self) -> Settings:
+        if self.persistence_backend == "postgres" and not self.persistence_database_url:
+            raise ValueError(
+                "persistence.backend is 'postgres' but DATABASE_URL is not set. "
+                "Add DATABASE_URL to .env or set persistence.backend: memory."
+            )
+        return self
 
     @property
     def langfuse_enabled(self) -> bool:
         return bool(self.langfuse_public_key and self.langfuse_secret_key and self.langfuse_base_url)
 
-    @property
-    def tracing_enabled(self) -> bool:
-        return self.langfuse_enabled
-
-    @property
-    def sap_ai_core_model_name(self) -> str:
-        return self.sap_model_name
-
-    @property
-    def model_name(self) -> str:
-        """Provider-agnostic model name (aliases the historical sap field)."""
-
-        return self.sap_model_name
-
-    @property
-    def uses_sap_ai_core(self) -> bool:
-        return self.model_provider == "sap"
-
-    @property
-    def persistence_enabled(self) -> bool:
-        """True when a durable (non-memory) persistence backend is configured."""
-
-        return self.persistence_backend != "memory"
-
     def sqlalchemy_database_url(self) -> str | None:
-        """Return the persistence URL normalized for SQLAlchemy async engines.
-
-        LangGraph's ``AsyncPostgresSaver`` wants a psycopg (``postgresql://``)
-        DSN, while the A2A ``DatabaseTaskStore`` uses a SQLAlchemy async engine
-        that needs an explicit driver (``postgresql+asyncpg://``). We keep one
-        URL in config and adapt it here for the SQLAlchemy consumer.
-        """
-
         url = self.persistence_database_url
         if not url:
             return None
@@ -140,36 +291,41 @@ class Settings:
             normalized = url
         elif url.startswith("postgresql://"):
             normalized = "postgresql+asyncpg://" + url[len("postgresql://") :]
-        elif url.startswith("postgres://"):
-            normalized = "postgresql+asyncpg://" + url[len("postgres://") :]
         else:
             return url
         return _rename_url_query_parameter(normalized, source="sslmode", target="ssl")
 
     def psycopg_database_url(self) -> str | None:
-        """Return the persistence URL normalized for psycopg (``AsyncPostgresSaver``).
-
-        psycopg rejects a SQLAlchemy-style ``+driver`` suffix, so strip it and
-        normalize the legacy ``postgres://`` scheme to ``postgresql://``.
-        """
-
         url = self.persistence_database_url
-        if not url:
-            return None
-        if url.startswith("postgres://"):
-            url = "postgresql://" + url[len("postgres://") :]
-        if url.startswith("postgresql+"):
-            rest = url[len("postgresql") :]
-            url = "postgresql" + rest[rest.index("://") :]
-        return url
+        if not url or not url.startswith("postgresql+"):
+            return url
+        rest = url[len("postgresql") :]
+        return "postgresql" + rest[rest.index("://") :]
 
-    def configured_system_prompt(self) -> str | None:
-        if self.system_prompt and self.system_prompt.strip():
-            return self.system_prompt.strip()
-        return None
 
-    def skill_path_values(self) -> list[str]:
-        return [str(path) for path in self.skills_paths]
+class _Environment(BaseSettings):
+    """Environment-only values; regular configuration remains YAML-owned."""
+
+    model_config = SettingsConfigDict(extra="ignore", env_ignore_empty=True)
+
+    config_path: Path | None = Field(None, validation_alias="OPS_PILOT_CONFIG")
+    model_api_key: str | None = Field(None, validation_alias="MODEL_API_KEY")
+    langfuse_public_key: str | None = Field(None, validation_alias="LANGFUSE_PUBLIC_KEY")
+    langfuse_secret_key: str | None = Field(None, validation_alias="LANGFUSE_SECRET_KEY")
+    persistence_database_url: str | None = Field(None, validation_alias="DATABASE_URL")
+    open_sandbox_api_key: str | None = Field(None, validation_alias="OPEN_SANDBOX_API_KEY")
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        del settings_cls, env_settings, dotenv_settings, file_secret_settings
+        return (init_settings,)
 
 
 def _rename_url_query_parameter(url: str, *, source: str, target: str) -> str:
@@ -178,7 +334,6 @@ def _rename_url_query_parameter(url: str, *, source: str, target: str) -> str:
     source_values = [value for key, value in query if key == source]
     if not source_values:
         return url
-
     without_source = [(key, value) for key, value in query if key != source]
     if not any(key == target for key, _ in without_source):
         without_source.append((target, source_values[-1]))
@@ -186,122 +341,38 @@ def _rename_url_query_parameter(url: str, *, source: str, target: str) -> str:
 
 
 def load_settings(env: Mapping[str, str] | None = None, *, config: Mapping[str, Any] | None = None) -> Settings:
-    """Load settings from ``config/config.yaml`` (regular) and the env (secrets).
-
-    ``config`` lets callers (tests) inject a config mapping and skip the file
-    read. ``env`` overrides the process environment for secret lookups.
-    """
+    """Load regular YAML configuration and overlay environment-backed secrets."""
 
     if env is None:
-        _load_dotenv()
-    secret_source = os.environ if env is None else env
-    config_data = config if config is not None else _load_config_file(secret_source)
+        load_dotenv(REPO_ROOT / ".env", override=False)
+        environment_values: Mapping[str, str] = os.environ
+    else:
+        environment_values = env
+    environment = _Environment.model_validate(environment_values)
 
-    model = _section(config_data, "model")
-    reasoning = _section(model, "reasoning")
-    langfuse = _section(config_data, "langfuse")
-    server = _section(config_data, "server")
-    sandbox = _section(config_data, "open_sandbox")
-    persistence = _section(config_data, "persistence")
-    reliability = _section(config_data, "reliability")
-    chaos = _section(config_data, "chaos")
-    spaces = _section(config_data, "spaces")
+    config_data = dict(config) if config is not None else _load_config_file(environment.config_path)
+    sandbox = config_data.get("open_sandbox")
+    sandbox_data = dict(sandbox) if isinstance(sandbox, Mapping) else {}
+    sandbox_domain = expand_optional(sandbox_data.get("domain"), environment_values)
+    sandbox_enabled = sandbox_data.get("enabled")
 
-    persistence_backend = _choice(
-        persistence.get("backend"),
-        default="memory",
-        allowed=SUPPORTED_PERSISTENCE_BACKENDS,
-        field_name="persistence.backend",
-    )
-    persistence_database_url = _optional_str(secret_source.get("DATABASE_URL"))
-    if persistence_backend != "memory" and not persistence_database_url:
-        raise SettingsError(
-            f"persistence.backend is '{persistence_backend}' but DATABASE_URL is not set. "
-            "Add DATABASE_URL to .env or set persistence.backend: memory."
-        )
-
-    open_sandbox_domain = _optional_str(expand_optional(sandbox.get("domain"), secret_source))
-    open_sandbox_api_key = _optional_str(secret_source.get("OPEN_SANDBOX_API_KEY"))
-    open_sandbox_enabled = _optional_bool(sandbox.get("enabled"))
-    if open_sandbox_enabled is None:
-        open_sandbox_enabled = bool(open_sandbox_domain and open_sandbox_api_key)
-
-    return Settings(
-        app_env=_str(config_data.get("app_env"), "local"),
-        assistant_id=_str(config_data.get("assistant_id"), "agent"),
-        model_provider=_model_provider(model.get("provider")),
-        model_base_url=_optional_str(model.get("base_url")),
-        model_api_key=_optional_str(secret_source.get("MODEL_API_KEY")),
-        sap_model_name=_str(model.get("model_name"), "anthropic--claude-4.6-sonnet"),
-        sap_temperature=_float(model.get("temperature"), 0.0),
-        sap_top_p=_optional_float(model.get("top_p")),
-        sap_max_tokens=_optional_int(model.get("max_tokens")) or 16384,
-        model_request_timeout_seconds=_positive_int(model.get("request_timeout_seconds"), 120),
-        model_reasoning_mode=_choice(
-            reasoning.get("mode"),
-            default="adaptive",
-            allowed={"adaptive", "disabled"},
-            field_name="model.reasoning.mode",
+    values = {
+        **config_data,
+        "mcp": MCPConfig.from_mapping(config_data, env=environment_values),
+        "model_api_key": environment.model_api_key,
+        "langfuse_public_key": environment.langfuse_public_key,
+        "langfuse_secret_key": environment.langfuse_secret_key,
+        "persistence_database_url": environment.persistence_database_url,
+        "open_sandbox_api_key": environment.open_sandbox_api_key,
+        "open_sandbox_domain": sandbox_domain,
+        "open_sandbox_enabled": (
+            bool(sandbox_domain and environment.open_sandbox_api_key) if sandbox_enabled is None else sandbox_enabled
         ),
-        model_reasoning_effort=_choice(
-            reasoning.get("effort"),
-            default="medium",
-            allowed={"low", "medium", "high"},
-            field_name="model.reasoning.effort",
-        ),
-        system_prompt=_optional_str(config_data.get("system_prompt")),
-        mcp=MCPConfig.from_mapping(config_data, env=secret_source),
-        skills_paths=tuple(resolve_path(path) for path in _str_list(config_data.get("skills_paths"))),
-        langfuse_public_key=_optional_str(secret_source.get("LANGFUSE_PUBLIC_KEY")),
-        langfuse_secret_key=_optional_str(secret_source.get("LANGFUSE_SECRET_KEY")),
-        langfuse_base_url=_optional_str(langfuse.get("base_url")),
-        langfuse_timeout_seconds=_positive_int(langfuse.get("timeout_seconds"), 30),
-        chat_base_path=_str(server.get("chat_base_path"), "/chat"),
-        chat_host=_str(server.get("chat_host"), "127.0.0.1"),
-        chat_port=_int(server.get("chat_port"), 8123),
-        a2a_base_path=_str(server.get("a2a_base_path"), "/a2a"),
-        persistence_backend=persistence_backend,
-        persistence_database_url=persistence_database_url,
-        persistence_setup_on_start=_bool(persistence.get("setup_on_start"), True),
-        spaces_resolver_enabled=_bool(spaces.get("resolver_enabled"), True),
-        spaces_resolver_poll_seconds=_positive_float(spaces.get("resolver_poll_seconds"), 30.0),
-        reliability_enabled=_bool(reliability.get("enabled"), True),
-        run_deadline_seconds=_optional_positive_float(reliability.get("run_deadline_seconds"), 600.0),
-        model_call_limit=_positive_int(reliability.get("model_call_limit"), 50),
-        tool_call_limit=_positive_int(reliability.get("tool_call_limit"), 200),
-        tool_retry_max_retries=_nonnegative_int(reliability.get("tool_retry_max_retries"), 2),
-        tool_retry_initial_delay_seconds=_nonnegative_float(reliability.get("tool_retry_initial_delay_seconds"), 0.25),
-        tool_retry_backoff_factor=_positive_float(reliability.get("tool_retry_backoff_factor"), 2.0),
-        tool_retry_max_delay_seconds=_positive_float(reliability.get("tool_retry_max_delay_seconds"), 60.0),
-        tool_retry_jitter=_bool(reliability.get("tool_retry_jitter"), True),
-        chaos_namespace=_str(chaos.get("namespace"), "otel-demo"),
-        chaos_flagd_service=_str(chaos.get("flagd_service"), "flagd"),
-        chaos_flagd_service_port=_positive_int(chaos.get("flagd_service_port"), 8016),
-        chaos_flagd_ui_port=_positive_int(chaos.get("flagd_ui_port"), 4000),
-        chaos_flag_sync_timeout_seconds=_positive_float(chaos.get("flag_sync_timeout_seconds"), 90.0),
-        chaos_poll_interval_seconds=_positive_float(chaos.get("poll_interval_seconds"), 1.0),
-        chaos_stable_reads=_positive_int(chaos.get("stable_reads"), 2),
-        chaos_signal_warmup_seconds=_nonnegative_float(chaos.get("signal_warmup_seconds"), 15.0),
-        open_sandbox_enabled=open_sandbox_enabled,
-        open_sandbox_domain=open_sandbox_domain,
-        open_sandbox_api_key=open_sandbox_api_key,
-        open_sandbox_protocol=_str(sandbox.get("protocol"), "https"),
-        open_sandbox_use_server_proxy=_bool(sandbox.get("use_server_proxy"), True),
-        open_sandbox_disable_metrics=_bool(sandbox.get("disable_metrics"), True),
-        open_sandbox_image=_str(sandbox.get("image"), "python:3.11"),
-        open_sandbox_timeout_seconds=(
-            _optional_int(sandbox["timeout_seconds"]) if "timeout_seconds" in sandbox else 600
-        ),
-        open_sandbox_ready_timeout_seconds=_int(sandbox.get("ready_timeout_seconds"), 240),
-        open_sandbox_cpu_limit=_str(sandbox.get("cpu_limit"), "250m"),
-        open_sandbox_memory_limit=_str(sandbox.get("memory_limit"), "256Mi"),
-        open_sandbox_cpu_request=_str(sandbox.get("cpu_request"), "100m"),
-        open_sandbox_memory_request=_str(sandbox.get("memory_request"), "128Mi"),
-        open_sandbox_scope=_sandbox_scope(sandbox.get("scope")),
-        open_sandbox_max_active=_positive_int(sandbox.get("max_active"), 16),
-        open_sandbox_workspace_path=_absolute_posix_path(sandbox.get("workspace_path"), "/workspace"),
-        open_sandbox_internal_root=_absolute_posix_path(sandbox.get("internal_root"), "/workspace/.ops-pilot"),
-    )
+    }
+    try:
+        return Settings.model_validate(values)
+    except ValidationError as exc:
+        raise SettingsError(str(exc)) from exc
 
 
 @lru_cache(maxsize=1)
@@ -309,180 +380,14 @@ def get_settings() -> Settings:
     return load_settings()
 
 
-def _config_path(env: Mapping[str, str]) -> Path:
-    override = env.get("OPS_PILOT_CONFIG", "").strip()
-    if override:
-        return resolve_path(override)
-    return DEFAULT_CONFIG_PATH
-
-
-def _load_config_file(env: Mapping[str, str]) -> Mapping[str, Any]:
-    import yaml
-
-    path = _config_path(env)
-    if not path.exists():
+def _load_config_file(path: Path | None) -> dict[str, Any]:
+    resolved = resolve_path(path or DEFAULT_CONFIG_PATH)
+    if not resolved.exists():
         raise SettingsError(
-            f"Config file not found: {path}. Copy config/config.example.yaml to "
+            f"Config file not found: {resolved}. Copy config/config.example.yaml to "
             "config/config.yaml or set OPS_PILOT_CONFIG."
         )
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except yaml.YAMLError as exc:
-        raise SettingsError(f"Config file is not valid YAML: {path}: {exc}") from exc
-    if data is None:
-        return {}
-    if not isinstance(data, Mapping):
-        raise SettingsError(f"Config file root must be a mapping: {path}")
-    return data
-
-
-def _load_dotenv() -> None:
-    try:
-        from dotenv import load_dotenv
-    except ImportError:
-        return
-    load_dotenv(REPO_ROOT / ".env", override=False)
-
-
-def _section(config: Mapping[str, Any], key: str) -> Mapping[str, Any]:
-    value = config.get(key)
-    return value if isinstance(value, Mapping) else {}
-
-
-def _str(value: Any, default: str) -> str:
-    if value is None:
-        return default
-    text = str(value).strip()
-    return text or default
-
-
-def _optional_str(value: Any) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
-
-
-def _int(value: Any, default: int) -> int:
-    parsed = _optional_int(value)
-    return parsed if parsed is not None else default
-
-
-def _positive_int(value: Any, default: int) -> int:
-    parsed = _int(value, default)
-    if parsed < 1:
-        raise SettingsError(f"Expected a positive integer, got: {value!r}")
-    return parsed
-
-
-def _nonnegative_int(value: Any, default: int) -> int:
-    parsed = _int(value, default)
-    if parsed < 0:
-        raise SettingsError(f"Expected a non-negative integer, got: {value!r}")
-    return parsed
-
-
-def _optional_int(value: Any) -> int | None:
-    if value is None or value == "":
-        return None
-    return int(value)
-
-
-def _float(value: Any, default: float) -> float:
-    if value is None or value == "":
-        return default
-    return float(value)
-
-
-def _optional_float(value: Any) -> float | None:
-    if value is None or value == "":
-        return None
-    return float(value)
-
-
-def _positive_float(value: Any, default: float) -> float:
-    parsed = _float(value, default)
-    if parsed <= 0:
-        raise SettingsError(f"Expected a positive number, got: {value!r}")
-    return parsed
-
-
-def _optional_positive_float(value: Any, default: float) -> float | None:
-    if value is None:
-        return default
-    if value == "":
-        return None
-    return _positive_float(value, default)
-
-
-def _nonnegative_float(value: Any, default: float) -> float:
-    parsed = _float(value, default)
-    if parsed < 0:
-        raise SettingsError(f"Expected a non-negative number, got: {value!r}")
-    return parsed
-
-
-def _ratio(value: Any, default: float) -> float:
-    parsed = _float(value, default)
-    if not 0 <= parsed <= 1:
-        raise SettingsError(f"Expected a ratio between 0 and 1, got: {value!r}")
-    return parsed
-
-
-def _bool(value: Any, default: bool) -> bool:
-    parsed = _optional_bool(value)
-    return parsed if parsed is not None else default
-
-
-def _optional_bool(value: Any) -> bool | None:
-    if value is None or value == "":
-        return None
-    if isinstance(value, bool):
-        return value
-    normalized = str(value).strip().lower()
-    if normalized in {"1", "true", "t", "yes", "y", "on"}:
-        return True
-    if normalized in {"0", "false", "f", "no", "n", "off"}:
-        return False
-    raise SettingsError(f"Expected a boolean value, got: {value!r}")
-
-
-def _model_provider(value: Any) -> str:
-    provider = _str(value, "sap").lower()
-    if provider not in SUPPORTED_MODEL_PROVIDERS:
-        supported = ", ".join(sorted(SUPPORTED_MODEL_PROVIDERS))
-        raise SettingsError(f"Expected model.provider to be one of {supported}; got: {value!r}")
-    return provider
-
-
-def _choice(value: Any, *, default: str, allowed: set[str], field_name: str) -> str:
-    choice = _str(value, default).lower()
-    if choice not in allowed:
-        supported = ", ".join(sorted(allowed))
-        raise SettingsError(f"Expected {field_name} to be one of {supported}; got: {value!r}")
-    return choice
-
-
-def _sandbox_scope(value: Any) -> str:
-    scope = _str(value, "thread")
-    if scope not in {"process", "thread", "run"}:
-        raise SettingsError(f"Expected open_sandbox.scope to be one of process, thread, run; got: {value!r}")
-    return scope
-
-
-def _absolute_posix_path(value: Any, default: str) -> str:
-    path = _str(value, default).rstrip("/") or "/"
-    if not path.startswith("/") or "//" in path or "/../" in f"{path}/" or path.endswith("/.."):
-        raise SettingsError(f"Expected an absolute POSIX path, got: {value!r}")
-    return path
-
-
-def _str_list(value: Any) -> list[str]:
-    if value is None or value == "":
-        return []
-    if isinstance(value, str):
-        separator = "," if "," in value else os.pathsep
-        return [part.strip() for part in value.split(separator) if part.strip()]
-    if isinstance(value, list | tuple):
-        return [str(item).strip() for item in value if str(item).strip()]
-    raise SettingsError(f"Expected a list of strings, got: {value!r}")
+        return dict(YamlConfigSettingsSource(Settings, yaml_file=resolved, yaml_file_encoding="utf-8")())
+    except Exception as exc:
+        raise SettingsError(f"Config file is not valid YAML: {resolved}: {exc}") from exc

@@ -101,10 +101,12 @@ class _FakeFlagd:
 async def test_wait_for_flag_variant_requires_stable_ofrep_reads() -> None:
     flagd = _FakeFlagd(
         variants=["off", "on", "on"],
-        settings=Settings(
-            chaos_flag_sync_timeout_seconds=1,
-            chaos_poll_interval_seconds=0.001,
-            chaos_stable_reads=2,
+        settings=Settings.model_validate(
+            {
+                "chaos_flag_sync_timeout_seconds": 1,
+                "chaos_poll_interval_seconds": 0.001,
+                "chaos_stable_reads": 2,
+            }
         ),
     )
 
@@ -115,23 +117,25 @@ async def test_wait_for_flag_variant_requires_stable_ofrep_reads() -> None:
 
 
 def _mcp_settings(*, required: bool = True) -> Settings:
-    return Settings(
-        mcp=MCPConfig.from_mapping(
-            {
-                "mcpServers": {
-                    "kubernetes": {
-                        "required": required,
-                        "transport": "stdio",
-                        "command": "kubernetes",
-                    },
-                    "prometheus": {
-                        "required": required,
-                        "transport": "stdio",
-                        "command": "prometheus",
+    return Settings.model_validate(
+        {
+            "mcp": MCPConfig.from_mapping(
+                {
+                    "mcpServers": {
+                        "kubernetes": {
+                            "required": required,
+                            "transport": "stdio",
+                            "command": "kubernetes",
+                        },
+                        "prometheus": {
+                            "required": required,
+                            "transport": "stdio",
+                            "command": "prometheus",
+                        },
                     },
                 }
-            }
-        )
+            )
+        }
     )
 
 
