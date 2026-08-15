@@ -73,6 +73,9 @@ reliability:
   # Official LangChain run-level loop guards recommended for production agents.
   model_call_limit: 50
   tool_call_limit: 200
+  # LangGraph super-step guard (DeepAgents' official default). Kept explicit in the
+  # run config because the AG-UI layer's ensure_config would otherwise stamp 25.
+  recursion_limit: 9999
   # Official ToolRetryMiddleware options; applied only to retry_tools.
   tool_retry_max_retries: 2
   tool_retry_initial_delay_seconds: 0.25

@@ -24,6 +24,7 @@ def test_load_settings_defaults_with_empty_config():
     assert settings.run_deadline_seconds == 600.0
     assert settings.model_call_limit == 50
     assert settings.tool_call_limit == 200
+    assert settings.recursion_limit == 9999
     assert settings.tool_retry_max_retries == 2
     assert settings.chaos_namespace == "otel-demo"
     assert settings.chaos_flagd_service == "flagd"
@@ -43,6 +44,7 @@ def test_load_settings_reads_reliability_policy() -> None:
                 "run_deadline_seconds": 90,
                 "model_call_limit": 12,
                 "tool_call_limit": 34,
+                "recursion_limit": 8,
                 "tool_retry_max_retries": 4,
                 "tool_retry_initial_delay_seconds": 0,
                 "tool_retry_backoff_factor": 3,
@@ -55,6 +57,7 @@ def test_load_settings_reads_reliability_policy() -> None:
     assert settings.run_deadline_seconds == 90
     assert settings.model_call_limit == 12
     assert settings.tool_call_limit == 34
+    assert settings.recursion_limit == 8
     assert settings.tool_retry_max_retries == 4
     assert settings.tool_retry_initial_delay_seconds == 0
     assert settings.tool_retry_backoff_factor == 3

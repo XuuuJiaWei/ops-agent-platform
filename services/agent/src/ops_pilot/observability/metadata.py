@@ -71,6 +71,10 @@ def build_runnable_config(
         "metadata": metadata,
         "run_name": metadata["langfuse_trace_name"],
         "tags": metadata["langfuse_tags"],
+        # Explicit LangGraph super-step guard (DeepAgents' official default). The
+        # AG-UI layer rebuilds the run config with langchain_core's ensure_config,
+        # which otherwise stamps 25 and overrides the graph's with_config(9999).
+        "recursion_limit": settings.recursion_limit,
     }
     if callbacks:
         config["callbacks"] = list(callbacks)

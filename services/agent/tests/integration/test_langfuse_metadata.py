@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 from ops_pilot.config.settings import load_settings
 from ops_pilot.observability.langfuse import create_callback_handler
-from ops_pilot.observability.metadata import build_model_metadata, build_trace_metadata
+from ops_pilot.observability.metadata import build_model_metadata, build_runnable_config, build_trace_metadata
 
 
 def test_langfuse_is_noop_when_keys_are_missing():
@@ -49,6 +49,14 @@ def test_trace_metadata_maps_user_id_to_langfuse_user_id():
     assert metadata["langfuse_session_id"] == "thread-1"
     assert metadata["langfuse_user_id"] == "user-1"
     assert metadata["langfuse_trace_name"] == "handle-copilotkit-run"
+
+
+def test_runnable_config_carries_explicit_recursion_limit():
+    settings = load_settings(env={}, config={"reliability": {"recursion_limit": 1234}})
+
+    config = build_runnable_config(settings, protocol="copilotkit-agui")
+
+    assert config["recursion_limit"] == 1234
 
 
 def test_model_metadata_uses_runtime_profile_capacity():

@@ -127,6 +127,14 @@ class Settings(BaseSettings):
         200,
         validation_alias=_alias("tool_call_limit", "reliability", "tool_call_limit"),
     )
+    # LangGraph super-step guard. Matches DeepAgents' official with_config default
+    # (9999). Must be carried in the run config explicitly: the AG-UI layer rebuilds
+    # it with langchain_core's ensure_config, which otherwise stamps 25 and overrides
+    # the graph's with_config(9999).
+    recursion_limit: PositiveInt = Field(
+        9_999,
+        validation_alias=_alias("recursion_limit", "reliability", "recursion_limit"),
+    )
     tool_retry_max_retries: NonNegativeInt = Field(
         2,
         validation_alias=_alias("tool_retry_max_retries", "reliability", "tool_retry_max_retries"),

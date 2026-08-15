@@ -18,7 +18,7 @@ def test_chaos_cli_can_launch_subprocess(monkeypatch) -> None:
     assert cli.main(["chaos", "status"]) == 0
 
 
-def test_serve_backend_lets_the_configured_event_loop_policy_select_the_loop(monkeypatch) -> None:
+def test_serve_backend_passes_a_psycopg_compatible_loop_factory(monkeypatch) -> None:
     captured_config: dict[str, object] = {}
     settings = Settings.model_validate({"chat_host": "127.0.0.1", "chat_port": 8123})
 
@@ -28,7 +28,16 @@ def test_serve_backend_lets_the_configured_event_loop_policy_select_the_loop(mon
     monkeypatch.setattr(cli.uvicorn, "Server", lambda _config: SimpleNamespace(run=lambda: None))
 
     assert cli._serve_backend(None, None) == 0
-    assert captured_config["loop"] == "none"
+
+    # The serve path must hand uvicorn a psycopg-compatible loop factory, not
+    # the default policy loop: psycopg async cannot run on Windows'
+    # ProactorEventLoop. uvicorn accepts a loop factory as an import string.
+    assert captured_config["loop"] == "ops_pilot.cli.main:_psycopg_compatible_loop_factory"
+    loop = cli._psycopg_compatible_loop_factory()
+    try:
+        assert not isinstance(loop, asyncio.ProactorEventLoop)
+    finally:
+        loop.close()
 
 
 def test_status_closes_the_runtime_it_builds(monkeypatch, capsys) -> None:

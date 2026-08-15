@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import selectors
+import sys
 from collections.abc import Sequence
 from typing import Any
 
@@ -100,6 +102,22 @@ async def _print_status() -> int:
         await runtime.aclose()
 
 
+def _psycopg_compatible_loop_factory() -> asyncio.AbstractEventLoop:
+    """Return an asyncio loop that psycopg async can run on Windows.
+
+    Windows' default ProactorEventLoop does not implement the add_reader /
+    add_writer APIs psycopg's async connections depend on, so psycopg rejects
+    it (see the psycopg docs, "Asynchronous operations"). The official fix is
+    to run on a SelectorEventLoop using the Windows SelectSelector. On Windows
+    a SelectorEventLoop cannot spawn subprocesses directly, but the MCP stdio
+    client falls back to a thread-based subprocess.Popen in that case, so MCP
+    servers keep working.
+    """
+    if sys.platform == "win32":
+        return asyncio.SelectorEventLoop(selectors.SelectSelector())
+    return asyncio.SelectorEventLoop()
+
+
 def _serve_backend(host: str | None, port: int | None) -> int:
     from ops_pilot.backend import create_backend_app
 
@@ -115,7 +133,13 @@ def _serve_backend(host: str | None, port: int | None) -> int:
     # KeyboardInterrupt surfaces from run() and we swallow it at this CLI boundary
     # for a clean exit (the same thing uvicorn's own CLI does).
     app = create_backend_app(settings)
-    config = uvicorn.Config(app, host=settings.chat_host, port=settings.chat_port, log_level="info", loop="none")
+    config = uvicorn.Config(
+        app,
+        host=settings.chat_host,
+        port=settings.chat_port,
+        log_level="info",
+        loop="ops_pilot.cli.main:_psycopg_compatible_loop_factory",
+    )
     try:
         uvicorn.Server(config).run()
     except KeyboardInterrupt:
