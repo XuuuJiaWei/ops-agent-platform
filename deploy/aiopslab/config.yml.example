@@ -1,0 +1,25 @@
+# AIOpsLab configuration (copy to aiopslab/config.yml)
+#
+# Reference: https://github.com/microsoft/AIOpsLab (aiopslab/config.yml.example)
+# Plan/sizing: docs/design/aiopslab-switch-spec.md
+
+# Kubernetes control plane node:
+#   - 'kind'                   for a local kind cluster
+#   - 'localhost'              when this controller holds the shoot kubeconfig
+#   - '<hostname>'             remote control-plane hostname
+k8s_host: localhost
+
+# Username on the control plane (ignored for kind).
+k8s_user: <your-username>
+
+# SSH key path (needed only for OS-level faults on worker nodes).
+ssh_key_path: ~/.ssh/id_rsa
+
+# Directory where data files (results, plots, telemetry) are stored.
+data_dir: data
+
+# Enable LLM-as-judge qualitative evaluation (makes LLM calls).
+qualitative_eval: false
+
+# Print the session trace after completion.
+print_session: false
