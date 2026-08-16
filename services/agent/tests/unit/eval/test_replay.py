@@ -31,20 +31,22 @@ def _write_fixture(directory: Path, case_id: str, *, metric_value: int) -> None:
     )
 
 
-def test_replay_tool_requires_active_case(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_replay_tool_requires_active_case(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(replay, "REPLAY_FIXTURE_DIR", tmp_path)
 
     with pytest.raises(RuntimeError, match="without an active replay case"):
-        replay.query.invoke({"query": "up"})
+        await replay.query.ainvoke({"query": "up"})
 
 
-def test_replay_tool_returns_bound_fixture(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_replay_tool_returns_bound_fixture(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(replay, "REPLAY_FIXTURE_DIR", tmp_path)
     _write_fixture(tmp_path, "case-a", metric_value=42)
 
     token = replay.activate_replay_case("case-a")
     try:
-        result = json.loads(replay.query.invoke({"query": "process_cpu_usage"}))
+        result = json.loads(await replay.query.ainvoke({"query": "process_cpu_usage"}))
     finally:
         replay.reset_replay_case(token)
 
@@ -54,7 +56,8 @@ def test_replay_tool_returns_bound_fixture(monkeypatch: pytest.MonkeyPatch, tmp_
     assert result["data"]["value"] == 42
 
 
-def test_replay_context_is_isolated_between_concurrent_tasks(
+@pytest.mark.asyncio
+async def test_replay_context_is_isolated_between_concurrent_tasks(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(replay, "REPLAY_FIXTURE_DIR", tmp_path)
@@ -65,15 +68,15 @@ def test_replay_context_is_isolated_between_concurrent_tasks(
         token = replay.activate_replay_case(case_id)
         try:
             await asyncio.sleep(0)
-            payload = json.loads(replay.query.invoke({"query": "memory"}))
+            payload = json.loads(await replay.query.ainvoke({"query": "memory"}))
             return payload["case_id"], payload["data"]["value"]
         finally:
             replay.reset_replay_case(token)
 
-    async def run() -> list[tuple[str, int]]:
-        return list(await asyncio.gather(invoke("case-a"), invoke("case-b")))
-
-    assert asyncio.run(run()) == [("case-a", 11), ("case-b", 22)]
+    assert list(await asyncio.gather(invoke("case-a"), invoke("case-b"))) == [
+        ("case-a", 11),
+        ("case-b", 22),
+    ]
 
 
 def test_replay_cases_get_reduced_local_tool_surface() -> None:
