@@ -1,0 +1,129 @@
+name: Replay Model Eval
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: Model provider understood by LangChain (for example deepseek or openai)
+        required: true
+        default: deepseek
+        type: string
+      model_name:
+        description: Model name exposed by the provider
+        required: true
+        default: deepseek-chat
+        type: string
+      base_url:
+        description: Optional OpenAI-compatible API base URL
+        required: false
+        default: https://api.deepseek.com
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: replay-eval-${{ github.ref }}-${{ inputs.provider }}-${{ inputs.model_name }}
+  cancel-in-progress: false
+
+jobs:
+  replay-eval:
+    name: ${{ inputs.provider }} / ${{ inputs.model_name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: services/agent
+    env:
+      MODEL_API_KEY: ${{ secrets.MODEL_API_KEY }}
+      MODEL_PROVIDER: ${{ inputs.provider }}
+      MODEL_NAME: ${{ inputs.model_name }}
+      MODEL_BASE_URL: ${{ inputs.base_url }}
+      OPS_PILOT_CONFIG: /tmp/ops-pilot-replay.yaml
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.32"
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: services/agent/uv.lock
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Require model API key
+        shell: bash
+        run: |
+          if [[ -z "${MODEL_API_KEY}" ]]; then
+            echo "::error::Repository secret MODEL_API_KEY is not configured."
+            exit 1
+          fi
+
+      - name: Generate isolated replay config
+        shell: bash
+        run: |
+          uv run python - <<'PY'
+          import os
+          from pathlib import Path
+
+          import yaml
+
+          model = {
+              "provider": os.environ["MODEL_PROVIDER"],
+              "model_name": os.environ["MODEL_NAME"],
+              "temperature": 0.0,
+              "max_tokens": 8192,
+              "reasoning": {"mode": "disabled"},
+          }
+          base_url = os.environ.get("MODEL_BASE_URL", "").strip()
+          if base_url:
+              model["base_url"] = base_url
+
+          config = {
+              "app_env": "test",
+              "assistant_id": "agent",
+              "model": model,
+              "skills_paths": [],
+              "persistence": {"backend": "memory"},
+              "open_sandbox": {"enabled": False},
+              "mcpServers": {},
+          }
+          Path("/tmp/ops-pilot-replay.yaml").write_text(
+              yaml.safe_dump(config, sort_keys=False),
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Run held-out replay benchmark
+        shell: bash
+        run: |
+          set -o pipefail
+          uv run ops_pilot eval run \
+            --dataset-name otel_replay \
+            --cases-dir eval/cases/held_out/replay.yaml \
+            --run-name "github-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            2>&1 | tee /tmp/replay-eval.txt
+
+      - name: Publish benchmark summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "# Replay Model Eval"
+            echo
+            echo "- Provider: \`${MODEL_PROVIDER}\`"
+            echo "- Model: \`${MODEL_NAME}\`"
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo
+            echo '```text'
+            if [[ -f /tmp/replay-eval.txt ]]; then
+              cat /tmp/replay-eval.txt
+            else
+              echo "Benchmark did not start; inspect the failed setup step above."
+            fi
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
