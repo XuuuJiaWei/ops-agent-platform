@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "case_id": "replay-email-memory-leak",
+  "origin": "synthetic_seed",
+  "captured_at": "2026-08-16T00:00:00Z",
+  "tools": {
+    "search_traces": {
+      "status": "ok",
+      "summary": "Notification traffic volume remains broadly steady during the replay window."
+    },
+    "query": {
+      "status": "ok",
+      "service": "emailservice",
+      "window_minutes": 30,
+      "metric": "process_resident_memory_bytes",
+      "memory_mib": [164, 218, 305, 419, 566, 711, 853],
+      "requests_per_minute": [92, 97, 94, 99, 96, 95, 98],
+      "evidence": "Resident memory rises monotonically from 164 MiB to 853 MiB while request throughput stays roughly flat, unlike a one-time allocation spike."
+    }
+  }
+}
