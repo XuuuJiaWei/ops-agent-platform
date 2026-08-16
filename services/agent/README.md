@@ -36,6 +36,7 @@ The root launcher reads `benchmark.aiopslab.directory` from
 this project only for the benchmark process. The same file declares its model,
 `tools.mcp` catalog, `backend`, and `checkpointer`.
 
-The core runtime accepts `create_deep_agent`'s declarative inputs — model,
+The `deepagent` subtree holds `create_deep_agent`'s declarative inputs — model,
 tools, system prompt, middleware, skills, memory, permissions, backend,
-interrupts, checkpointer, debug, and name — from the entry-owned `RuntimeSpec`.
+interrupts, checkpointer, debug, and name — and maps them to the entry-owned
+`RuntimeSpec`.

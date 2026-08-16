@@ -18,7 +18,7 @@ from ops_pilot.runtime.spec import (
 
 
 def model_from_environment(environment: RuntimeEnvironment) -> ModelSpec:
-    model = environment.model
+    model = environment.deepagent.model
     return ModelSpec(
         provider=model.provider,
         name=model.name,
@@ -35,23 +35,24 @@ def model_from_environment(environment: RuntimeEnvironment) -> ModelSpec:
 def deepagent_fields_from_environment(environment: RuntimeEnvironment) -> dict[str, Any]:
     """Map YAML keys named after ``create_deep_agent`` arguments."""
 
+    deepagent = environment.deepagent
     return {
-        "system_prompt": environment.system_prompt,
-        "skills": tuple(Path(path) for path in environment.skills),
-        "memory": environment.memory,
+        "system_prompt": deepagent.system_prompt,
+        "skills": tuple(Path(path) for path in deepagent.skills),
+        "memory": deepagent.memory,
         "permissions": tuple(
             FilesystemPermissionSpec(
                 operations=permission.operations,
                 paths=permission.paths,
                 mode=permission.mode,
             )
-            for permission in environment.permissions
+            for permission in deepagent.permissions
         ),
-        "filesystem_tools": environment.middleware.filesystem.tools,
-        "todo_list_enabled": environment.middleware.todo_list,
-        "interrupt_on": dict(environment.interrupt_on),
-        "debug": environment.debug,
-        "name": environment.name,
+        "filesystem_tools": deepagent.middleware.filesystem.tools,
+        "todo_list_enabled": deepagent.middleware.todo_list,
+        "interrupt_on": dict(deepagent.interrupt_on),
+        "debug": deepagent.debug,
+        "name": deepagent.name,
     }
 
 
@@ -67,7 +68,7 @@ def observability_from_environment(environment: RuntimeEnvironment) -> Observabi
 
 
 def checkpointer_from_environment(environment: RuntimeEnvironment) -> PersistenceSpec:
-    checkpointer = environment.checkpointer
+    checkpointer = environment.deepagent.checkpointer
     return PersistenceSpec(
         backend=checkpointer.backend,
         database_url=environment.database_url,
@@ -76,7 +77,7 @@ def checkpointer_from_environment(environment: RuntimeEnvironment) -> Persistenc
 
 
 def sandbox_from_environment(environment: RuntimeEnvironment) -> SandboxSpec:
-    backend = environment.backend
+    backend = environment.deepagent.backend
     opensandbox = backend.opensandbox
     return SandboxSpec(
         enabled=backend.type == "opensandbox",
@@ -92,7 +93,7 @@ def sandbox_from_environment(environment: RuntimeEnvironment) -> SandboxSpec:
 
 
 def reliability_from_environment(environment: RuntimeEnvironment) -> ReliabilitySpec:
-    reliability = environment.middleware.reliability
+    reliability = environment.deepagent.middleware.reliability
     return ReliabilitySpec(
         enabled=reliability.enabled,
         run_deadline_seconds=reliability.run_deadline_seconds,
@@ -105,7 +106,7 @@ def observer_mcp_from_environment(environment: RuntimeEnvironment) -> MCPServerC
     """Declare the MCP tools selected by the ``tools.mcp`` YAML subtree."""
 
     servers: list[MCPServerSpec] = []
-    kubernetes = environment.tools.mcp.kubernetes
+    kubernetes = environment.deepagent.tools.mcp.kubernetes
     if kubernetes.kubeconfig:
         servers.append(
             MCPServerSpec(
@@ -127,8 +128,8 @@ def observer_mcp_from_environment(environment: RuntimeEnvironment) -> MCPServerC
     basic_auth = environment.mcp_basic_auth_header
     headers = {"Authorization": basic_auth} if basic_auth else {}
     for name, configuration in (
-        ("jaeger", environment.tools.mcp.jaeger),
-        ("prometheus", environment.tools.mcp.prometheus),
+        ("jaeger", environment.deepagent.tools.mcp.jaeger),
+        ("prometheus", environment.deepagent.tools.mcp.prometheus),
     ):
         if configuration.url:
             servers.append(

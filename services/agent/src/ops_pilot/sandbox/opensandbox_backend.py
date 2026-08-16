@@ -24,8 +24,8 @@ class SandboxRuntime:
     mode: str = "opensandbox"
     image: str = "python:3.11"
     domain: str | None = None
-    protocol: str = "https"
-    use_server_proxy: bool = True
+    protocol: str = "http"
+    use_server_proxy: bool = False
     timeout_seconds: int | None = None
     lease_started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     _closed: bool = field(default=False, init=False, repr=False)

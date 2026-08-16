@@ -17,7 +17,7 @@ from ops_pilot.runtime.spec import RuntimeSpec
 
 def build_langgraph_runtime_spec(environment: RuntimeEnvironment | None = None) -> RuntimeSpec:
     environment = environment or RuntimeEnvironment.for_entrypoint("langgraph")
-    assistant_id = environment.name or "ops-pilot-langgraph"
+    assistant_id = environment.deepagent.name or "ops-pilot-langgraph"
     return RuntimeSpec(
         id="langgraph",
         assistant_id=assistant_id,

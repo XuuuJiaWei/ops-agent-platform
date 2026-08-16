@@ -19,7 +19,7 @@ def build_eval_runtime_spec(environment: RuntimeEnvironment | None = None) -> Ru
     environment = environment or RuntimeEnvironment.for_entrypoint("eval")
     return RuntimeSpec(
         id="eval",
-        assistant_id=environment.name or "ops-pilot-eval",
+        assistant_id=environment.deepagent.name or "ops-pilot-eval",
         entrypoint="eval",
         model=model_from_environment(environment),
         mcp=observer_mcp_from_environment(environment),

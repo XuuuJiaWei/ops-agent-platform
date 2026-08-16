@@ -17,7 +17,7 @@ from ops_pilot.runtime.spec import RuntimeSpec
 
 def build_benchmark_runtime_spec(environment: RuntimeEnvironment | None = None) -> RuntimeSpec:
     environment = environment or RuntimeEnvironment.for_entrypoint("benchmark")
-    assistant_id = environment.name or "ops-pilot-benchmark"
+    assistant_id = environment.deepagent.name or "ops-pilot-benchmark"
     return RuntimeSpec(
         id="benchmark-aiopslab",
         assistant_id=assistant_id,

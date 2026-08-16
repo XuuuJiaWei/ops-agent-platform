@@ -1,45 +1,43 @@
-# AIOpsLab's isolated runtime. Secrets remain in the repository .env.
-model:
-  provider: deepseek
-  name: deepseek-v4-pro
-  base-url: https://api.deepseek.com
-  temperature: 0.0
-  max-tokens: 16384
-  timeout-seconds: 120
-  reasoning:
-    mode: adaptive
-    effort: medium
-
-tools:
-  mcp:
-    kubernetes:
-      kubeconfig: null
-    jaeger:
-      url: null
-    prometheus:
-      url: null
-
-system-prompt: null
-skills:
-  - skills
-memory: []
-permissions: []
-middleware:
-  todo-list: false
-  filesystem:
-    tools: null
-  reliability:
-    enabled: true
-    run-deadline-seconds: 600
-    model-call-limit: 50
-    tool-call-limit: 200
-backend:
-  type: state
-interrupt-on: {}
-checkpointer:
-  backend: none
-debug: false
-name: ops-pilot-benchmark
+# AIOpsLab's isolated runtime. Credentials belong only in the repository .env.
+deepagent:
+  model:
+    provider: deepseek
+    name: deepseek-v4-pro
+    base-url: https://api.deepseek.com
+    temperature: 0.0
+    max-tokens: 16384
+    timeout-seconds: 120
+    reasoning:
+      mode: adaptive
+      effort: medium
+  tools:
+    mcp:
+      kubernetes:
+        kubeconfig: null
+      jaeger:
+        url: null
+      prometheus:
+        url: null
+  skills:
+    - skills
+  memory: []
+  permissions: []
+  middleware:
+    todo-list: false
+    filesystem:
+      tools: null
+    reliability:
+      enabled: true
+      run-deadline-seconds: 600
+      model-call-limit: 50
+      tool-call-limit: 200
+  backend:
+    type: state
+  interrupt-on: {}
+  checkpointer:
+    backend: none
+  debug: false
+  name: ops-pilot-benchmark
 
 observability:
   environment: local

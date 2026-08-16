@@ -17,21 +17,25 @@ def test_entries_select_independent_models_mcp_catalogs_and_extensions(monkeypat
     web = build_web_application_spec(
         RuntimeEnvironment.model_validate(
             {
-                "model": {"provider": "openai", "name": "web-model"},
-                "tools": {"mcp": {"kubernetes": {"kubeconfig": "C:/web/kubeconfig"}}},
+                "deepagent": {
+                    "model": {"provider": "openai", "name": "web-model"},
+                    "tools": {"mcp": {"kubernetes": {"kubeconfig": "C:/web/kubeconfig"}}},
+                },
             }
         )
     ).runtime
     benchmark = build_benchmark_runtime_spec(
         RuntimeEnvironment.model_validate(
             {
-                "model": {"provider": "deepseek", "name": "benchmark-model"},
-                "tools": {"mcp": {"prometheus": {"url": "https://benchmark.example/mcp"}}},
+                "deepagent": {
+                    "model": {"provider": "deepseek", "name": "benchmark-model"},
+                    "tools": {"mcp": {"prometheus": {"url": "https://benchmark.example/mcp"}}},
+                },
             }
         )
     )
     evaluation = build_eval_runtime_spec(
-        RuntimeEnvironment.model_validate({"model": {"provider": "anthropic", "name": "eval-model"}})
+        RuntimeEnvironment.model_validate({"deepagent": {"model": {"provider": "anthropic", "name": "eval-model"}}})
     )
 
     assert (web.model.provider, web.model.name) == ("openai", "web-model")
@@ -56,6 +60,7 @@ def test_entrypoint_yaml_does_not_allow_environment_capability_selection(monkeyp
     monkeypatch.setenv("OPS_PILOT_WEB_MODEL_NAME", "untrusted-web-override")
     monkeypatch.setenv("OPS_PILOT_BENCHMARK_MODEL_NAME", "untrusted-benchmark-override")
     monkeypatch.setenv("OPS_PILOT_SECRET_DEBUG", "true")
+    monkeypatch.setenv("OPEN_SANDBOX_API_KEY", "test-key")
 
     assert build_web_application_spec().runtime.model.name == "deepseek-v4-pro"
     assert build_benchmark_runtime_spec().model.name == "deepseek-v4-pro"
@@ -72,23 +77,25 @@ def test_entrypoint_yaml_reads_secrets_from_environment_only(monkeypatch) -> Non
 def test_deepagent_injection_points_are_mapped_from_one_normalized_composition() -> None:
     environment = RuntimeEnvironment.model_validate(
         {
-            "name": "configured-agent",
-            "system_prompt": "Follow the runbook.",
-            "memory": ["/memory/AGENTS.md"],
-            "permissions": [
-                {
-                    "operations": ["read"],
-                    "paths": ["/workspace/**"],
-                    "mode": "allow",
-                }
-            ],
-            "middleware": {
-                "todo-list": True,
-                "filesystem": {"tools": ["read_file", "ls", "glob"]},
+            "deepagent": {
+                "name": "configured-agent",
+                "system_prompt": "Follow the runbook.",
+                "memory": ["/memory/AGENTS.md"],
+                "permissions": [
+                    {
+                        "operations": ["read"],
+                        "paths": ["/workspace/**"],
+                        "mode": "allow",
+                    }
+                ],
+                "middleware": {
+                    "todo-list": True,
+                    "filesystem": {"tools": ["read_file", "ls", "glob"]},
+                },
+                "interrupt_on": {"delete_file": True},
+                "checkpointer": {"backend": "none"},
+                "debug": True,
             },
-            "interrupt_on": {"delete_file": True},
-            "checkpointer": {"backend": "none"},
-            "debug": True,
         }
     )
 
@@ -111,12 +118,15 @@ def test_deepagent_injection_points_are_mapped_from_one_normalized_composition()
 
 def test_entrypoint_yaml_rejects_nested_secrets(tmp_path) -> None:
     config = tmp_path / "entry.yaml"
-    config.write_text("model:\n  provider: deepseek\n  api-key: must-not-be-here\n", encoding="utf-8")
+    config.write_text(
+        "deepagent:\n  model:\n    provider: deepseek\n    api-key: must-not-be-here\n",
+        encoding="utf-8",
+    )
 
     class SecretYamlEnvironment(RuntimeEnvironment):
         model_config = SettingsConfigDict(yaml_file=config)
 
-    with pytest.raises(ValueError, match="model.api-key"):
+    with pytest.raises(ValueError, match="deepagent.model.api-key"):
         SecretYamlEnvironment()
 
 

@@ -13,7 +13,7 @@ The core runtime consumes `RuntimeSpec` only. It must not load a profile file, i
 
 ## Configuration and lifecycle
 
-Use the entrypoint-scoped `RuntimeEnvironment` Pydantic Settings module to load `config/entries/<entry>.yaml`. Each YAML file declares only that entrypoint's non-sensitive runtime composition; `.env` supplies explicit credential aliases. Name the runtime tree after `create_deep_agent` inputs: `model`, `tools`, `system-prompt`, `middleware`, `skills`, `memory`, `permissions`, `backend`, `interrupt-on`, `checkpointer`, `debug`, and `name`. Keep capability selection local to its entrypoint, never in a process-wide singleton.
+Use the entrypoint-scoped `RuntimeEnvironment` Pydantic Settings module to load `config/entries/<entry>.yaml`. Each YAML file declares only that entrypoint's non-sensitive runtime composition; `.env` supplies explicit credential aliases. Place the DeepAgents harness below `deepagent`, using `model`, `tools`, `system-prompt`, `middleware`, `skills`, `memory`, `permissions`, `backend`, `interrupt-on`, `checkpointer`, `debug`, and `name`. Keep capability selection local to its entrypoint, never in a process-wide singleton.
 
 Use official SDK abstractions before hand-written adapters:
 

@@ -89,8 +89,8 @@ class SandboxSpec:
     enabled: bool = False
     domain: str | None = None
     api_key: str | None = None
-    protocol: str = "https"
-    use_server_proxy: bool = True
+    protocol: str = "http"
+    use_server_proxy: bool = False
     disable_metrics: bool = True
     image: str = "python:3.11"
     timeout_seconds: int | None = 600

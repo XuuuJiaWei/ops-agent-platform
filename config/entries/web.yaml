@@ -1,62 +1,64 @@
-# Web entrypoint. Keep credentials in the repository .env, never in this file.
-model:
-  provider: deepseek
-  name: deepseek-v4-pro
-  base-url: https://api.deepseek.com
-  temperature: 0.0
-  max-tokens: 16384
-  timeout-seconds: 120
-  reasoning:
-    mode: adaptive
-    effort: medium
+# Web entrypoint. Credentials belong only in the repository .env.
+deepagent:
+  model:
+    provider: deepseek
+    name: deepseek-v4-pro
+    base-url: https://api.deepseek.com
+    temperature: 0.0
+    max-tokens: 16384
+    timeout-seconds: 120
+    reasoning:
+      mode: adaptive
+      effort: medium
 
-# The backend tool catalog. Browser-only CopilotKit tools stay in React source.
-tools:
-  mcp:
-    kubernetes:
-      kubeconfig: null
-    jaeger:
-      url: null
-    prometheus:
-      url: null
+  # The backend tool catalog. Browser-only CopilotKit tools stay in React source.
+  tools:
+    mcp:
+      kubernetes:
+        kubeconfig: null
+      jaeger:
+        url: null
+      prometheus:
+        url: null
 
-system-prompt: null
-skills:
-  - skills
-memory: []
-permissions: []
+  # Omitted system-prompt preserves DeepAgents' built-in base prompt.
+  skills:
+    - skills
+  memory: []
+  permissions: []
+  middleware:
+    todo-list: true
+    filesystem:
+      # The official read-only FilesystemMiddleware allowlist.
+      tools:
+        - read_file
+        - ls
+        - glob
+        - grep
+    reliability:
+      enabled: true
+      run-deadline-seconds: 600
+      model-call-limit: 50
+      tool-call-limit: 200
 
-# Official DeepAgents middleware plus this host's reliability middleware.
-middleware:
-  todo-list: false
-  filesystem:
-    tools: null
-  reliability:
-    enabled: true
-    run-deadline-seconds: 600
-    model-call-limit: 50
-    tool-call-limit: 200
+  # The local OpenSandbox service listens at http://127.0.0.1:8090.
+  backend:
+    type: opensandbox
+    opensandbox:
+      domain: 127.0.0.1:8090
+      protocol: http
+      use-server-proxy: false
+      image: python:3.11
+      timeout-seconds: 600
+      ready-timeout-seconds: 240
+      scope: thread
 
-# state selects DeepAgents' default StateBackend. Use opensandbox only when
-# OPEN_SANDBOX_API_KEY is present in .env.
-backend:
-  type: state
-  opensandbox:
-    domain: null
-    protocol: https
-    use-server-proxy: true
-    image: python:3.11
-    timeout-seconds: 600
-    ready-timeout-seconds: 240
-    scope: thread
-
-# Map tool names directly to create_deep_agent(interrupt_on=...).
-interrupt-on: {}
-checkpointer:
-  backend: memory
-  setup-on-start: true
-debug: false
-name: agent
+  interrupt-on: {}
+  checkpointer:
+    backend: memory
+    setup-on-start: true
+  debug: false
+  name: agent
 
 observability:
   environment: local
@@ -64,7 +66,7 @@ observability:
     base-url: https://cloud.langfuse.com
     timeout-seconds: 30
 
-# Host transport, not agent capability. It remains entrypoint-local.
+# Host transport, not DeepAgents harness capability. It remains entrypoint-local.
 server:
   host: 127.0.0.1
   port: 8123

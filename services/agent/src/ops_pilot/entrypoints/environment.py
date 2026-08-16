@@ -157,8 +157,8 @@ class FilesystemPermissionConfiguration(_RuntimeConfiguration):
 
 class OpenSandboxConfiguration(_RuntimeConfiguration):
     domain: str | None = None
-    protocol: str = "https"
-    use_server_proxy: bool = True
+    protocol: str = "http"
+    use_server_proxy: bool = False
     image: str = "python:3.11"
     timeout_seconds: int = 600
     ready_timeout_seconds: int = 240
@@ -235,6 +235,23 @@ class BenchmarkConfiguration(_RuntimeConfiguration):
     aiopslab: AIOpsLabConfiguration = Field(default_factory=AIOpsLabConfiguration)
 
 
+class DeepAgentConfiguration(_RuntimeConfiguration):
+    """The complete declarative harness passed to ``create_deep_agent``."""
+
+    model: ModelConfiguration = Field(default_factory=ModelConfiguration)
+    tools: ToolsConfiguration = Field(default_factory=ToolsConfiguration)
+    system_prompt: str | None = None
+    middleware: MiddlewareConfiguration = Field(default_factory=MiddlewareConfiguration)
+    skills: tuple[str, ...] = ("skills",)
+    memory: tuple[str, ...] = ()
+    permissions: tuple[FilesystemPermissionConfiguration, ...] = ()
+    backend: BackendConfiguration = Field(default_factory=BackendConfiguration)
+    interrupt_on: dict[str, bool] = Field(default_factory=dict)
+    checkpointer: CheckpointerConfiguration = Field(default_factory=CheckpointerConfiguration)
+    debug: bool = False
+    name: str | None = None
+
+
 def _declared_secret_paths(value: object, path: tuple[str, ...] = ()) -> tuple[str, ...]:
     if not isinstance(value, dict):
         return ()
@@ -287,26 +304,14 @@ class _SecretOnlyDotenvSource(DotEnvSettingsSource):
 class RuntimeEnvironment(BaseSettings):
     """Validated values for one complete, nested runtime composition.
 
-    The top-level keys mirror the official ``create_deep_agent`` injection
-    points. Other keys describe the process host (server, web, benchmark) or
-    tracing. Credentials use explicit aliases in `.env` only.
+    ``deepagent`` holds the official ``create_deep_agent`` injection points.
+    Sibling keys describe the process host (server, web, benchmark) or tracing.
+    Credentials use explicit aliases in `.env` only.
     """
 
     model_config = SettingsConfigDict(**_SHARED_MODEL_CONFIG, yaml_file=None)
 
-    model: ModelConfiguration = Field(default_factory=ModelConfiguration)
-    tools: ToolsConfiguration = Field(default_factory=ToolsConfiguration)
-    system_prompt: str | None = None
-    middleware: MiddlewareConfiguration = Field(default_factory=MiddlewareConfiguration)
-    skills: tuple[str, ...] = ("skills",)
-    memory: tuple[str, ...] = ()
-    permissions: tuple[FilesystemPermissionConfiguration, ...] = ()
-    backend: BackendConfiguration = Field(default_factory=BackendConfiguration)
-    interrupt_on: dict[str, bool] = Field(default_factory=dict)
-    checkpointer: CheckpointerConfiguration = Field(default_factory=CheckpointerConfiguration)
-    debug: bool = False
-    name: str | None = None
-
+    deepagent: DeepAgentConfiguration = Field(default_factory=DeepAgentConfiguration)
     observability: ObservabilityConfiguration = Field(default_factory=ObservabilityConfiguration)
     server: ServerConfiguration = Field(default_factory=ServerConfiguration)
     web: WebSurfaceConfiguration = Field(default_factory=WebSurfaceConfiguration)

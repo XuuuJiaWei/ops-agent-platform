@@ -22,25 +22,26 @@ cd services/agent; uv sync; cd ../..
 Copy-Item .env.example .env
 ```
 
-Choose models, backend tools/MCP, DeepAgents middleware, backend, and
-checkpointer by editing the relevant file under `config/entries/`. Its runtime
-tree follows `create_deep_agent`'s injection points. For example, the default
-Web entry is in [config/entries/web.yaml](config/entries/web.yaml):
+Choose the DeepAgents harness by editing the relevant file under
+`config/entries/`. The `deepagent` subtree follows `create_deep_agent`'s
+injection points. For example, the default Web entry is in
+[config/entries/web.yaml](config/entries/web.yaml):
 
 ```yaml
-model:
-  provider: deepseek
-  name: deepseek-v4-pro
-tools:
-  mcp:
-    prometheus:
-      url: null
-middleware:
-  todo-list: false
-backend:
-  type: state
-checkpointer:
-  backend: memory
+deepagent:
+  model:
+    provider: deepseek
+    name: deepseek-v4-pro
+  tools:
+    mcp:
+      prometheus:
+        url: null
+  middleware:
+    todo-list: true
+  backend:
+    type: opensandbox
+  checkpointer:
+    backend: memory
 ```
 
 Put only secrets in `.env`:
@@ -53,6 +54,12 @@ OPEN_SANDBOX_API_KEY=...          # only for an enabled sandbox
 ```
 
 ## Start the local Web stack
+
+Start the configured OpenSandbox service first:
+
+```powershell
+pnpm sandbox:up
+```
 
 ```powershell
 pnpm dev
@@ -79,15 +86,16 @@ pnpm benchmark:setup
 Then edit [config/entries/benchmark.yaml](config/entries/benchmark.yaml):
 
 ```yaml
-model:
-  provider: deepseek
-  name: deepseek-v4-pro
-tools:
-  mcp:
-    kubernetes:
-      kubeconfig: null
-checkpointer:
-  backend: none
+deepagent:
+  model:
+    provider: deepseek
+    name: deepseek-v4-pro
+  tools:
+    mcp:
+      kubernetes:
+        kubeconfig: null
+  checkpointer:
+    backend: none
 benchmark:
   aiopslab:
     directory: D:/dev/projects/AIOpsLab
