@@ -57,6 +57,8 @@ def _create_langchain_chat_model(spec: ModelSpec) -> Any:
             "reasoning": {"enabled": spec.reasoning_mode != "disabled"},
             "provider": {"require_parameters": True},
         }
+    elif _is_deepseek_official(spec):
+        kwargs["extra_body"] = {"thinking": {"type": "disabled" if spec.reasoning_mode == "disabled" else "enabled"}}
 
     try:
         model = init_chat_model(**kwargs)
@@ -82,3 +84,9 @@ def _init_chat_model_provider(provider: str) -> str:
 
 def _is_openrouter(spec: ModelSpec) -> bool:
     return bool(spec.base_url and spec.base_url.rstrip("/").startswith("https://openrouter.ai/api/"))
+
+
+def _is_deepseek_official(spec: ModelSpec) -> bool:
+    return spec.provider == "deepseek" and bool(
+        spec.base_url and spec.base_url.rstrip("/").startswith("https://api.deepseek.com")
+    )

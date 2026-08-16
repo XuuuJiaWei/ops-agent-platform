@@ -127,7 +127,9 @@ async def build_agent_runtime(spec: RuntimeSpec) -> AgentRuntime:
     mcp_registry = replace(mcp_registry, hitl_tools=tuple(spec.interrupt_on))
     local_skills = tuple(str(path) for path in resolve_skill_paths(spec.skills))
     tracing = create_callback_handler(spec.observability)
-    run_controller = RunController(default_deadline_seconds=spec.reliability.run_deadline_seconds)
+    run_controller = RunController(
+        default_deadline_seconds=spec.reliability.run_deadline_seconds if spec.reliability.enabled else None
+    )
 
     sandbox: SandboxManager | None = None
     checkpointer_closer: Callable[[], Awaitable[None]] | None = None

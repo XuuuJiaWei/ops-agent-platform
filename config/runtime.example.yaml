@@ -2,14 +2,14 @@
 # Copy this file to runtime.yaml for local changes. Credentials belong in .env.
 deepagent:
   model:
-    provider: openai
-    name: openai/gpt-5-nano
-    base-url: https://openrouter.ai/api/v1
+    provider: deepseek
+    name: deepseek-v4-flash
+    base-url: https://api.deepseek.com
     temperature: 0.0
     max-tokens: 16384
     timeout-seconds: 120
     reasoning:
-      mode: adaptive
+      mode: disabled
       effort: medium
   tools:
     mcp:
@@ -107,11 +107,7 @@ entrypoints:
         filesystem:
           tools: null
         reliability:
-          enabled: true
-          run-deadline-seconds: 600
-          model-call-limit: 50
-          tool-call-limit: 200
-          recursion-limit: 256
+          enabled: false
       checkpointer:
         backend: none
 

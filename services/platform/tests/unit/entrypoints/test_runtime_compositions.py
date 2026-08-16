@@ -59,7 +59,7 @@ def test_entrypoint_yaml_does_not_allow_environment_capability_selection(monkeyp
     monkeypatch.setenv("OPS_PILOT_SECRET_DEBUG", "true")
     monkeypatch.setenv("OPEN_SANDBOX_API_KEY", "test-key")
 
-    expected_model = "openai/gpt-5-nano"
+    expected_model = "deepseek-v4-flash"
     assert build_web_application_spec().runtime.model.name == expected_model
     assert build_benchmark_runtime_spec().model.name == expected_model
     assert build_eval_runtime_spec().model.name == expected_model
@@ -68,10 +68,11 @@ def test_entrypoint_yaml_does_not_allow_environment_capability_selection(monkeyp
 
 
 def test_entrypoint_yaml_reads_secrets_from_environment_only(monkeypatch) -> None:
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek-key")
     monkeypatch.setenv("OPENROUTER_API_KEY", "openrouter-key")
     monkeypatch.setenv("MODEL_API_KEY", "fallback-key")
 
-    assert RuntimeEnvironment.for_entrypoint("web").model_api_key == "openrouter-key"
+    assert RuntimeEnvironment.for_entrypoint("web").model_api_key == "deepseek-key"
 
 
 def test_observability_requires_explicit_entrypoint_opt_in() -> None:

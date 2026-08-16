@@ -59,10 +59,10 @@ def build_runnable_config(
         "metadata": metadata,
         "run_name": metadata["langfuse_trace_name"],
         "tags": metadata["langfuse_tags"],
-        # LangGraph requires recursion_limit at the top level. Keeping it here
-        # makes every host use the same guardrail.
-        "recursion_limit": runtime.reliability.recursion_limit,
     }
+    if runtime.reliability.enabled:
+        # LangGraph requires recursion_limit at the top level.
+        config["recursion_limit"] = runtime.reliability.recursion_limit
     if callbacks:
         config["callbacks"] = list(callbacks)
     effective_configurable = dict(configurable or {})

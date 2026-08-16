@@ -1,14 +1,12 @@
 """OpsPilot's isolated RCA100 JSON-over-stdio adapter."""
 
-from __future__ import annotations
-
 import json
 import sys
 from collections import Counter
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any, Literal, cast
+from typing import Annotated, Any, Literal, Self, cast
 
 import pyarrow.compute as arrow_compute
 import pyarrow.dataset as arrow_dataset
@@ -30,7 +28,9 @@ ground every conclusion in time-aligned evidence.
 Use a disciplined troubleshooting method:
 1. Establish the incident window, affected entity, and user-visible impact.
 2. Compare incident signals with a preceding healthy baseline while preserving
-   timestamps and measurement units.
+   timestamps and measurement units. Observation snapshots can have limited
+   history; after one empty baseline query, use the reported coverage and move
+   to another signal instead of repeatedly widening the time window.
 3. Use metrics to establish onset and scope, logs to identify failure details,
    traces and topology to determine dependency direction, and events and alerts
    to identify changes and lifecycle transitions.
@@ -44,7 +44,8 @@ Use a disciplined troubleshooting method:
 Keep the investigation read-only. Use only the supplied incident context and
 observation tools. Call one observation tool at a time and pass one scalar value
 per argument; make separate calls for separate selectors or time windows. Follow
-the requested output schema exactly, without Markdown or additional commentary."""
+the requested output schema exactly, without Markdown or additional commentary.
+Inspect metrics, logs, and traces before refining a query more than once."""
 
 RCA100Source = Literal["metrics", "logs", "traces", "events", "alerts"]
 
@@ -63,7 +64,7 @@ class RCA100Request(BaseModel):
     prediction_schema: dict[str, Any]
 
     @model_validator(mode="after")
-    def validate_case_paths(self) -> RCA100Request:
+    def validate_case_paths(self) -> Self:
         case_directory = self.case_directory.resolve()
         topology_path = self.topology_path.resolve()
         if topology_path != case_directory / "topology.json":
@@ -80,70 +81,6 @@ class RCA100Context:
     """Per-run dependency hidden from the model-visible tool schema."""
 
     case_directory: Path
-
-
-class ToolInput(BaseModel):
-    """Strict model-generated observation query."""
-
-    model_config = ConfigDict(extra="forbid")
-
-
-class TimeRangeQuery(ToolInput):
-    start_time: str | None = Field(
-        default=None,
-        description="One ISO-8601 lower-bound timestamp, or null. Never pass a list.",
-    )
-    end_time: str | None = Field(
-        default=None,
-        description="One ISO-8601 upper-bound timestamp, or null. Never pass a list.",
-    )
-
-
-class MetricQuery(TimeRangeQuery):
-    metric: str | None = Field(default=None, description="One exact metric name, or null. Never pass a list.")
-    entity_name: str | None = Field(
-        default=None,
-        description="One exact entity name, or null. Never pass a list.",
-    )
-    entity_id: str | None = Field(default=None, description="One exact entity identifier, or null.")
-    domain: Literal["apm", "k8s"] | None = Field(default=None, description="One entity domain, or null.")
-    entity_set: str | None = Field(default=None, description="One exact entity-set name, or null.")
-    limit: int = Field(default=200, ge=1, le=500, description="Maximum samples to return.")
-
-
-class LogQuery(TimeRangeQuery):
-    keyword: str | None = Field(default=None, description="One case-insensitive text fragment, or null.")
-    pod_name: str | None = Field(default=None, description="One exact pod name, or null.")
-    namespace: str | None = Field(default=None, description="One exact namespace, or null.")
-    limit: int = Field(default=100, ge=1, le=300, description="Maximum log records to return.")
-
-
-class TraceQuery(TimeRangeQuery):
-    service_name: str | None = Field(default=None, description="One exact service name, or null.")
-    span_name: str | None = Field(default=None, description="One exact span operation name, or null.")
-    trace_id: str | None = Field(default=None, description="One exact trace identifier, or null.")
-    status_code: str | None = Field(default=None, description="One exact span status code, or null.")
-    keyword: str | None = Field(default=None, description="One text fragment for span details, or null.")
-    limit: int = Field(default=100, ge=1, le=300, description="Maximum spans to return.")
-
-
-class EventQuery(ToolInput):
-    keyword: str | None = Field(default=None, description="One text fragment for the event body, or null.")
-    pod_name: str | None = Field(default=None, description="One exact pod name, or null.")
-    level: str | None = Field(default=None, description="One exact event level, or null.")
-    limit: int = Field(default=100, ge=1, le=300, description="Maximum events to return.")
-
-
-class AlertQuery(TimeRangeQuery):
-    subject: str | None = Field(default=None, description="One subject text fragment, or null.")
-    status: str | None = Field(default=None, description="One exact alert status, or null.")
-    limit: int = Field(default=50, ge=1, le=100, description="Maximum alert records to return.")
-
-
-class TopologyQuery(ToolInput):
-    entity_name: str | None = Field(default=None, description="One entity-name fragment, or null.")
-    relation: str | None = Field(default=None, description="One exact dependency relation, or null.")
-    limit: int = Field(default=200, ge=1, le=500, description="Maximum entities and edges to return.")
 
 
 class IncidentEvidence(BaseModel):
@@ -179,16 +116,20 @@ class IncidentDiagnosis(BaseModel):
     reasoning: list[IncidentReasoningStep] = Field(default_factory=list)
 
 
-@tool(args_schema=MetricQuery)
+@tool
 def query_metric(
     runtime: ToolRuntime[RCA100Context],
-    metric: str | None = None,
-    entity_name: str | None = None,
-    entity_id: str | None = None,
-    domain: Literal["apm", "k8s"] | None = None,
-    entity_set: str | None = None,
-    start_time: str | None = None,
-    end_time: str | None = None,
+    metric: Annotated[str | None, Field(description="One exact metric name, or null. Never pass a list.")] = None,
+    entity_name: Annotated[str | None, Field(description="One exact entity name, or null. Never pass a list.")] = None,
+    entity_id: Annotated[str | None, Field(description="One exact entity identifier, or null.")] = None,
+    domain: Annotated[Literal["apm", "k8s"] | None, Field(description="One entity domain, or null.")] = None,
+    entity_set: Annotated[str | None, Field(description="One exact entity-set name, or null.")] = None,
+    start_time: Annotated[
+        str | None, Field(description="One ISO-8601 lower-bound timestamp, or null. Never pass a list.")
+    ] = None,
+    end_time: Annotated[
+        str | None, Field(description="One ISO-8601 upper-bound timestamp, or null. Never pass a list.")
+    ] = None,
     limit: Annotated[int, Field(ge=1, le=500)] = 200,
 ) -> str:
     """Query metric samples from the incident observability store.
@@ -200,22 +141,26 @@ def query_metric(
 
     dataset = _dataset(runtime, "metrics")
     if all(value is None for value in (metric, entity_name, entity_id, domain, entity_set, start_time, end_time)):
-        catalog = dataset.to_table(columns=["domain", "entity_set", "entity_name", "metric"])
+        catalog = dataset.to_table(columns=["time", "domain", "entity_set", "entity_name", "metric"])
         return _json(
             {
                 "source": "metrics",
+                "available_time_range": _time_range(catalog["time"], unit="us"),
                 "metrics": sorted(value for value in set(catalog["metric"].to_pylist()) if value),
                 "entities": sorted(value for value in set(catalog["entity_name"].to_pylist()) if value)[:500],
                 "entity_sets": sorted(value for value in set(catalog["entity_set"].to_pylist()) if value),
             }
         )
 
-    expression = _and(
+    selectors = _and(
         _equals("metric", metric),
         _equals("entity_name", entity_name),
         _equals("entity_id", entity_id),
         _equals("domain", domain),
         _equals("entity_set", entity_set),
+    )
+    expression = _and(
+        selectors,
         _lower_bound("time", _epoch(start_time, unit="us")),
         _upper_bound("time", _epoch(end_time, unit="us")),
     )
@@ -225,17 +170,24 @@ def query_metric(
         expression=expression,
         limit=limit,
     )
-    return _rows("metrics", rows)
+    for row in rows:
+        if isinstance(timestamp := row.get("time"), int):
+            row["time"] = _iso_epoch(timestamp, unit="us")
+    coverage = None
+    if not rows and (start_time is not None or end_time is not None):
+        coverage_table = dataset.to_table(columns=["time"], filter=selectors)
+        coverage = _time_range(coverage_table["time"], unit="us")
+    return _rows("metrics", rows, available_time_range=coverage)
 
 
-@tool(args_schema=LogQuery)
+@tool
 def query_logs(
     runtime: ToolRuntime[RCA100Context],
-    keyword: str | None = None,
-    pod_name: str | None = None,
-    namespace: str | None = None,
-    start_time: str | None = None,
-    end_time: str | None = None,
+    keyword: Annotated[str | None, Field(description="One case-insensitive text fragment, or null.")] = None,
+    pod_name: Annotated[str | None, Field(description="One exact pod name, or null.")] = None,
+    namespace: Annotated[str | None, Field(description="One exact namespace, or null.")] = None,
+    start_time: Annotated[str | None, Field(description="One ISO-8601 lower-bound timestamp, or null.")] = None,
+    end_time: Annotated[str | None, Field(description="One ISO-8601 upper-bound timestamp, or null.")] = None,
     limit: Annotated[int, Field(ge=1, le=300)] = 100,
 ) -> str:
     """Query application logs by time, pod, namespace, and keyword."""
@@ -257,16 +209,16 @@ def query_logs(
     return _rows("logs", rows)
 
 
-@tool(args_schema=TraceQuery)
+@tool
 def query_traces(
     runtime: ToolRuntime[RCA100Context],
-    service_name: str | None = None,
-    span_name: str | None = None,
-    trace_id: str | None = None,
-    status_code: str | None = None,
-    keyword: str | None = None,
-    start_time: str | None = None,
-    end_time: str | None = None,
+    service_name: Annotated[str | None, Field(description="One exact service name, or null.")] = None,
+    span_name: Annotated[str | None, Field(description="One exact span operation name, or null.")] = None,
+    trace_id: Annotated[str | None, Field(description="One exact trace identifier, or null.")] = None,
+    status_code: Annotated[str | None, Field(description="One exact span status code, or null.")] = None,
+    keyword: Annotated[str | None, Field(description="One text fragment for span details, or null.")] = None,
+    start_time: Annotated[str | None, Field(description="One ISO-8601 lower-bound timestamp, or null.")] = None,
+    end_time: Annotated[str | None, Field(description="One ISO-8601 upper-bound timestamp, or null.")] = None,
     limit: Annotated[int, Field(ge=1, le=300)] = 100,
 ) -> str:
     """Query trace spans by service, operation, trace, status, time, or text.
@@ -311,12 +263,12 @@ def query_traces(
     return _rows("traces", rows)
 
 
-@tool(args_schema=EventQuery)
+@tool
 def query_events(
     runtime: ToolRuntime[RCA100Context],
-    keyword: str | None = None,
-    pod_name: str | None = None,
-    level: str | None = None,
+    keyword: Annotated[str | None, Field(description="One text fragment for the event body, or null.")] = None,
+    pod_name: Annotated[str | None, Field(description="One exact pod name, or null.")] = None,
+    level: Annotated[str | None, Field(description="One exact event level, or null.")] = None,
     limit: Annotated[int, Field(ge=1, le=300)] = 100,
 ) -> str:
     """Query Kubernetes events; keyword searches the JSON event body."""
@@ -332,13 +284,13 @@ def query_events(
     return _rows("events", rows)
 
 
-@tool(args_schema=AlertQuery)
+@tool
 def query_alerts(
     runtime: ToolRuntime[RCA100Context],
-    subject: str | None = None,
-    status: str | None = None,
-    start_time: str | None = None,
-    end_time: str | None = None,
+    subject: Annotated[str | None, Field(description="One subject text fragment, or null.")] = None,
+    status: Annotated[str | None, Field(description="One exact alert status, or null.")] = None,
+    start_time: Annotated[str | None, Field(description="One ISO-8601 lower-bound timestamp, or null.")] = None,
+    end_time: Annotated[str | None, Field(description="One ISO-8601 upper-bound timestamp, or null.")] = None,
     limit: Annotated[int, Field(ge=1, le=100)] = 50,
 ) -> str:
     """Query the incident alert lifecycle."""
@@ -358,11 +310,11 @@ def query_alerts(
     return _rows("alerts", rows)
 
 
-@tool(args_schema=TopologyQuery)
+@tool
 def query_topology(
     runtime: ToolRuntime[RCA100Context],
-    entity_name: str | None = None,
-    relation: str | None = None,
+    entity_name: Annotated[str | None, Field(description="One entity-name fragment, or null.")] = None,
+    relation: Annotated[str | None, Field(description="One exact dependency relation, or null.")] = None,
     limit: Annotated[int, Field(ge=1, le=500)] = 200,
 ) -> str:
     """Query entities and dependency edges.
@@ -524,8 +476,24 @@ def _epoch_text(value: str | None, *, unit: Literal["ns"]) -> str | None:
     return None if converted is None else str(converted)
 
 
-def _rows(source: str, rows: list[dict[str, Any]]) -> str:
-    return _json({"source": source, "returned_rows": len(rows), "rows": rows})
+def _rows(source: str, rows: list[dict[str, Any]], **metadata: object) -> str:
+    return _json({"source": source, "returned_rows": len(rows), **metadata, "rows": rows})
+
+
+def _time_range(values: Any, *, unit: Literal["us", "ns"]) -> dict[str, str] | None:
+    compute = cast(Any, arrow_compute)
+    bounds = cast(dict[str, int | None], compute.min_max(values).as_py())
+    if bounds.get("min") is None or bounds.get("max") is None:
+        return None
+    return {
+        "start": _iso_epoch(cast(int, bounds["min"]), unit=unit),
+        "end": _iso_epoch(cast(int, bounds["max"]), unit=unit),
+    }
+
+
+def _iso_epoch(value: int, *, unit: Literal["us", "ns"]) -> str:
+    divisor = 1_000_000 if unit == "us" else 1_000_000_000
+    return datetime.fromtimestamp(value / divisor, UTC).isoformat()
 
 
 def _json(value: object) -> str:

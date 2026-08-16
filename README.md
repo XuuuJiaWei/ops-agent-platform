@@ -43,9 +43,9 @@ Edit the top-level defaults once and keep only real differences under `entrypoin
 ```yaml
 deepagent:
   model:
-    provider: openai
-    name: dots-studio/dots-3-note-preview:free
-    base-url: https://openrouter.ai/api/v1
+    provider: deepseek
+    name: deepseek-v4-flash
+    base-url: https://api.deepseek.com
   checkpointer:
     backend: none
 entrypoints:
@@ -61,7 +61,7 @@ entrypoints:
 Put only secrets in `.env`:
 
 ```dotenv
-OPENROUTER_API_KEY=...
+DEEPSEEK_API_KEY=...
 DATABASE_URL=...                 # only for a YAML entry using postgres
 MCP_BASIC_AUTH_HEADER=...         # only for authenticated MCP endpoints
 OPEN_SANDBOX_API_KEY=...          # only for an enabled sandbox
@@ -107,7 +107,7 @@ entrypoints:
         directory: D:/dev/projects/AIOpsLab
 ```
 
-`OPENROUTER_API_KEY` remains in `.env`. Run a problem with its fully isolated
+`DEEPSEEK_API_KEY` remains in `.env`. Run a problem with its fully isolated
 runtime:
 
 ```powershell

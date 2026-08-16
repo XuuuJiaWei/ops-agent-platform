@@ -50,6 +50,7 @@ _SECRET_SETTINGS_FIELD_NAMES = frozenset(
 _SECRET_SOURCE_FIELD_NAMES = _SECRET_SETTINGS_FIELD_NAMES | frozenset(
     {
         "MODEL_API_KEY",
+        "DEEPSEEK_API_KEY",
         "OPENROUTER_API_KEY",
         "LANGFUSE_PUBLIC_KEY",
         "LANGFUSE_SECRET_KEY",
@@ -366,7 +367,7 @@ class RuntimeEnvironment(BaseSettings):
     # Secrets are deliberately not part of the YAML tree.
     model_api_key: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("OPENROUTER_API_KEY", "MODEL_API_KEY"),
+        validation_alias=AliasChoices("DEEPSEEK_API_KEY", "MODEL_API_KEY", "OPENROUTER_API_KEY"),
     )
     langfuse_public_key: str | None = Field(default=None, validation_alias=AliasChoices("LANGFUSE_PUBLIC_KEY"))
     langfuse_secret_key: str | None = Field(default=None, validation_alias=AliasChoices("LANGFUSE_SECRET_KEY"))
