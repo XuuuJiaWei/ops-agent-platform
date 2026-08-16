@@ -22,16 +22,25 @@ cd services/agent; uv sync; cd ../..
 Copy-Item .env.example .env
 ```
 
-Choose models, MCP endpoints, ports, persistence, and feature flags by editing
-the relevant file under `config/entries/`. For example, the default Web entry
-is in [config/entries/web.yaml](config/entries/web.yaml):
+Choose models, backend tools/MCP, DeepAgents middleware, backend, and
+checkpointer by editing the relevant file under `config/entries/`. Its runtime
+tree follows `create_deep_agent`'s injection points. For example, the default
+Web entry is in [config/entries/web.yaml](config/entries/web.yaml):
 
 ```yaml
-model_provider: deepseek
-model_name: deepseek-v4-pro
-model_base_url: https://api.deepseek.com
-port: 8123
-frontend_port: 3000
+model:
+  provider: deepseek
+  name: deepseek-v4-pro
+tools:
+  mcp:
+    prometheus:
+      url: null
+middleware:
+  todo-list: false
+backend:
+  type: state
+checkpointer:
+  backend: memory
 ```
 
 Put only secrets in `.env`:
@@ -70,11 +79,18 @@ pnpm benchmark:setup
 Then edit [config/entries/benchmark.yaml](config/entries/benchmark.yaml):
 
 ```yaml
-aiopslab_dir: D:/dev/projects/AIOpsLab
-model_provider: deepseek
-model_name: deepseek-v4-pro
-model_base_url: https://api.deepseek.com
-kubeconfig: null
+model:
+  provider: deepseek
+  name: deepseek-v4-pro
+tools:
+  mcp:
+    kubernetes:
+      kubeconfig: null
+checkpointer:
+  backend: none
+benchmark:
+  aiopslab:
+    directory: D:/dev/projects/AIOpsLab
 ```
 
 `MODEL_API_KEY` remains in `.env`. Run a problem with its fully isolated

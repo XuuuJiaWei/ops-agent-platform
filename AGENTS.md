@@ -13,7 +13,7 @@ The core runtime consumes `RuntimeSpec` only. It must not load a profile file, i
 
 ## Configuration and lifecycle
 
-Use the entrypoint-scoped `RuntimeEnvironment` Pydantic Settings module to load `config/entries/<entry>.yaml`. Each YAML file declares only that entrypoint's non-sensitive runtime composition; `.env` supplies explicit credential aliases. Keep capability selection local to its entrypoint, never in a process-wide singleton.
+Use the entrypoint-scoped `RuntimeEnvironment` Pydantic Settings module to load `config/entries/<entry>.yaml`. Each YAML file declares only that entrypoint's non-sensitive runtime composition; `.env` supplies explicit credential aliases. Name the runtime tree after `create_deep_agent` inputs: `model`, `tools`, `system-prompt`, `middleware`, `skills`, `memory`, `permissions`, `backend`, `interrupt-on`, `checkpointer`, `debug`, and `name`. Keep capability selection local to its entrypoint, never in a process-wide singleton.
 
 Use official SDK abstractions before hand-written adapters:
 
@@ -52,6 +52,6 @@ Place Python unit tests in `services/agent/tests/unit` and integration tests in 
 
 ## Security and delivery
 
-Never commit secrets. Copy the applicable `.env.example` and use the documented entrypoint prefix. Keep company data features disabled unless explicitly approved.
+Never commit secrets. Copy `.env.example` and use only its explicit credential variables; choose runtime capabilities in the applicable entrypoint YAML. Keep company data features disabled unless explicitly approved.
 
 Use short imperative Conventional Commit messages. Before committing, run the relevant checks; run `pnpm check` for cross-stack or architectural changes. PRs describe runtime/data-boundary changes and include screenshots for UI changes.

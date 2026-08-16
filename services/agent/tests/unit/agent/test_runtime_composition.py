@@ -17,6 +17,7 @@ async def test_builder_consumes_only_the_explicit_runtime_spec(monkeypatch) -> N
         entrypoint="test",
         model=ModelSpec(provider="openai", name="test-model"),
         tools=("entry-tool",),
+        interrupt_on={"dangerous-tool": True},
     )
 
     monkeypatch.setattr(runtime_module, "create_chat_model", lambda model: captured.setdefault("model", model))
@@ -47,14 +48,13 @@ async def test_builder_consumes_only_the_explicit_runtime_spec(monkeypatch) -> N
 
 
 @pytest.mark.asyncio
-async def test_automated_runtime_can_declare_hitl_bypass_without_changing_mcp_catalog(monkeypatch) -> None:
+async def test_automated_runtime_can_declare_no_tool_interrupts(monkeypatch) -> None:
     captured: dict[str, object] = {}
     spec = RuntimeSpec(
         id="benchmark",
         assistant_id="benchmark-agent",
         entrypoint="benchmark",
         model=ModelSpec(provider="openai", name="benchmark-model"),
-        bypass_hitl=True,
     )
 
     monkeypatch.setattr(runtime_module, "create_chat_model", lambda _: object())

@@ -4,31 +4,29 @@ from __future__ import annotations
 
 from ops_pilot.entrypoints.environment import RuntimeEnvironment
 from ops_pilot.entrypoints.profiles import (
+    checkpointer_from_environment,
+    deepagent_fields_from_environment,
     model_from_environment,
     observability_from_environment,
     observer_mcp_from_environment,
-    project_skills,
     reliability_from_environment,
     sandbox_from_environment,
 )
-from ops_pilot.runtime.spec import PersistenceSpec, RuntimeSpec
+from ops_pilot.runtime.spec import RuntimeSpec
 
 
 def build_eval_runtime_spec(environment: RuntimeEnvironment | None = None) -> RuntimeSpec:
     environment = environment or RuntimeEnvironment.for_entrypoint("eval")
     return RuntimeSpec(
         id="eval",
-        assistant_id=environment.assistant_id or "ops-pilot-eval",
+        assistant_id=environment.name or "ops-pilot-eval",
         entrypoint="eval",
         model=model_from_environment(environment),
         mcp=observer_mcp_from_environment(environment),
-        system_prompt=environment.system_prompt,
-        skills=project_skills(),
+        **deepagent_fields_from_environment(environment),
         reliability=reliability_from_environment(environment),
-        persistence=PersistenceSpec(),
+        persistence=checkpointer_from_environment(environment),
         sandbox=sandbox_from_environment(environment),
         observability=observability_from_environment(environment),
-        bypass_hitl=True,
-        attach_checkpointer=False,
         metadata={"evaluation": True},
     )

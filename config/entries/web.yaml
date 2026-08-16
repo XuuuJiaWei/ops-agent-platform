@@ -1,39 +1,86 @@
-# The Web application composition. Secrets belong in the repository .env.
-environment: local
-assistant_id: agent
+# Web entrypoint. Keep credentials in the repository .env, never in this file.
+model:
+  provider: deepseek
+  name: deepseek-v4-pro
+  base-url: https://api.deepseek.com
+  temperature: 0.0
+  max-tokens: 16384
+  timeout-seconds: 120
+  reasoning:
+    mode: adaptive
+    effort: medium
 
-model_provider: deepseek
-model_name: deepseek-v4-pro
-model_base_url: https://api.deepseek.com
-model_temperature: 0.0
-model_max_tokens: 16384
-model_timeout_seconds: 120
-model_reasoning_mode: adaptive
-model_reasoning_effort: medium
+# The backend tool catalog. Browser-only CopilotKit tools stay in React source.
+tools:
+  mcp:
+    kubernetes:
+      kubeconfig: null
+    jaeger:
+      url: null
+    prometheus:
+      url: null
 
-persistence_backend: memory
-open_sandbox_enabled: false
-reliability_enabled: true
-run_deadline_seconds: 600
-model_call_limit: 50
-tool_call_limit: 200
+system-prompt: null
+skills:
+  - skills
+memory: []
+permissions: []
 
-# Declare non-secret MCP endpoints or a kubeconfig path here when needed.
-kubeconfig: null
-jaeger_mcp_url: null
-prometheus_mcp_url: null
+# Official DeepAgents middleware plus this host's reliability middleware.
+middleware:
+  todo-list: false
+  filesystem:
+    tools: null
+  reliability:
+    enabled: true
+    run-deadline-seconds: 600
+    model-call-limit: 50
+    tool-call-limit: 200
 
-host: 127.0.0.1
-port: 8123
-chat_base_path: /chat
-a2a_base_path: /a2a
-enable_spaces: true
-enable_a2a: true
+# state selects DeepAgents' default StateBackend. Use opensandbox only when
+# OPEN_SANDBOX_API_KEY is present in .env.
+backend:
+  type: state
+  opensandbox:
+    domain: null
+    protocol: https
+    use-server-proxy: true
+    image: python:3.11
+    timeout-seconds: 600
+    ready-timeout-seconds: 240
+    scope: thread
 
-# Local web-stack transport settings; these are not browser secrets.
-frontend_port: 3000
-copilot_runtime_host: 127.0.0.1
-copilot_runtime_port: 4001
-copilot_runtime_base_path: /api/copilotkit
-copilot_event_store_backend: memory
-copilot_event_store_setup_on_start: true
+# Map tool names directly to create_deep_agent(interrupt_on=...).
+interrupt-on: {}
+checkpointer:
+  backend: memory
+  setup-on-start: true
+debug: false
+name: agent
+
+observability:
+  environment: local
+  langfuse:
+    base-url: https://cloud.langfuse.com
+    timeout-seconds: 30
+
+# Host transport, not agent capability. It remains entrypoint-local.
+server:
+  host: 127.0.0.1
+  port: 8123
+  chat:
+    base-path: /chat
+  a2a:
+    base-path: /a2a
+    enabled: true
+web:
+  spaces:
+    enabled: true
+  frontend:
+    port: 3000
+  copilot-runtime:
+    host: 127.0.0.1
+    port: 4001
+    base-path: /api/copilotkit
+    event-store-backend: memory
+    event-store-setup-on-start: true

@@ -59,7 +59,8 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(_web_development_config(), sort_keys=True))
         return 0
     if args.command == "benchmark-launch-config":
-        print(json.dumps({"aiopslab_dir": RuntimeEnvironment.for_entrypoint("benchmark").aiopslab_dir}))
+        environment = RuntimeEnvironment.for_entrypoint("benchmark")
+        print(json.dumps({"aiopslab_dir": environment.benchmark.aiopslab.directory}))
         return 0
     if args.command == "status":
         return asyncio.run(_print_status(_profiles()[args.entry]))
@@ -91,12 +92,12 @@ def _web_development_config() -> dict[str, object]:
         "backend_host": application.host,
         "backend_port": application.port,
         "chat_base_path": application.chat_base_path,
-        "frontend_port": environment.frontend_port,
-        "copilot_runtime_host": environment.copilot_runtime_host,
-        "copilot_runtime_port": environment.copilot_runtime_port,
-        "copilot_runtime_base_path": environment.copilot_runtime_base_path,
-        "copilot_event_store_backend": environment.copilot_event_store_backend,
-        "copilot_event_store_setup_on_start": environment.copilot_event_store_setup_on_start,
+        "frontend_port": environment.web.frontend.port,
+        "copilot_runtime_host": environment.web.copilot_runtime.host,
+        "copilot_runtime_port": environment.web.copilot_runtime.port,
+        "copilot_runtime_base_path": environment.web.copilot_runtime.base_path,
+        "copilot_event_store_backend": environment.web.copilot_runtime.event_store_backend,
+        "copilot_event_store_setup_on_start": environment.web.copilot_runtime.event_store_setup_on_start,
     }
 
 
@@ -107,7 +108,7 @@ def _describe_spec(spec: RuntimeSpec) -> dict[str, Any]:
         "entrypoint": spec.entrypoint,
         "model": {"provider": spec.model.provider, "name": spec.model.name},
         "mcp_servers": [server.name for server in spec.mcp.servers],
-        "persistence": spec.persistence.backend,
+        "checkpointer": spec.persistence.backend,
         "sandbox_enabled": spec.sandbox.enabled,
         "extensions": [factory.__name__ for factory in spec.extensions],
     }

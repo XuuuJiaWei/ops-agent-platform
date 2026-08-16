@@ -25,7 +25,6 @@ class MCPRegistry:
         return cls(
             tools=tuple(result.tools),
             status=result.status,
-            hitl_tools=tuple(result.hitl_tools),
             tool_servers=dict(result.tool_servers),
             retry_tools=tuple(result.retry_tools),
         )

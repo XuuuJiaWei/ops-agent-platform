@@ -40,7 +40,6 @@ class MCPServerSpec:
     timeout: float | None = None
     read_timeout_seconds: float | None = None
     allow_tools: tuple[str, ...] = field(default_factory=tuple)
-    hitl_tools: tuple[str, ...] = field(default_factory=tuple)
     retry_tools: tuple[str, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
@@ -93,6 +92,3 @@ class MCPServerCatalog:
         names = [server.name for server in self.servers]
         if len(names) != len(set(names)):
             raise MCPDeclarationError("MCP server names must be unique within a runtime composition.")
-
-    def hitl_tool_names(self) -> frozenset[str]:
-        return frozenset(name for server in self.servers for name in server.hitl_tools)

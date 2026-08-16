@@ -13,12 +13,10 @@ def test_mcp_catalog_is_declared_by_the_host_not_loaded_from_a_global_file() -> 
         transport="streamable_http",
         url="https://metrics.example/mcp",
         allow_tools=("query",),
-        hitl_tools=("mutate",),
     )
 
-    catalog = MCPServerCatalog((server,))
+    assert MCPServerCatalog((server,)).servers == (server,)
 
-    assert catalog.hitl_tool_names() == {"mutate"}
     connection = cast(dict[str, Any], server.to_client_connection())
     assert connection["url"] == "https://metrics.example/mcp"
 

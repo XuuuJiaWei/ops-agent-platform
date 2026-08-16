@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from dotenv import load_dotenv
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 from pydantic_settings import (
     BaseSettings,
+    DotEnvSettingsSource,
+    EnvSettingsSource,
     PydanticBaseSettingsSource,
     SettingsConfigDict,
     YamlConfigSettingsSource,
@@ -15,7 +19,22 @@ from ops_pilot.config.paths import REPO_ROOT
 from ops_pilot.runtime.spec import ModelProvider, PersistenceBackend, ReasoningEffort, ReasoningMode, SandboxScope
 
 ENTRYPOINT_CONFIG_DIR = REPO_ROOT / "config" / "entries"
+
+
+def _kebab_case(name: str) -> str:
+    return name.replace("_", "-")
+
+
 _SECRET_FIELD_NAMES = frozenset(
+    {
+        "api-key",
+        "public-key",
+        "secret-key",
+        "database-url",
+        "basic-auth-header",
+    }
+)
+_SECRET_SETTINGS_FIELD_NAMES = frozenset(
     {
         "model_api_key",
         "langfuse_public_key",
@@ -23,6 +42,16 @@ _SECRET_FIELD_NAMES = frozenset(
         "database_url",
         "open_sandbox_api_key",
         "mcp_basic_auth_header",
+    }
+)
+_SECRET_SOURCE_FIELD_NAMES = _SECRET_SETTINGS_FIELD_NAMES | frozenset(
+    {
+        "MODEL_API_KEY",
+        "LANGFUSE_PUBLIC_KEY",
+        "LANGFUSE_SECRET_KEY",
+        "DATABASE_URL",
+        "OPEN_SANDBOX_API_KEY",
+        "MCP_BASIC_AUTH_HEADER",
     }
 )
 _SHARED_MODEL_CONFIG = {
@@ -38,89 +67,258 @@ _SHARED_MODEL_CONFIG = {
     "yaml_file_encoding": "utf-8",
 }
 
+FilesystemTool = Literal["ls", "read_file", "write_file", "edit_file", "delete", "glob", "grep", "execute"]
+FilesystemOperation = Literal["read", "write"]
+FilesystemPermissionMode = Literal["allow", "deny", "interrupt"]
+BackendType = Literal["state", "opensandbox"]
+
+
+class _RuntimeConfiguration(BaseModel):
+    """Strict nested schema for non-sensitive entrypoint YAML."""
+
+    model_config = ConfigDict(alias_generator=_kebab_case, populate_by_name=True, extra="forbid", frozen=True)
+
+
+class ReasoningConfiguration(_RuntimeConfiguration):
+    mode: ReasoningMode = "adaptive"
+    effort: ReasoningEffort = "medium"
+
+
+class ModelConfiguration(_RuntimeConfiguration):
+    provider: ModelProvider = "sap"
+    name: str = "anthropic--claude-4.6-sonnet"
+    base_url: str | None = None
+    temperature: float = 0.0
+    max_tokens: int = 16384
+    timeout_seconds: int = 120
+    reasoning: ReasoningConfiguration = Field(default_factory=ReasoningConfiguration)
+
+
+class KubernetesMCPConfiguration(_RuntimeConfiguration):
+    kubeconfig: str | None = None
+    read_timeout_seconds: int = 60
+
+
+class HTTPMCPConfiguration(_RuntimeConfiguration):
+    url: str | None = None
+    timeout_seconds: int = 90
+    read_timeout_seconds: int = 30
+    retry_tools: tuple[str, ...] = ()
+
+
+class MCPToolConfiguration(_RuntimeConfiguration):
+    kubernetes: KubernetesMCPConfiguration = Field(default_factory=KubernetesMCPConfiguration)
+    jaeger: HTTPMCPConfiguration = Field(
+        default_factory=lambda: HTTPMCPConfiguration(retry_tools=("search_traces", "get_services", "get_span_details"))
+    )
+    prometheus: HTTPMCPConfiguration = Field(default_factory=HTTPMCPConfiguration)
+
+
+class ToolsConfiguration(_RuntimeConfiguration):
+    """The ``tools=`` capability catalog for this host.
+
+    Frontend-only CopilotKit tools deliberately do not belong here. They are
+    React declarations, while this schema declares backend MCP capabilities.
+    """
+
+    mcp: MCPToolConfiguration = Field(default_factory=MCPToolConfiguration)
+
+
+class FilesystemConfiguration(_RuntimeConfiguration):
+    """The official ``FilesystemMiddleware`` allowlist.
+
+    A null value preserves DeepAgents' default filesystem tool surface. A
+    concrete list becomes the middleware's model-visible allowlist.
+    """
+
+    tools: tuple[FilesystemTool, ...] | None = None
+
+
+class ReliabilityMiddlewareConfiguration(_RuntimeConfiguration):
+    enabled: bool = True
+    run_deadline_seconds: float = 600
+    model_call_limit: int = 50
+    tool_call_limit: int = 200
+
+
+class MiddlewareConfiguration(_RuntimeConfiguration):
+    """Agent middleware selected by the entrypoint."""
+
+    todo_list: bool = False
+    filesystem: FilesystemConfiguration = Field(default_factory=FilesystemConfiguration)
+    reliability: ReliabilityMiddlewareConfiguration = Field(default_factory=ReliabilityMiddlewareConfiguration)
+
+
+class FilesystemPermissionConfiguration(_RuntimeConfiguration):
+    operations: tuple[FilesystemOperation, ...]
+    paths: tuple[str, ...]
+    mode: FilesystemPermissionMode = "allow"
+
+
+class OpenSandboxConfiguration(_RuntimeConfiguration):
+    domain: str | None = None
+    protocol: str = "https"
+    use_server_proxy: bool = True
+    image: str = "python:3.11"
+    timeout_seconds: int = 600
+    ready_timeout_seconds: int = 240
+    scope: SandboxScope = "thread"
+
+
+class BackendConfiguration(_RuntimeConfiguration):
+    """The ``backend=`` choice for DeepAgents' virtual filesystem/runtime."""
+
+    type: BackendType = "state"
+    opensandbox: OpenSandboxConfiguration = Field(default_factory=OpenSandboxConfiguration)
+
+
+class CheckpointerConfiguration(_RuntimeConfiguration):
+    """The ``checkpointer=`` runtime persistence selection."""
+
+    backend: PersistenceBackend = "memory"
+    setup_on_start: bool = True
+
+
+class LangfuseConfiguration(_RuntimeConfiguration):
+    base_url: str = "https://cloud.langfuse.com"
+    timeout_seconds: int = 30
+
+
+class ObservabilityConfiguration(_RuntimeConfiguration):
+    environment: str = "local"
+    langfuse: LangfuseConfiguration = Field(default_factory=LangfuseConfiguration)
+
+
+class ChatServerConfiguration(_RuntimeConfiguration):
+    base_path: str = "/chat"
+
+
+class A2AServerConfiguration(_RuntimeConfiguration):
+    base_path: str = "/a2a"
+    enabled: bool = True
+
+
+class ServerConfiguration(_RuntimeConfiguration):
+    host: str = "127.0.0.1"
+    port: int = 8123
+    chat: ChatServerConfiguration = Field(default_factory=ChatServerConfiguration)
+    a2a: A2AServerConfiguration = Field(default_factory=A2AServerConfiguration)
+
+
+class SpacesConfiguration(_RuntimeConfiguration):
+    enabled: bool = True
+
+
+class FrontendConfiguration(_RuntimeConfiguration):
+    port: int = 3000
+
+
+class CopilotRuntimeConfiguration(_RuntimeConfiguration):
+    host: str = "127.0.0.1"
+    port: int = 4001
+    base_path: str = "/api/copilotkit"
+    event_store_backend: PersistenceBackend = "memory"
+    event_store_setup_on_start: bool = True
+
+
+class WebSurfaceConfiguration(_RuntimeConfiguration):
+    spaces: SpacesConfiguration = Field(default_factory=SpacesConfiguration)
+    frontend: FrontendConfiguration = Field(default_factory=FrontendConfiguration)
+    copilot_runtime: CopilotRuntimeConfiguration = Field(default_factory=CopilotRuntimeConfiguration)
+
+
+class AIOpsLabConfiguration(_RuntimeConfiguration):
+    directory: str | None = None
+
+
+class BenchmarkConfiguration(_RuntimeConfiguration):
+    aiopslab: AIOpsLabConfiguration = Field(default_factory=AIOpsLabConfiguration)
+
+
+def _declared_secret_paths(value: object, path: tuple[str, ...] = ()) -> tuple[str, ...]:
+    if not isinstance(value, dict):
+        return ()
+    found: list[str] = []
+    for key, nested_value in value.items():
+        normalized_key = str(key).replace("_", "-")
+        nested_path = (*path, str(key))
+        if normalized_key in _SECRET_FIELD_NAMES:
+            found.append(".".join(nested_path))
+        found.extend(_declared_secret_paths(nested_value, nested_path))
+    return tuple(found)
+
 
 class _EntrypointYamlSource(YamlConfigSettingsSource):
     """Reject credentials in a declarative runtime composition file."""
 
     def __call__(self) -> dict[str, object]:
         values = super().__call__()
-        unknown_fields = set(values).difference(self.settings_cls.model_fields)
+        known_fields = set(self.settings_cls.model_fields) | {
+            _kebab_case(name) for name in self.settings_cls.model_fields
+        }
+        unknown_fields = set(values).difference(known_fields)
         if unknown_fields:
             names = ", ".join(sorted(unknown_fields))
             raise ValueError(f"Unknown entrypoint YAML fields: {names}")
-        declared_secrets = _SECRET_FIELD_NAMES.intersection(values)
+        declared_secrets = _declared_secret_paths(values)
         if declared_secrets:
             names = ", ".join(sorted(declared_secrets))
             raise ValueError(f"Secrets must be supplied through .env, not an entrypoint YAML file: {names}")
-        return values
+        return {
+            key if key in self.settings_cls.model_fields else str(key).replace("-", "_"): value
+            for key, value in values.items()
+        }
+
+
+class _SecretOnlyEnvironmentSource(EnvSettingsSource):
+    """Allow process environment input only for explicit credential fields."""
+
+    def __call__(self) -> dict[str, object]:
+        return {name: value for name, value in super().__call__().items() if name in _SECRET_SOURCE_FIELD_NAMES}
+
+
+class _SecretOnlyDotenvSource(DotEnvSettingsSource):
+    """Allow `.env` input only for explicit credential fields."""
+
+    def __call__(self) -> dict[str, object]:
+        return {name: value for name, value in super().__call__().items() if name in _SECRET_SOURCE_FIELD_NAMES}
 
 
 class RuntimeEnvironment(BaseSettings):
-    """Validated values for one runtime composition.
+    """Validated values for one complete, nested runtime composition.
 
-    Non-sensitive values come from one entrypoint YAML file.  Credentials use
-    explicit aliases in `.env`; no `OPS_PILOT_<ENTRY>_*` environment variable
-    can select models, tools, MCP servers, or other runtime capabilities.
+    The top-level keys mirror the official ``create_deep_agent`` injection
+    points. Other keys describe the process host (server, web, benchmark) or
+    tracing. Credentials use explicit aliases in `.env` only.
     """
 
     model_config = SettingsConfigDict(**_SHARED_MODEL_CONFIG, yaml_file=None)
 
-    model_provider: ModelProvider = "sap"
-    model_name: str = "anthropic--claude-4.6-sonnet"
-    model_api_key: str | None = Field(default=None, validation_alias=AliasChoices("MODEL_API_KEY"))
-    model_base_url: str | None = None
-    model_temperature: float = 0.0
-    model_max_tokens: int = 16384
-    model_timeout_seconds: int = 120
-    model_reasoning_mode: ReasoningMode = "adaptive"
-    model_reasoning_effort: ReasoningEffort = "medium"
-    assistant_id: str | None = None
+    model: ModelConfiguration = Field(default_factory=ModelConfiguration)
+    tools: ToolsConfiguration = Field(default_factory=ToolsConfiguration)
     system_prompt: str | None = None
+    middleware: MiddlewareConfiguration = Field(default_factory=MiddlewareConfiguration)
+    skills: tuple[str, ...] = ("skills",)
+    memory: tuple[str, ...] = ()
+    permissions: tuple[FilesystemPermissionConfiguration, ...] = ()
+    backend: BackendConfiguration = Field(default_factory=BackendConfiguration)
+    interrupt_on: dict[str, bool] = Field(default_factory=dict)
+    checkpointer: CheckpointerConfiguration = Field(default_factory=CheckpointerConfiguration)
+    debug: bool = False
+    name: str | None = None
 
-    environment: str = "local"
+    observability: ObservabilityConfiguration = Field(default_factory=ObservabilityConfiguration)
+    server: ServerConfiguration = Field(default_factory=ServerConfiguration)
+    web: WebSurfaceConfiguration = Field(default_factory=WebSurfaceConfiguration)
+    benchmark: BenchmarkConfiguration = Field(default_factory=BenchmarkConfiguration)
+
+    # Secrets are deliberately not part of the YAML tree.
+    model_api_key: str | None = Field(default=None, validation_alias=AliasChoices("MODEL_API_KEY"))
     langfuse_public_key: str | None = Field(default=None, validation_alias=AliasChoices("LANGFUSE_PUBLIC_KEY"))
     langfuse_secret_key: str | None = Field(default=None, validation_alias=AliasChoices("LANGFUSE_SECRET_KEY"))
-    langfuse_base_url: str = "https://cloud.langfuse.com"
-    langfuse_timeout_seconds: int = 30
-
-    persistence_backend: PersistenceBackend = "memory"
     database_url: str | None = Field(default=None, validation_alias=AliasChoices("DATABASE_URL"))
-    persistence_setup_on_start: bool = True
-
-    open_sandbox_enabled: bool = False
-    open_sandbox_domain: str | None = None
     open_sandbox_api_key: str | None = Field(default=None, validation_alias=AliasChoices("OPEN_SANDBOX_API_KEY"))
-    open_sandbox_protocol: str = "https"
-    open_sandbox_use_server_proxy: bool = True
-    open_sandbox_image: str = "python:3.11"
-    open_sandbox_timeout_seconds: int = 600
-    open_sandbox_ready_timeout_seconds: int = 240
-    open_sandbox_scope: SandboxScope = "thread"
-
-    reliability_enabled: bool = True
-    run_deadline_seconds: float = 600
-    model_call_limit: int = 50
-    tool_call_limit: int = 200
-
-    kubeconfig: str | None = None
-    jaeger_mcp_url: str | None = None
-    prometheus_mcp_url: str | None = None
     mcp_basic_auth_header: str | None = Field(default=None, validation_alias=AliasChoices("MCP_BASIC_AUTH_HEADER"))
-
-    host: str = "127.0.0.1"
-    port: int = 8123
-    chat_base_path: str = "/chat"
-    a2a_base_path: str = "/a2a"
-    enable_spaces: bool = True
-    enable_a2a: bool = True
-    frontend_port: int = 3000
-    copilot_runtime_host: str = "127.0.0.1"
-    copilot_runtime_port: int = 4001
-    copilot_runtime_base_path: str = "/api/copilotkit"
-    copilot_event_store_backend: PersistenceBackend = "memory"
-    copilot_event_store_setup_on_start: bool = True
-
-    aiopslab_dir: str | None = None
 
     @classmethod
     def settings_customise_sources(
@@ -133,8 +331,8 @@ class RuntimeEnvironment(BaseSettings):
     ) -> tuple[PydanticBaseSettingsSource, ...]:
         return (
             init_settings,
-            env_settings,
-            dotenv_settings,
+            _SecretOnlyEnvironmentSource(settings_cls),
+            _SecretOnlyDotenvSource(settings_cls),
             _EntrypointYamlSource(settings_cls),
             file_secret_settings,
         )

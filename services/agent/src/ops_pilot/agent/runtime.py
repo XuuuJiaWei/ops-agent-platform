@@ -5,8 +5,8 @@ from __future__ import annotations
 import time
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING, Any, cast
 
 from deepagents import create_deep_agent
 from langchain_core.runnables import RunnableConfig
@@ -181,17 +181,18 @@ class AgentRuntime:
 async def build_agent_runtime(spec: RuntimeSpec) -> AgentRuntime:
     """Build one DeepAgent runtime from an explicit host composition.
 
-    DeepAgents long-term/semantic memory is intentionally not configured here.
-    Runtime continuity is provided by LangGraph's checkpointer: an in-memory
-    saver by default, or a durable ``AsyncPostgresSaver`` when
-    ``persistence.backend`` is ``postgres``. ``attach_checkpointer=False`` skips
-    it for callers that supply their own persistence (e.g. the LangGraph
-    platform server) or need a stateless graph (eval runs).
+    Runtime continuity is provided by the entrypoint's ``checkpointer``
+    composition: in-memory, durable Postgres, or disabled. DeepAgents memory,
+    skills, permissions, middleware, backend, interrupts, debug flag, and name
+    are also passed through from the explicit runtime specification.
     """
 
     model = create_chat_model(spec.model)
     model_metadata = build_model_metadata(spec, model)
     mcp_registry = await create_mcp_registry(spec.mcp)
+    # Human approval is a create_deep_agent(interrupt_on=...) declaration, not
+    # an incidental property of an MCP transport definition.
+    mcp_registry = replace(mcp_registry, hitl_tools=tuple(spec.interrupt_on))
     local_skills = tuple(str(path) for path in resolve_skill_paths(spec.skills))
     tracing = create_callback_handler(spec.observability)
     run_controller = RunController(default_deadline_seconds=spec.reliability.run_deadline_seconds)
@@ -200,7 +201,6 @@ async def build_agent_runtime(spec: RuntimeSpec) -> AgentRuntime:
     checkpointer_closer: Callable[[], Awaitable[None]] | None = None
     runtime_extensions: list[RuntimeExtension] = []
     try:
-        middleware = _create_runtime_middleware(spec, mcp_registry.retry_tools)
         for create_extension in spec.extensions:
             runtime_extensions.append(await create_extension(spec))
         tools = [
@@ -208,12 +208,10 @@ async def build_agent_runtime(spec: RuntimeSpec) -> AgentRuntime:
             *(tool for extension in runtime_extensions for tool in extension.tools),
             *spec.tools,
         ]
-        checkpointer, checkpointer_closer = (
-            await _create_checkpointer(spec.persistence) if spec.attach_checkpointer else (None, None)
-        )
         sandbox = create_sandbox_manager(spec.sandbox)
+        middleware = _create_runtime_middleware(spec, mcp_registry.retry_tools, sandbox)
+        checkpointer, checkpointer_closer = await _create_checkpointer(spec.persistence)
         skills = _resolve_backend_skill_paths(local_skills, sandbox)
-        interrupt_on = {} if spec.bypass_hitl else {name: True for name in mcp_registry.hitl_tools}
         graph = _create_deep_agent(
             model=model,
             tools=tools,
@@ -224,8 +222,12 @@ async def build_agent_runtime(spec: RuntimeSpec) -> AgentRuntime:
             ),
             checkpointer=checkpointer,
             backend=sandbox.backend if sandbox is not None else None,
-            interrupt_on=interrupt_on,
+            memory=list(spec.memory),
+            permissions=[permission.as_deepagents_permission() for permission in spec.permissions],
+            interrupt_on=spec.interrupt_on,
             middleware=[*middleware, *(item for extension in runtime_extensions for item in extension.middleware)],
+            debug=spec.debug,
+            name=spec.name,
         )
     except Exception:
         if checkpointer_closer is not None:
@@ -268,33 +270,52 @@ def _resolve_backend_skill_paths(
     return sync_result.remote_paths
 
 
-def _create_runtime_middleware(spec: RuntimeSpec, retry_tools: tuple[str, ...]) -> list[Any]:
+def _create_runtime_middleware(
+    spec: RuntimeSpec,
+    retry_tools: tuple[str, ...],
+    sandbox: SandboxManager | SandboxRuntime | None,
+) -> list[Any]:
     """Build the production guardrails from LangChain's official middleware."""
 
-    if not spec.reliability.enabled:
-        return []
+    middleware: list[Any] = []
+    if spec.reliability.enabled:
+        from langchain.agents.middleware import (
+            ModelCallLimitMiddleware,
+            ToolCallLimitMiddleware,
+            ToolRetryMiddleware,
+        )
 
-    from langchain.agents.middleware import (
-        ModelCallLimitMiddleware,
-        ToolCallLimitMiddleware,
-        ToolRetryMiddleware,
-    )
+        middleware.extend(
+            (
+                ModelCallLimitMiddleware(run_limit=spec.reliability.model_call_limit, exit_behavior="error"),
+                ToolCallLimitMiddleware(run_limit=spec.reliability.tool_call_limit, exit_behavior="error"),
+            )
+        )
+        if retry_tools:
+            middleware.append(
+                ToolRetryMiddleware(
+                    tools=list(retry_tools),
+                    max_retries=spec.reliability.tool_retry_max_retries,
+                    retry_on=(TimeoutError, ConnectionError),
+                    initial_delay=spec.reliability.tool_retry_initial_delay_seconds,
+                    backoff_factor=spec.reliability.tool_retry_backoff_factor,
+                    max_delay=spec.reliability.tool_retry_max_delay_seconds,
+                    jitter=spec.reliability.tool_retry_jitter,
+                    on_failure="continue",
+                )
+            )
+    if spec.todo_list_enabled:
+        from langchain.agents.middleware import TodoListMiddleware
 
-    middleware: list[Any] = [
-        ModelCallLimitMiddleware(run_limit=spec.reliability.model_call_limit, exit_behavior="error"),
-        ToolCallLimitMiddleware(run_limit=spec.reliability.tool_call_limit, exit_behavior="error"),
-    ]
-    if retry_tools:
+        middleware.append(TodoListMiddleware())
+    if spec.filesystem_tools is not None:
+        from deepagents.middleware import FilesystemMiddleware
+
         middleware.append(
-            ToolRetryMiddleware(
-                tools=list(retry_tools),
-                max_retries=spec.reliability.tool_retry_max_retries,
-                retry_on=(TimeoutError, ConnectionError),
-                initial_delay=spec.reliability.tool_retry_initial_delay_seconds,
-                backoff_factor=spec.reliability.tool_retry_backoff_factor,
-                max_delay=spec.reliability.tool_retry_max_delay_seconds,
-                jitter=spec.reliability.tool_retry_jitter,
-                on_failure="continue",
+            FilesystemMiddleware(
+                backend=sandbox.backend if sandbox is not None else None,
+                tools=cast(Any, list(spec.filesystem_tools)),
+                _permissions=cast(Any, [permission.as_deepagents_permission() for permission in spec.permissions]),
             )
         )
     return middleware
@@ -308,8 +329,12 @@ def _create_deep_agent(
     system_prompt: str | None,
     checkpointer: Any | None,
     backend: Any | None,
+    memory: list[str],
+    permissions: list[dict[str, object]],
     interrupt_on: dict[str, Any] | None = None,
     middleware: Sequence[Any] = (),
+    debug: bool = False,
+    name: str | None = None,
 ) -> Any:
     kwargs: dict[str, Any] = {
         "model": model,
@@ -321,6 +346,10 @@ def _create_deep_agent(
         kwargs["skills"] = skills
     if backend is not None:
         kwargs["backend"] = backend
+    if memory:
+        kwargs["memory"] = memory
+    if permissions:
+        kwargs["permissions"] = permissions
     if interrupt_on:
         kwargs["interrupt_on"] = interrupt_on
 
@@ -328,6 +357,10 @@ def _create_deep_agent(
 
     if checkpointer is not None:
         kwargs["checkpointer"] = checkpointer
+    if debug:
+        kwargs["debug"] = True
+    if name:
+        kwargs["name"] = name
 
     return create_deep_agent(**kwargs)
 
@@ -342,6 +375,8 @@ async def _create_checkpointer(
     it is ``None`` when the checkpointer holds nothing to release.
     """
 
+    if persistence.backend == "none":
+        return None, None
     if persistence.backend == "postgres":
         return await _create_postgres_checkpointer(persistence)
     return _create_memory_checkpointer(), None

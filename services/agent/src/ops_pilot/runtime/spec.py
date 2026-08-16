@@ -21,10 +21,12 @@ else:
     RuntimeExtensionFactory = Callable[..., Awaitable[Any]]
 
 ModelProvider = Literal["sap", "openai", "deepseek", "anthropic", "google_genai", "ollama"]
-PersistenceBackend = Literal["memory", "postgres"]
+PersistenceBackend = Literal["memory", "postgres", "none"]
 SandboxScope = Literal["process", "thread", "run"]
 ReasoningMode = Literal["adaptive", "disabled"]
 ReasoningEffort = Literal["low", "medium", "high"]
+FilesystemOperation = Literal["read", "write"]
+FilesystemPermissionMode = Literal["allow", "deny", "interrupt"]
 
 
 @dataclass(frozen=True)
@@ -64,6 +66,22 @@ class PersistenceSpec:
     def __post_init__(self) -> None:
         if self.backend == "postgres" and not self.database_url:
             raise ValueError("A postgres PersistenceSpec requires database_url.")
+
+
+@dataclass(frozen=True)
+class FilesystemPermissionSpec:
+    """One declarative DeepAgents filesystem permission rule."""
+
+    operations: tuple[FilesystemOperation, ...]
+    paths: tuple[str, ...]
+    mode: FilesystemPermissionMode = "allow"
+
+    def as_deepagents_permission(self) -> dict[str, object]:
+        return {
+            "operations": list(self.operations),
+            "paths": list(self.paths),
+            "mode": self.mode,
+        }
 
 
 @dataclass(frozen=True)
@@ -111,14 +129,19 @@ class RuntimeSpec:
     mcp: MCPServerCatalog = field(default_factory=MCPServerCatalog)
     system_prompt: str | None = None
     skills: tuple[Path, ...] = field(default_factory=tuple)
+    memory: tuple[str, ...] = field(default_factory=tuple)
+    permissions: tuple[FilesystemPermissionSpec, ...] = field(default_factory=tuple)
+    filesystem_tools: tuple[str, ...] | None = None
+    todo_list_enabled: bool = False
+    interrupt_on: dict[str, bool] = field(default_factory=dict)
+    debug: bool = False
+    name: str | None = None
     reliability: ReliabilitySpec = field(default_factory=ReliabilitySpec)
     persistence: PersistenceSpec = field(default_factory=PersistenceSpec)
     sandbox: SandboxSpec = field(default_factory=SandboxSpec)
     observability: ObservabilitySpec = field(default_factory=ObservabilitySpec)
     extensions: tuple[RuntimeExtensionFactory, ...] = field(default_factory=tuple)
     tools: tuple[Any, ...] = field(default_factory=tuple)
-    bypass_hitl: bool = False
-    attach_checkpointer: bool = True
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def with_tools(self, tools: Sequence[Any]) -> RuntimeSpec:

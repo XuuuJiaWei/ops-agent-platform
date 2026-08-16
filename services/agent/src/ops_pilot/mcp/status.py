@@ -63,6 +63,5 @@ class MCPLoadStatus:
 class MCPLoadResult:
     tools: list[Any]
     status: MCPLoadStatus
-    hitl_tools: tuple[str, ...] = ()
     tool_servers: dict[str, str] = field(default_factory=dict)
     retry_tools: tuple[str, ...] = ()

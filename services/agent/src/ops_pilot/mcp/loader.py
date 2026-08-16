@@ -66,7 +66,6 @@ async def load_mcp_tools(catalog: MCPServerCatalog) -> MCPLoadResult:
     loaded = await asyncio.gather(*(load(server) for server in catalog.servers), return_exceptions=True)
     tools: list[Any] = []
     statuses: list[MCPServerLoadStatus] = []
-    hitl_tools: list[str] = []
     retry_tools: list[str] = []
     tool_servers: dict[str, str] = {}
 
@@ -91,7 +90,6 @@ async def load_mcp_tools(catalog: MCPServerCatalog) -> MCPLoadResult:
         names = {_tool_name(tool) for tool in server_tools}
         _warn_unknown_policy_tools(server, names)
         tools.extend(server_tools)
-        hitl_tools.extend(name for name in server.hitl_tools if name in names)
         retry_tools.extend(name for name in server.retry_tools if name in names)
         tool_servers.update({name: server.name for name in names})
         statuses.append(
@@ -107,7 +105,6 @@ async def load_mcp_tools(catalog: MCPServerCatalog) -> MCPLoadResult:
     return MCPLoadResult(
         tools=tools,
         status=MCPLoadStatus(servers=tuple(statuses)),
-        hitl_tools=tuple(dict.fromkeys(hitl_tools)),
         tool_servers=tool_servers,
         retry_tools=tuple(dict.fromkeys(retry_tools)),
     )
@@ -121,7 +118,7 @@ def _allowed_tools(server: MCPServerSpec, tools: list[Any]) -> list[Any]:
 
 
 def _warn_unknown_policy_tools(server: MCPServerSpec, loaded_names: set[str]) -> None:
-    configured = set(server.allow_tools) | set(server.hitl_tools) | set(server.retry_tools)
+    configured = set(server.allow_tools) | set(server.retry_tools)
     unknown = configured - loaded_names
     if unknown:
         logger.warning(

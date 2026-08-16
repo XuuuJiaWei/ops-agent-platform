@@ -13,7 +13,9 @@ const agentDir = join(rootDir, "services", "agent");
 loadRootEnvironment();
 const aiopsLabDir = loadBenchmarkConfig().aiopslab_dir?.trim();
 if (!aiopsLabDir) {
-  throw new Error("config/entries/benchmark.yaml requires aiopslab_dir. Run `pnpm benchmark:setup` first.");
+  throw new Error(
+    "config/entries/benchmark.yaml requires benchmark.aiopslab.directory. Run `pnpm benchmark:setup` first.",
+  );
 }
 if (!existsSync(aiopsLabDir)) {
   throw new Error(`OPS_PILOT_AIOPSLAB_DIR does not exist: ${aiopsLabDir}`);

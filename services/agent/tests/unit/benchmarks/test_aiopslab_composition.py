@@ -35,8 +35,6 @@ async def test_benchmark_receives_a_dedicated_runtime_composition() -> None:
         assistant_id="benchmark-test-agent",
         entrypoint="benchmark:aiopslab",
         model=ModelSpec(provider="openai", name="benchmark-model"),
-        attach_checkpointer=False,
-        bypass_hitl=True,
     )
 
     async def factory(candidate: RuntimeSpec) -> Runtime:

@@ -31,10 +31,11 @@ pnpm benchmark:setup
 pnpm benchmark -- --problem <problem-id> --max-steps 30
 ```
 
-The root launcher reads `aiopslab_dir` from `config/entries/benchmark.yaml` and
-layers that editable AIOpsLab checkout over this project only for the benchmark
-process. The same file declares its model, MCP, and optional persistence.
+The root launcher reads `benchmark.aiopslab.directory` from
+`config/entries/benchmark.yaml` and layers that editable AIOpsLab checkout over
+this project only for the benchmark process. The same file declares its model,
+`tools.mcp` catalog, `backend`, and `checkpointer`.
 
-The core runtime accepts model, MCP catalog, tools, middleware, sandbox,
-checkpointer, tracing, and lifecycle configuration from the entry-owned
-`RuntimeSpec`, matching DeepAgents' application-supplied composition model.
+The core runtime accepts `create_deep_agent`'s declarative inputs — model,
+tools, system prompt, middleware, skills, memory, permissions, backend,
+interrupts, checkpointer, debug, and name — from the entry-owned `RuntimeSpec`.

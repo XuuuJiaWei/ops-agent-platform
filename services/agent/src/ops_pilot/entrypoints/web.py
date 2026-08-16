@@ -7,11 +7,11 @@ from dataclasses import dataclass
 from ops_pilot.agui.runtime import create_copilotkit_runtime_extension
 from ops_pilot.entrypoints.environment import RuntimeEnvironment
 from ops_pilot.entrypoints.profiles import (
+    checkpointer_from_environment,
+    deepagent_fields_from_environment,
     model_from_environment,
     observability_from_environment,
     observer_mcp_from_environment,
-    persistence_from_environment,
-    project_skills,
     reliability_from_environment,
     sandbox_from_environment,
 )
@@ -34,14 +34,13 @@ def build_web_application_spec(environment: RuntimeEnvironment | None = None) ->
     environment = environment or RuntimeEnvironment.for_entrypoint("web")
     runtime = RuntimeSpec(
         id="web",
-        assistant_id=environment.assistant_id or "agent",
+        assistant_id=environment.name or "agent",
         entrypoint="web",
         model=model_from_environment(environment),
         mcp=observer_mcp_from_environment(environment),
-        system_prompt=environment.system_prompt,
-        skills=project_skills(),
+        **deepagent_fields_from_environment(environment),
         reliability=reliability_from_environment(environment),
-        persistence=persistence_from_environment(environment),
+        persistence=checkpointer_from_environment(environment),
         sandbox=sandbox_from_environment(environment),
         observability=observability_from_environment(environment),
         extensions=(create_spaces_runtime_extension, create_copilotkit_runtime_extension),
@@ -49,10 +48,10 @@ def build_web_application_spec(environment: RuntimeEnvironment | None = None) ->
     )
     return WebApplicationSpec(
         runtime=runtime,
-        host=environment.host,
-        port=environment.port,
-        chat_base_path=environment.chat_base_path,
-        a2a_base_path=environment.a2a_base_path,
-        enable_spaces=environment.enable_spaces,
-        enable_a2a=environment.enable_a2a,
+        host=environment.server.host,
+        port=environment.server.port,
+        chat_base_path=environment.server.chat.base_path,
+        a2a_base_path=environment.server.a2a.base_path,
+        enable_spaces=environment.web.spaces.enabled,
+        enable_a2a=environment.server.a2a.enabled,
     )
