@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field, replace
 from typing import Any, cast
 
@@ -15,6 +17,7 @@ from ops_pilot.agent.results import extract_result_text
 from ops_pilot.mcp.registry import MCPRegistry, create_mcp_registry
 from ops_pilot.models import create_chat_model
 from ops_pilot.observability.langfuse import TracingSetup, create_callback_handler, flush_tracing
+from ops_pilot.observability.logging import AgentLoggingMiddleware
 from ops_pilot.observability.metadata import build_model_metadata, build_runnable_config
 from ops_pilot.reliability.run import RunController
 from ops_pilot.runtime.spec import PersistenceSpec, RuntimeSpec
@@ -33,22 +36,19 @@ class AgentRuntime:
     tracing: TracingSetup = field(default_factory=lambda: TracingSetup(enabled=False))
     sandbox: SandboxManager | SandboxRuntime | None = None
     model_metadata: dict[str, Any] = field(default_factory=dict)
-    checkpointer_closer: Callable[[], Awaitable[None]] | None = None
     run_controller: RunController = field(default_factory=RunController)
+    _lifecycle: AsyncExitStack = field(default_factory=AsyncExitStack, repr=False, compare=False)
 
-    def close(self) -> None:
-        if self.sandbox is not None:
-            self.sandbox.close()
+    async def __aenter__(self) -> AgentRuntime:
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        await self.aclose()
 
     async def aclose(self) -> None:
-        try:
-            try:
-                if self.checkpointer_closer is not None:
-                    await self.checkpointer_closer()
-            finally:
-                self.close()
-        finally:
-            flush_tracing(self.tracing)
+        """Release every resource acquired while assembling this runtime."""
+
+        await self._lifecycle.aclose()
 
     def runnable_config(
         self,
@@ -119,25 +119,34 @@ async def build_agent_runtime(spec: RuntimeSpec) -> AgentRuntime:
     are also passed through from the explicit runtime specification.
     """
 
-    model = create_chat_model(spec.model)
-    model_metadata = build_model_metadata(spec, model)
-    mcp_registry = await create_mcp_registry(spec.mcp)
-    # Human approval is a create_deep_agent(interrupt_on=...) declaration, not
-    # an incidental property of an MCP transport definition.
-    mcp_registry = replace(mcp_registry, hitl_tools=tuple(spec.interrupt_on))
-    local_skills = tuple(str(path) for path in resolve_skill_paths(spec.skills))
-    tracing = create_callback_handler(spec.observability)
-    run_controller = RunController(
-        default_deadline_seconds=spec.reliability.run_deadline_seconds if spec.reliability.enabled else None
-    )
-
-    sandbox: SandboxManager | None = None
-    checkpointer_closer: Callable[[], Awaitable[None]] | None = None
+    lifecycle = AsyncExitStack()
     try:
+        model = create_chat_model(spec.model)
+        model_metadata = build_model_metadata(spec, model)
+        mcp_registry = await create_mcp_registry(spec.mcp)
+        # Human approval is a create_deep_agent(interrupt_on=...) declaration,
+        # not an incidental property of an MCP transport definition.
+        mcp_registry = replace(mcp_registry, hitl_tools=tuple(spec.interrupt_on))
+        local_skills = tuple(path.as_posix() for path in resolve_skill_paths(spec.skills))
+        tracing = create_callback_handler(spec.observability)
+        lifecycle.push_async_callback(_flush_tracing, tracing)
+        run_controller = RunController(
+            default_deadline_seconds=spec.reliability.run_deadline_seconds if spec.reliability.enabled else None
+        )
+
         tools = [*mcp_registry.tools, *spec.tools]
         sandbox = create_sandbox_manager(spec.sandbox)
+        if sandbox is not None:
+            lifecycle.push_async_callback(_close_sandbox, sandbox)
         middleware = _create_runtime_middleware(spec, mcp_registry.retry_tools, sandbox)
+        composed_middleware = [*middleware, *spec.middleware]
+        if spec.observability.logging.enabled:
+            # Keep observability innermost so it records the effective request
+            # after entrypoint-specific middleware has changed tools or settings.
+            composed_middleware.append(AgentLoggingMiddleware(spec.observability.logging))
         checkpointer, checkpointer_closer = await _create_checkpointer(spec.persistence)
+        if checkpointer_closer is not None:
+            lifecycle.push_async_callback(checkpointer_closer)
         skills = _resolve_backend_skill_paths(local_skills, sandbox)
         graph = _create_deep_agent(
             model=model,
@@ -145,22 +154,22 @@ async def build_agent_runtime(spec: RuntimeSpec) -> AgentRuntime:
             skills=list(skills),
             system_prompt=spec.system_prompt,
             checkpointer=checkpointer,
-            backend=sandbox.backend if sandbox is not None else None,
+            backend=sandbox.backend if sandbox is not None else spec.backend,
+            subagents=list(spec.subagents),
             memory=list(spec.memory),
             permissions=[permission.as_deepagents_permission() for permission in spec.permissions],
             interrupt_on=spec.interrupt_on,
-            middleware=[*middleware, *spec.middleware],
+            middleware=composed_middleware,
             context_schema=spec.context_schema,
+            state_schema=spec.state_schema,
             response_format=spec.response_format,
+            store=spec.store,
+            cache=spec.cache,
             debug=spec.debug,
             name=spec.name,
         )
-    except Exception:
-        if checkpointer_closer is not None:
-            await checkpointer_closer()
-        if sandbox is not None:
-            sandbox.close()
-        flush_tracing(tracing)
+    except BaseException:
+        await lifecycle.aclose()
         raise
     return AgentRuntime(
         graph=graph,
@@ -171,9 +180,28 @@ async def build_agent_runtime(spec: RuntimeSpec) -> AgentRuntime:
         tracing=tracing,
         sandbox=sandbox,
         model_metadata=model_metadata,
-        checkpointer_closer=checkpointer_closer,
         run_controller=run_controller,
+        _lifecycle=lifecycle,
     )
+
+
+@asynccontextmanager
+async def agent_runtime(spec: RuntimeSpec) -> AsyncIterator[AgentRuntime]:
+    """Open one runtime and guarantee matching shutdown for its owner."""
+
+    runtime = await build_agent_runtime(spec)
+    try:
+        yield runtime
+    finally:
+        await runtime.aclose()
+
+
+async def _close_sandbox(sandbox: SandboxManager | SandboxRuntime) -> None:
+    await asyncio.to_thread(sandbox.close)
+
+
+async def _flush_tracing(tracing: TracingSetup) -> None:
+    await asyncio.to_thread(flush_tracing, tracing)
 
 
 def _resolve_backend_skill_paths(
@@ -232,7 +260,7 @@ def _create_runtime_middleware(
 
         middleware.append(
             FilesystemMiddleware(
-                backend=sandbox.backend if sandbox is not None else None,
+                backend=sandbox.backend if sandbox is not None else spec.backend,
                 tools=cast(Any, list(spec.filesystem_tools)),
                 _permissions=cast(Any, [permission.as_deepagents_permission() for permission in spec.permissions]),
             )
@@ -248,12 +276,16 @@ def _create_deep_agent(
     system_prompt: str | None,
     checkpointer: Any | None,
     backend: Any | None,
+    subagents: list[Any],
     memory: list[str],
     permissions: list[dict[str, object]],
     interrupt_on: dict[str, Any] | None = None,
     middleware: Sequence[Any] = (),
     context_schema: type[Any] | None = None,
+    state_schema: type[Any] | None = None,
     response_format: Any | None = None,
+    store: Any | None = None,
+    cache: Any | None = None,
     debug: bool = False,
     name: str | None = None,
 ) -> Any:
@@ -267,6 +299,8 @@ def _create_deep_agent(
         kwargs["skills"] = skills
     if backend is not None:
         kwargs["backend"] = backend
+    if subagents:
+        kwargs["subagents"] = subagents
     if memory:
         kwargs["memory"] = memory
     if permissions:
@@ -277,8 +311,14 @@ def _create_deep_agent(
     kwargs["middleware"] = list(middleware)
     if context_schema is not None:
         kwargs["context_schema"] = context_schema
+    if state_schema is not None:
+        kwargs["state_schema"] = state_schema
     if response_format is not None:
         kwargs["response_format"] = response_format
+    if store is not None:
+        kwargs["store"] = store
+    if cache is not None:
+        kwargs["cache"] = cache
 
     if checkpointer is not None:
         kwargs["checkpointer"] = checkpointer

@@ -17,6 +17,10 @@ config/runtime.yaml
 # Local archives
 archives/*.zip
 
+# Generated benchmark output
+/artifacts/
+/benchmarks/*/artifacts/
+
 # Python
 __pycache__/
 *.py[cod]

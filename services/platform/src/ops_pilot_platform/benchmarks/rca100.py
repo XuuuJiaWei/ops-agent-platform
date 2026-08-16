@@ -4,50 +4,70 @@ import json
 import sys
 from collections import Counter
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from dataclasses import field as dataclass_field
 from pathlib import Path
-from typing import Annotated, Any, Literal, Self, cast
+from typing import Any, Literal, Self
 
-import pyarrow.compute as arrow_compute
-import pyarrow.dataset as arrow_dataset
-from langchain.agents.structured_output import ToolStrategy
-from langchain.tools import ToolRuntime, tool
-from ops_pilot.agent.runtime import build_agent_runtime
+from deepagents import GeneralPurposeSubagentProfile, HarnessProfile, register_harness_profile
+from langchain.agents.middleware import AgentMiddleware, AgentState
+from langchain.messages import AIMessage
+from langchain_core.output_parsers import PydanticOutputParser
+from langgraph.runtime import Runtime
+from ops_pilot.agent.runtime import agent_runtime
 from ops_pilot.runtime.spec import RuntimeSpec
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from ops_pilot_platform.benchmarks.rca100_tools import RCA100_TOOLS, RCA100Context, RCA100ToolCacheMiddleware
 from ops_pilot_platform.entrypoints.benchmark import build_rca100_runtime_spec
 
-SRE_SYSTEM_PROMPT = """You are a senior site reliability engineer diagnosing a production incident
-from read-only observability data.
+_FILESYSTEM_TOOLS = frozenset({"delete", "edit_file", "execute", "glob", "grep", "ls", "read_file", "write_file"})
 
-Your goals are to identify the earliest credible faulting entity and failure
-mechanism, explain how the failure propagated to the reported symptom, and
-ground every conclusion in time-aligned evidence.
 
-Use a disciplined troubleshooting method:
-1. Establish the incident window, affected entity, and user-visible impact.
-2. Compare incident signals with a preceding healthy baseline while preserving
-   timestamps and measurement units. Observation snapshots can have limited
-   history; after one empty baseline query, use the reported coverage and move
-   to another signal instead of repeatedly widening the time window.
-3. Use metrics to establish onset and scope, logs to identify failure details,
-   traces and topology to determine dependency direction, and events and alerts
-   to identify changes and lifecycle transitions.
-4. Form a small set of plausible hypotheses and actively seek both confirming
-   and disconfirming evidence.
-5. Separate root cause, propagation, and impact. Correlation or temporal
-   coincidence alone is not proof of causation.
-6. Prefer the simplest explanation that accounts for all strong evidence.
-   State uncertainty when evidence is insufficient and never fabricate facts.
+class RCAToolFilterMiddleware(AgentMiddleware):
+    """Hide DeepAgents filesystem scaffolding from this observation-only worker."""
 
-Keep the investigation read-only. Use only the supplied incident context and
-observation tools. Call one observation tool at a time and pass one scalar value
-per argument; make separate calls for separate selectors or time windows. Follow
-the requested output schema exactly, without Markdown or additional commentary.
-Inspect metrics, logs, and traces before refining a query more than once."""
+    async def awrap_model_call(self, request: Any, handler: Any) -> Any:
+        tools = [tool for tool in request.tools if _tool_name(tool) not in _FILESYSTEM_TOOLS]
+        return await handler(request.override(tools=tools))
 
-RCA100Source = Literal["metrics", "logs", "traces", "events", "alerts"]
+
+@dataclass
+class RCABenchmarkTelemetry(AgentMiddleware[AgentState, Any, Any]):
+    """Observe benchmark execution through LangChain's middleware seam."""
+
+    model_calls: int = 0
+    tool_calls: int = 0
+    total_tokens: int = 0
+    tool_counts: Counter[str] = dataclass_field(default_factory=Counter)
+
+    def after_model(self, state: AgentState, runtime: Runtime[Any]) -> None:
+        del runtime
+        message = state["messages"][-1]
+        if not isinstance(message, AIMessage):
+            return
+        self.model_calls += 1
+        tools = [str(call.get("name", "unknown")) for call in message.tool_calls]
+        self.tool_calls += len(tools)
+        self.tool_counts.update(tools)
+        usage = message.usage_metadata or {}
+        self.total_tokens += int(usage.get("total_tokens", 0) or 0)
+        sys.stderr.write(
+            "RCA100_EVENT:"
+            + json.dumps(
+                {"model_call": self.model_calls, "tools": tools, "total_tokens": self.total_tokens},
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
+        sys.stderr.flush()
+
+    def snapshot(self) -> dict[str, Any]:
+        return {
+            "model_calls": self.model_calls,
+            "tool_calls": self.tool_calls,
+            "total_tokens": self.total_tokens,
+            "tools": dict(sorted(self.tool_counts.items())),
+        }
 
 
 class RCA100Request(BaseModel):
@@ -74,13 +94,6 @@ class RCA100Request(BaseModel):
         self.case_directory = case_directory
         self.topology_path = topology_path
         return self
-
-
-@dataclass(frozen=True)
-class RCA100Context:
-    """Per-run dependency hidden from the model-visible tool schema."""
-
-    case_directory: Path
 
 
 class IncidentEvidence(BaseModel):
@@ -116,269 +129,28 @@ class IncidentDiagnosis(BaseModel):
     reasoning: list[IncidentReasoningStep] = Field(default_factory=list)
 
 
-@tool
-def query_metric(
-    runtime: ToolRuntime[RCA100Context],
-    metric: Annotated[str | None, Field(description="One exact metric name, or null. Never pass a list.")] = None,
-    entity_name: Annotated[str | None, Field(description="One exact entity name, or null. Never pass a list.")] = None,
-    entity_id: Annotated[str | None, Field(description="One exact entity identifier, or null.")] = None,
-    domain: Annotated[Literal["apm", "k8s"] | None, Field(description="One entity domain, or null.")] = None,
-    entity_set: Annotated[str | None, Field(description="One exact entity-set name, or null.")] = None,
-    start_time: Annotated[
-        str | None, Field(description="One ISO-8601 lower-bound timestamp, or null. Never pass a list.")
-    ] = None,
-    end_time: Annotated[
-        str | None, Field(description="One ISO-8601 upper-bound timestamp, or null. Never pass a list.")
-    ] = None,
-    limit: Annotated[int, Field(ge=1, le=500)] = 200,
-) -> str:
-    """Query metric samples from the incident observability store.
-
-    Times are ISO-8601 values. Call without selectors to list the available
-    metrics and entities, then narrow by metric/entity and compare the alert
-    window with an earlier baseline.
-    """
-
-    dataset = _dataset(runtime, "metrics")
-    if all(value is None for value in (metric, entity_name, entity_id, domain, entity_set, start_time, end_time)):
-        catalog = dataset.to_table(columns=["time", "domain", "entity_set", "entity_name", "metric"])
-        return _json(
-            {
-                "source": "metrics",
-                "available_time_range": _time_range(catalog["time"], unit="us"),
-                "metrics": sorted(value for value in set(catalog["metric"].to_pylist()) if value),
-                "entities": sorted(value for value in set(catalog["entity_name"].to_pylist()) if value)[:500],
-                "entity_sets": sorted(value for value in set(catalog["entity_set"].to_pylist()) if value),
-            }
-        )
-
-    selectors = _and(
-        _equals("metric", metric),
-        _equals("entity_name", entity_name),
-        _equals("entity_id", entity_id),
-        _equals("domain", domain),
-        _equals("entity_set", entity_set),
-    )
-    expression = _and(
-        selectors,
-        _lower_bound("time", _epoch(start_time, unit="us")),
-        _upper_bound("time", _epoch(end_time, unit="us")),
-    )
-    rows = _scan_rows(
-        dataset,
-        columns=["time", "domain", "entity_set", "entity_id", "entity_name", "metric", "value", "service"],
-        expression=expression,
-        limit=limit,
-    )
-    for row in rows:
-        if isinstance(timestamp := row.get("time"), int):
-            row["time"] = _iso_epoch(timestamp, unit="us")
-    coverage = None
-    if not rows and (start_time is not None or end_time is not None):
-        coverage_table = dataset.to_table(columns=["time"], filter=selectors)
-        coverage = _time_range(coverage_table["time"], unit="us")
-    return _rows("metrics", rows, available_time_range=coverage)
-
-
-@tool
-def query_logs(
-    runtime: ToolRuntime[RCA100Context],
-    keyword: Annotated[str | None, Field(description="One case-insensitive text fragment, or null.")] = None,
-    pod_name: Annotated[str | None, Field(description="One exact pod name, or null.")] = None,
-    namespace: Annotated[str | None, Field(description="One exact namespace, or null.")] = None,
-    start_time: Annotated[str | None, Field(description="One ISO-8601 lower-bound timestamp, or null.")] = None,
-    end_time: Annotated[str | None, Field(description="One ISO-8601 upper-bound timestamp, or null.")] = None,
-    limit: Annotated[int, Field(ge=1, le=300)] = 100,
-) -> str:
-    """Query application logs by time, pod, namespace, and keyword."""
-
-    dataset = _dataset(runtime, "logs")
-    expression = _and(
-        _equals("_pod_name_", pod_name),
-        _equals("_namespace_", namespace),
-        _lower_bound("_time_", start_time),
-        _upper_bound("_time_", end_time),
-    )
-    rows = _scan_rows(
-        dataset,
-        columns=["_time_", "_namespace_", "_pod_name_", "_container_name_", "content"],
-        expression=expression,
-        contains=(("content", keyword),),
-        limit=limit,
-    )
-    return _rows("logs", rows)
-
-
-@tool
-def query_traces(
-    runtime: ToolRuntime[RCA100Context],
-    service_name: Annotated[str | None, Field(description="One exact service name, or null.")] = None,
-    span_name: Annotated[str | None, Field(description="One exact span operation name, or null.")] = None,
-    trace_id: Annotated[str | None, Field(description="One exact trace identifier, or null.")] = None,
-    status_code: Annotated[str | None, Field(description="One exact span status code, or null.")] = None,
-    keyword: Annotated[str | None, Field(description="One text fragment for span details, or null.")] = None,
-    start_time: Annotated[str | None, Field(description="One ISO-8601 lower-bound timestamp, or null.")] = None,
-    end_time: Annotated[str | None, Field(description="One ISO-8601 upper-bound timestamp, or null.")] = None,
-    limit: Annotated[int, Field(ge=1, le=300)] = 100,
-) -> str:
-    """Query trace spans by service, operation, trace, status, time, or text.
-
-    The keyword searches status messages, attributes, and span events. Times
-    are ISO-8601 values converted to the dataset's nanosecond timestamps.
-    """
-
-    dataset = _dataset(runtime, "traces")
-    expression = _and(
-        _equals("serviceName", service_name),
-        _equals("spanName", span_name),
-        _equals("traceId", trace_id),
-        _equals("statusCode", status_code),
-        _lower_bound("startTime", _epoch_text(start_time, unit="ns")),
-        _upper_bound("startTime", _epoch_text(end_time, unit="ns")),
-    )
-    rows = _scan_rows(
-        dataset,
-        columns=[
-            "traceId",
-            "spanId",
-            "parentSpanId",
-            "spanName",
-            "startTime",
-            "duration",
-            "serviceName",
-            "statusCode",
-            "statusMessage",
-            "attributes",
-            "events",
-        ],
-        expression=expression,
-        contains=(
-            ("statusMessage", keyword),
-            ("attributes", keyword),
-            ("events", keyword),
-        ),
-        contains_mode="any_for_keyword",
-        limit=limit,
-    )
-    return _rows("traces", rows)
-
-
-@tool
-def query_events(
-    runtime: ToolRuntime[RCA100Context],
-    keyword: Annotated[str | None, Field(description="One text fragment for the event body, or null.")] = None,
-    pod_name: Annotated[str | None, Field(description="One exact pod name, or null.")] = None,
-    level: Annotated[str | None, Field(description="One exact event level, or null.")] = None,
-    limit: Annotated[int, Field(ge=1, le=300)] = 100,
-) -> str:
-    """Query Kubernetes events; keyword searches the JSON event body."""
-
-    dataset = _dataset(runtime, "events")
-    rows = _scan_rows(
-        dataset,
-        columns=["eventId", "hostname", "level", "pod_name", "clusterName"],
-        expression=_and(_equals("pod_name", pod_name), _equals("level", level)),
-        contains=(("eventId", keyword),),
-        limit=limit,
-    )
-    return _rows("events", rows)
-
-
-@tool
-def query_alerts(
-    runtime: ToolRuntime[RCA100Context],
-    subject: Annotated[str | None, Field(description="One subject text fragment, or null.")] = None,
-    status: Annotated[str | None, Field(description="One exact alert status, or null.")] = None,
-    start_time: Annotated[str | None, Field(description="One ISO-8601 lower-bound timestamp, or null.")] = None,
-    end_time: Annotated[str | None, Field(description="One ISO-8601 upper-bound timestamp, or null.")] = None,
-    limit: Annotated[int, Field(ge=1, le=100)] = 50,
-) -> str:
-    """Query the incident alert lifecycle."""
-
-    dataset = _dataset(runtime, "alerts")
-    rows = _scan_rows(
-        dataset,
-        columns=["time", "subject", "severity", "status", "subtype", "labels", "annotations", "data"],
-        expression=_and(
-            _equals("status", status),
-            _lower_bound("time", start_time),
-            _upper_bound("time", end_time),
-        ),
-        contains=(("subject", subject),),
-        limit=limit,
-    )
-    return _rows("alerts", rows)
-
-
-@tool
-def query_topology(
-    runtime: ToolRuntime[RCA100Context],
-    entity_name: Annotated[str | None, Field(description="One entity-name fragment, or null.")] = None,
-    relation: Annotated[str | None, Field(description="One exact dependency relation, or null.")] = None,
-    limit: Annotated[int, Field(ge=1, le=500)] = 200,
-) -> str:
-    """Query entities and dependency edges.
-
-    With no selectors, returns topology statistics plus entity-type and
-    relation counts. With an entity name, returns matching entities and their
-    adjacent edges.
-    """
-
-    topology = json.loads((runtime.context.case_directory / "topology.json").read_text(encoding="utf-8"))
-    entities = topology.get("entities", [])
-    edges = topology.get("edges", [])
-    if entity_name is None and relation is None:
-        return _json(
-            {
-                "source": "topology",
-                "stats": topology.get("stats", {}),
-                "entity_types": Counter(entity.get("type") for entity in entities),
-                "relations": Counter(edge.get("relation") for edge in edges),
-            }
-        )
-
-    matching_entities = [
-        entity
-        for entity in entities
-        if entity_name is None or entity_name.casefold() in str(entity.get("name", "")).casefold()
-    ]
-    matching_ids = {entity.get("id") for entity in matching_entities}
-    matching_edges = [
-        edge
-        for edge in edges
-        if (relation is None or edge.get("relation") == relation)
-        and (not matching_ids or edge.get("src") in matching_ids or edge.get("dst") in matching_ids)
-    ]
-    return _json(
-        {
-            "source": "topology",
-            "entities": matching_entities[:limit],
-            "edges": matching_edges[:limit],
-            "matched_entities": len(matching_entities),
-            "matched_edges": len(matching_edges),
-        }
-    )
-
-
-RCA100_TOOLS = (query_metric, query_logs, query_traces, query_events, query_alerts, query_topology)
-
-
-def build_rca100_agent_spec(response_format: Any | None = None) -> RuntimeSpec:
+def build_rca100_agent_spec(
+    *,
+    telemetry: RCABenchmarkTelemetry | None = None,
+) -> RuntimeSpec:
     """Contribute RCA100 policy through the runtime's official injection fields."""
 
     base_spec = build_rca100_runtime_spec(
         tools=RCA100_TOOLS,
         context_schema=RCA100Context,
-        response_format=response_format,
     )
-    prompt = "\n\n".join(part for part in (base_spec.system_prompt, SRE_SYSTEM_PROMPT) if part)
     return replace(
         base_spec,
-        system_prompt=prompt,
         skills=(),
         memory=(),
         permissions=(),
         filesystem_tools=None,
+        middleware=(
+            *base_spec.middleware,
+            RCAToolFilterMiddleware(),
+            RCA100ToolCacheMiddleware(),
+            *((telemetry,) if telemetry is not None else ()),
+        ),
     )
 
 
@@ -386,118 +158,41 @@ async def run_rca100_agent() -> None:
     """Read one blind request from stdin and emit only the agent prediction."""
 
     request = RCA100Request.model_validate_json(sys.stdin.read())
-    runtime = await build_agent_runtime(build_rca100_agent_spec(ToolStrategy(IncidentDiagnosis)))
+    telemetry = RCABenchmarkTelemetry()
+    spec = build_rca100_agent_spec(telemetry=telemetry)
+    _configure_isolated_harness(spec)
     try:
-        prediction = await runtime.ainvoke_text(
-            _diagnosis_prompt(request),
-            protocol="benchmark:rca100",
-            thread_id=f"rca100:{request.task_id}",
-            run_id=f"rca100:{request.task_id}",
-            context=RCA100Context(case_directory=request.case_directory),
-            extra_metadata={"benchmark": "rca100", "task_id": request.task_id},
-        )
-        sys.stdout.write(prediction.strip())
+        async with agent_runtime(spec) as runtime:
+            prediction = await runtime.ainvoke_text(
+                _diagnosis_prompt(request),
+                protocol="benchmark:rca100",
+                thread_id=f"rca100:{request.task_id}",
+                run_id=f"rca100:{request.task_id}",
+                context=RCA100Context(case_directory=request.case_directory),
+                extra_metadata={"benchmark": "rca100", "task_id": request.task_id},
+            )
+            diagnosis = PydanticOutputParser(pydantic_object=IncidentDiagnosis).parse(prediction)
+            sys.stdout.write(diagnosis.model_dump_json())
     finally:
-        await runtime.aclose()
+        sys.stderr.write("RCA100_METRICS:" + json.dumps(telemetry.snapshot(), ensure_ascii=False) + "\n")
 
 
-def _dataset(runtime: ToolRuntime[RCA100Context], source: RCA100Source) -> arrow_dataset.Dataset:
-    return arrow_dataset.dataset(runtime.context.case_directory / f"{source}.parquet", format="parquet")
+def _configure_isolated_harness(spec: RuntimeSpec) -> None:
+    """Configure the official process-wide harness profile for this worker."""
+
+    provider = "openai" if spec.model.provider == "deepseek" else spec.model.provider
+    register_harness_profile(
+        f"{provider}:{spec.model.name}",
+        HarnessProfile(
+            general_purpose_subagent=GeneralPurposeSubagentProfile(enabled=False),
+        ),
+    )
 
 
-def _scan_rows(
-    dataset: arrow_dataset.Dataset,
-    *,
-    columns: list[str],
-    expression: arrow_dataset.Expression | None,
-    limit: int,
-    contains: tuple[tuple[str, str | None], ...] = (),
-    contains_mode: Literal["all", "any_for_keyword"] = "all",
-) -> list[dict[str, Any]]:
-    active_contains = tuple((column, value) for column, value in contains if value)
-    compute = cast(Any, arrow_compute)
-    rows: list[dict[str, Any]] = []
-    for batch in dataset.scanner(columns=columns, filter=expression, batch_size=8192).to_batches():
-        filtered = batch
-        if active_contains:
-            masks = [
-                compute.fill_null(
-                    compute.match_substring(filtered[column], value, ignore_case=True),
-                    False,
-                )
-                for column, value in active_contains
-            ]
-            mask = masks[0]
-            for candidate in masks[1:]:
-                mask = (
-                    compute.or_(mask, candidate)
-                    if contains_mode == "any_for_keyword"
-                    else compute.and_(mask, candidate)
-                )
-            filtered = filtered.filter(mask)
-        remaining = limit - len(rows)
-        rows.extend(filtered.slice(0, remaining).to_pylist())
-        if len(rows) >= limit:
-            break
-    return rows
-
-
-def _equals(column: str, value: object | None) -> arrow_dataset.Expression | None:
-    return None if value is None else arrow_dataset.field(column) == value
-
-
-def _lower_bound(column: str, value: object | None) -> arrow_dataset.Expression | None:
-    return None if value is None else arrow_dataset.field(column) >= value
-
-
-def _upper_bound(column: str, value: object | None) -> arrow_dataset.Expression | None:
-    return None if value is None else arrow_dataset.field(column) <= value
-
-
-def _and(*expressions: arrow_dataset.Expression | None) -> arrow_dataset.Expression | None:
-    result = None
-    for expression in expressions:
-        if expression is not None:
-            result = expression if result is None else result & expression
-    return result
-
-
-def _epoch(value: str | None, *, unit: Literal["us", "ns"]) -> int | None:
-    if value is None:
-        return None
-    normalized = value.replace("Z", "+00:00")
-    timestamp = datetime.fromisoformat(normalized).timestamp()
-    multiplier = 1_000_000 if unit == "us" else 1_000_000_000
-    return int(timestamp * multiplier)
-
-
-def _epoch_text(value: str | None, *, unit: Literal["ns"]) -> str | None:
-    converted = _epoch(value, unit=unit)
-    return None if converted is None else str(converted)
-
-
-def _rows(source: str, rows: list[dict[str, Any]], **metadata: object) -> str:
-    return _json({"source": source, "returned_rows": len(rows), **metadata, "rows": rows})
-
-
-def _time_range(values: Any, *, unit: Literal["us", "ns"]) -> dict[str, str] | None:
-    compute = cast(Any, arrow_compute)
-    bounds = cast(dict[str, int | None], compute.min_max(values).as_py())
-    if bounds.get("min") is None or bounds.get("max") is None:
-        return None
-    return {
-        "start": _iso_epoch(cast(int, bounds["min"]), unit=unit),
-        "end": _iso_epoch(cast(int, bounds["max"]), unit=unit),
-    }
-
-
-def _iso_epoch(value: int, *, unit: Literal["us", "ns"]) -> str:
-    divisor = 1_000_000 if unit == "us" else 1_000_000_000
-    return datetime.fromtimestamp(value / divisor, UTC).isoformat()
-
-
-def _json(value: object) -> str:
-    return json.dumps(value, ensure_ascii=False, default=str)
+def _tool_name(tool: Any) -> str:
+    if isinstance(tool, dict):
+        return str(tool.get("name", ""))
+    return str(getattr(tool, "name", ""))
 
 
 def _diagnosis_prompt(request: RCA100Request) -> str:

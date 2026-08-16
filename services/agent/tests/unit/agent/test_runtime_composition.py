@@ -44,6 +44,7 @@ async def test_builder_consumes_only_the_explicit_runtime_spec(monkeypatch) -> N
     assert captured["model"] is spec.model
     assert captured["catalog"] is spec.mcp
     assert captured["tools"] == ["entry-tool"]
+    assert captured["subagents"] == []
     assert captured["interrupt_on"] == {"dangerous-tool": True}
 
 

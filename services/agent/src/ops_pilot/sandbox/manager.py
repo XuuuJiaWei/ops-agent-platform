@@ -139,12 +139,23 @@ class SandboxManager:
     def close(self) -> None:
         with self._lock:
             self._closed = True
-            leases = list(self._leases.values())
+            leases = list(self._leases.items())
             self._leases.clear()
             self._initialized_workspaces.clear()
             self._synced_skills.clear()
-        for runtime in leases:
-            runtime.close()
+        failed: list[tuple[str, SandboxRuntime]] = []
+        errors: list[Exception] = []
+        for key, runtime in leases:
+            try:
+                runtime.close()
+            except Exception as exc:  # noqa: BLE001 - attempt every owned lease before reporting cleanup failure.
+                failed.append((key, runtime))
+                errors.append(exc)
+        if failed:
+            with self._lock:
+                self._leases.update(failed)
+        if errors:
+            raise ExceptionGroup("Failed to release one or more sandbox leases.", errors)
 
     def _sandbox_key(self, scope: _InvocationScope) -> str:
         if self.scope == "process":

@@ -18,6 +18,7 @@ PersistenceBackend = Literal["memory", "postgres", "none"]
 SandboxScope = Literal["process", "thread", "run"]
 ReasoningMode = Literal["adaptive", "disabled"]
 ReasoningEffort = Literal["low", "medium", "high"]
+AgentLogPayloads = Literal["metadata", "preview"]
 FilesystemOperation = Literal["read", "write"]
 FilesystemPermissionMode = Literal["allow", "deny", "interrupt"]
 
@@ -38,7 +39,7 @@ class ModelSpec:
 
 @dataclass(frozen=True)
 class ReliabilitySpec:
-    enabled: bool = True
+    enabled: bool = False
     run_deadline_seconds: float | None = 600.0
     model_call_limit: int = 50
     tool_call_limit: int = 200
@@ -103,6 +104,14 @@ class SandboxSpec:
 
 
 @dataclass(frozen=True)
+class AgentLoggingSpec:
+    enabled: bool = False
+    level: str = "INFO"
+    payloads: AgentLogPayloads = "metadata"
+    max_preview_chars: int = 500
+
+
+@dataclass(frozen=True)
 class ObservabilitySpec:
     enabled: bool = False
     environment: str = "local"
@@ -110,11 +119,18 @@ class ObservabilitySpec:
     secret_key: str | None = None
     base_url: str | None = "https://cloud.langfuse.com"
     timeout_seconds: int = 30
+    logging: AgentLoggingSpec = field(default_factory=AgentLoggingSpec)
 
 
 @dataclass(frozen=True)
 class RuntimeSpec:
-    """Everything the host intentionally grants to one agent runtime."""
+    """Everything the host intentionally grants to one agent runtime.
+
+    Runtime objects injected through tools, middleware, backend, store, cache,
+    and subagents remain owned by the host that created them. The harness owns
+    only resources it constructs from declarative specs such as persistence
+    and sandbox configuration.
+    """
 
     id: str
     assistant_id: str
@@ -137,7 +153,12 @@ class RuntimeSpec:
     tools: tuple[Any, ...] = field(default_factory=tuple)
     middleware: tuple[Any, ...] = field(default_factory=tuple)
     context_schema: type[Any] | None = None
+    state_schema: type[Any] | None = None
     response_format: Any | None = None
+    backend: Any | None = None
+    store: Any | None = None
+    cache: Any | None = None
+    subagents: tuple[Any, ...] = field(default_factory=tuple)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def with_tools(self, tools: Sequence[Any]) -> RuntimeSpec:

@@ -140,7 +140,7 @@ class FilesystemConfiguration(_RuntimeConfiguration):
 
 
 class ReliabilityMiddlewareConfiguration(_RuntimeConfiguration):
-    enabled: bool = True
+    enabled: bool = False
     run_deadline_seconds: float = 600
     model_call_limit: int = 50
     tool_call_limit: int = 200
@@ -190,9 +190,17 @@ class LangfuseConfiguration(_RuntimeConfiguration):
     timeout_seconds: int = 30
 
 
+class AgentLoggingConfiguration(_RuntimeConfiguration):
+    enabled: bool = False
+    level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+    payloads: Literal["metadata", "preview"] = "metadata"
+    max_preview_chars: int = Field(default=500, ge=100, le=4000)
+
+
 class ObservabilityConfiguration(_RuntimeConfiguration):
     enabled: bool = False
     environment: str = "local"
+    logging: AgentLoggingConfiguration = Field(default_factory=AgentLoggingConfiguration)
     langfuse: LangfuseConfiguration = Field(default_factory=LangfuseConfiguration)
 
 

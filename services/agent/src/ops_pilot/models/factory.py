@@ -44,6 +44,7 @@ def _create_langchain_chat_model(spec: ModelSpec) -> Any:
     kwargs: dict[str, Any] = {
         "model": spec.name,
         "model_provider": provider,
+        "timeout": spec.request_timeout_seconds,
         **_sampling_kwargs(spec),
     }
     if spec.max_tokens is not None:

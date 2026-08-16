@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import os
+import signal
 import subprocess
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -20,7 +22,15 @@ from rca100_benchmark.scoring import load_ground_truth, score_prediction
 class RCA100Agent(Protocol):
     """Minimal contract for any agent implementation or test double."""
 
-    def diagnose(self, public_input: dict[str, object]) -> str: ...
+    def diagnose(self, public_input: dict[str, object]) -> AgentExecution | str: ...
+
+
+@dataclass(frozen=True)
+class AgentExecution:
+    """One agent response plus optional runner-visible telemetry."""
+
+    output: str
+    metrics: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -31,21 +41,37 @@ class CommandAgent:
     timeout_seconds: float = 600
     working_directory: Path | None = None
 
-    def diagnose(self, public_input: dict[str, object]) -> str:
-        completed = subprocess.run(
+    def diagnose(self, public_input: dict[str, object]) -> AgentExecution:
+        process = subprocess.Popen(
             self.command,
-            input=json.dumps(public_input, ensure_ascii=False),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
-            capture_output=True,
             cwd=self.working_directory,
-            timeout=self.timeout_seconds,
-            check=False,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
+            start_new_session=os.name != "nt",
         )
-        if completed.returncode != 0:
-            stderr = completed.stderr.strip()
-            raise RuntimeError(f"Agent command exited with status {completed.returncode}: {stderr}")
-        return completed.stdout
+        try:
+            stdout, stderr = process.communicate(
+                input=json.dumps(public_input, ensure_ascii=False),
+                timeout=self.timeout_seconds,
+            )
+        except subprocess.TimeoutExpired as exc:
+            _terminate_process_tree(process)
+            _stdout, stderr = process.communicate()
+            detail = _stderr_tail(stderr)
+            message = f"Agent command exceeded {self.timeout_seconds:g} seconds."
+            if detail:
+                message += f" Last agent events:\n{detail}"
+            raise TimeoutError(message) from exc
+        if process.returncode != 0:
+            raise RuntimeError(f"Agent command exited with status {process.returncode}: {stderr.strip()}")
+        return AgentExecution(
+            output=stdout,
+            metrics=_parse_agent_metrics(stderr),
+        )
 
 
 @dataclass(frozen=True)
@@ -66,7 +92,10 @@ class RCA100Runner:
     def run_task(self, task_id: str) -> dict[str, Any]:
         case = RCA100Case.load(self.dataset_directory, task_id)
         started = time.perf_counter()
-        raw_response = self.agent.diagnose(case.public_input())
+        execution = self.agent.diagnose(case.public_input())
+        if isinstance(execution, str):
+            execution = AgentExecution(output=execution)
+        raw_response = execution.output
         prediction: RCA100Prediction | None
         prediction_error: str | None = None
         try:
@@ -81,7 +110,10 @@ class RCA100Runner:
             "prediction": prediction.model_dump(mode="json") if prediction is not None else None,
             "prediction_error": prediction_error,
             "raw_response": raw_response,
-            "benchmark_metrics": {"elapsed_s": time.perf_counter() - started},
+            "benchmark_metrics": {
+                "elapsed_s": time.perf_counter() - started,
+                **execution.metrics,
+            },
         }
         if self.answer_key_directory is None:
             result["evaluation_available"] = False
@@ -140,3 +172,35 @@ def parse_prediction(response: str) -> RCA100Prediction:
 
 
 AgentFactory = Callable[[], RCA100Agent]
+
+
+_METRICS_PREFIX = "RCA100_METRICS:"
+
+
+def _parse_agent_metrics(stderr: str) -> dict[str, Any]:
+    for line in reversed(stderr.splitlines()):
+        if not line.startswith(_METRICS_PREFIX):
+            continue
+        try:
+            value = json.loads(line.removeprefix(_METRICS_PREFIX))
+        except json.JSONDecodeError:
+            return {"telemetry_error": "invalid agent metrics JSON"}
+        return value if isinstance(value, dict) else {"telemetry_error": "agent metrics must be an object"}
+    return {}
+
+
+def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
+    if process.poll() is not None:
+        return
+    if os.name == "nt":
+        subprocess.run(
+            ("taskkill", "/PID", str(process.pid), "/T", "/F"),
+            capture_output=True,
+            check=False,
+        )
+        return
+    os.killpg(process.pid, signal.SIGKILL)
+
+
+def _stderr_tail(stderr: str, *, lines: int = 20) -> str:
+    return "\n".join(stderr.splitlines()[-lines:])

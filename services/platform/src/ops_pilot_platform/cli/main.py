@@ -5,13 +5,16 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
 import uvicorn
-from ops_pilot.agent.runtime import build_agent_runtime
+from ops_pilot.agent.runtime import AgentRuntime, agent_runtime
 from ops_pilot.mcp.status import MCPLoadStatus
+from ops_pilot.observability.logging import configure_runtime_logging
 from ops_pilot.runtime.spec import RuntimeSpec
 
 from ops_pilot_platform.benchmarks.aiopslab import run_aiopslab_problem
@@ -25,6 +28,7 @@ from ops_pilot_platform.smoke.tools import get_smoke_tools
 
 
 def main(argv: list[str] | None = None) -> int:
+    configure_runtime_logging()
     parser = argparse.ArgumentParser(prog="ops_pilot")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("profiles", help="Print the declared runtime compositions.")
@@ -126,21 +130,22 @@ def _describe_spec(spec: RuntimeSpec) -> dict[str, Any]:
         "sandbox_enabled": spec.sandbox.enabled,
         "custom_tools": [getattr(tool, "name", type(tool).__name__) for tool in spec.tools],
         "custom_middleware": [type(item).__name__ for item in spec.middleware],
-        "limits": {
-            "model_calls": spec.reliability.model_call_limit,
-            "tool_calls": spec.reliability.tool_call_limit,
-            "graph_steps": spec.reliability.recursion_limit,
-        },
+        "limits": (
+            {
+                "model_calls": spec.reliability.model_call_limit,
+                "tool_calls": spec.reliability.tool_call_limit,
+                "graph_steps": spec.reliability.recursion_limit,
+            }
+            if spec.reliability.enabled
+            else None
+        ),
     }
 
 
 async def _print_status(spec: RuntimeSpec) -> int:
-    runtime = await build_agent_runtime(spec)
-    try:
+    async with agent_runtime(spec) as runtime:
         print(json.dumps(build_runtime_status(runtime), indent=2, sort_keys=True))
         return 0
-    finally:
-        await runtime.aclose()
 
 
 def _serve_web(host: str | None, port: int | None) -> int:
@@ -183,8 +188,7 @@ def _smoke(command: str) -> int:
 
 
 async def _smoke_agent(spec: RuntimeSpec) -> int:
-    runtime = await build_agent_runtime(spec.with_tools(get_smoke_tools()))
-    try:
+    async with agent_runtime(spec.with_tools(get_smoke_tools())) as runtime:
         print(
             await runtime.ainvoke_text(
                 "Use add_numbers to compute 2 + 3, then reply with the result.",
@@ -193,15 +197,19 @@ async def _smoke_agent(spec: RuntimeSpec) -> int:
             )
         )
         return 0
-    finally:
-        await runtime.aclose()
 
 
 async def _smoke_a2a() -> int:
     from ops_pilot_platform.web.app import create_backend_app
 
     application = replace(build_web_application_spec(), enable_spaces=False)
-    app = create_backend_app(application, runtime=cast(Any, _DummyRuntime(application.runtime)))
+    dummy = cast(AgentRuntime, _DummyRuntime(application.runtime))
+
+    @asynccontextmanager
+    async def runtime_context(_: RuntimeSpec) -> AsyncIterator[AgentRuntime]:
+        yield dummy
+
+    app = create_backend_app(application, runtime_context=runtime_context)
     async with app.router.lifespan_context(app):
         print("routes:", ", ".join(sorted(app.openapi().get("paths", {}))))
     return 0

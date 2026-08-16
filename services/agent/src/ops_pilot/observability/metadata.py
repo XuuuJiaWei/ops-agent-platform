@@ -18,6 +18,7 @@ def build_trace_metadata(
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     metadata: dict[str, Any] = {
+        **runtime.metadata,
         "assistant_id": runtime.assistant_id,
         "protocol": protocol,
         "model_provider": runtime.model.provider,

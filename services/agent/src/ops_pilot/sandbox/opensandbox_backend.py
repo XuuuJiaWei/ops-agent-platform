@@ -92,19 +92,23 @@ class SandboxRuntime:
 
         if self._closed:
             return
-        self._closed = True
+        errors: list[Exception] = []
         terminate = getattr(self.sandbox, "destroy", None) or getattr(self.sandbox, "kill", None)
-        try:
-            if terminate is not None:
-                try:
-                    terminate()
-                except Exception as exc:  # noqa: BLE001 - SDK raises different subclasses across versions.
-                    if not _is_sandbox_not_found_error(exc):
-                        raise
-        finally:
-            close = getattr(self.sandbox, "close", None)
-            if close is not None:
+        if terminate is not None:
+            try:
+                terminate()
+            except Exception as exc:  # noqa: BLE001 - SDK raises different subclasses across versions.
+                if not _is_sandbox_not_found_error(exc):
+                    errors.append(exc)
+        close = getattr(self.sandbox, "close", None)
+        if close is not None:
+            try:
                 close()
+            except Exception as exc:  # noqa: BLE001 - SDK raises different subclasses across versions.
+                errors.append(exc)
+        if errors:
+            raise ExceptionGroup("Failed to release OpenSandbox resources.", errors)
+        self._closed = True
 
 
 def create_sandbox_runtime(spec: SandboxSpec) -> SandboxRuntime | None:

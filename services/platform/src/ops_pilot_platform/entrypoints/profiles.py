@@ -6,6 +6,7 @@ from typing import Any
 
 from ops_pilot.mcp.spec import MCPServerCatalog, MCPServerSpec
 from ops_pilot.runtime.spec import (
+    AgentLoggingSpec,
     FilesystemPermissionSpec,
     ModelSpec,
     ObservabilitySpec,
@@ -100,6 +101,12 @@ def observability_from_environment(environment: RuntimeEnvironment) -> Observabi
         secret_key=environment.langfuse_secret_key,
         base_url=observability.langfuse.base_url,
         timeout_seconds=observability.langfuse.timeout_seconds,
+        logging=AgentLoggingSpec(
+            enabled=observability.logging.enabled,
+            level=observability.logging.level,
+            payloads=observability.logging.payloads,
+            max_preview_chars=observability.logging.max_preview_chars,
+        ),
     )
 
 

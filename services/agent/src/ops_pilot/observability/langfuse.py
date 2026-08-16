@@ -68,6 +68,20 @@ def create_callback_handler(spec: ObservabilitySpec) -> TracingSetup:
     )
 
 
+def describe_tracing(spec: ObservabilitySpec) -> TracingSetup:
+    """Describe tracing configuration without creating an SDK client."""
+
+    if not spec.enabled:
+        return TracingSetup(enabled=False, warning="Langfuse tracing disabled by entrypoint configuration")
+    missing = _missing_langfuse_keys(spec)
+    if missing:
+        return TracingSetup(
+            enabled=False,
+            warning=("Langfuse tracing disabled; missing required environment values: " + ", ".join(missing)),
+        )
+    return TracingSetup(enabled=True)
+
+
 def flush_tracing(tracing: TracingSetup) -> None:
     """Flush buffered events without owning or replacing the SDK's OTel provider."""
 
