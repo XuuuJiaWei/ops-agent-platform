@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "case_id": "replay-image-load-latency",
+  "origin": "synthetic_seed",
+  "captured_at": "2026-08-16T00:00:00Z",
+  "tools": {
+    "search_traces": {
+      "status": "ok",
+      "window_minutes": 15,
+      "service": "frontend",
+      "operation": "image load",
+      "sampled_spans": 22,
+      "image_span_p50_seconds": 10.1,
+      "image_span_p95_seconds": 10.6,
+      "backend_rpc_p95_seconds": 0.42,
+      "evidence": "Frontend image-loading spans cluster around ten seconds while backend RPC spans remain below half a second at p95."
+    },
+    "query": {
+      "status": "no_signal",
+      "summary": "No replayed metric series is required for this trace-focused case."
+    }
+  }
+}
