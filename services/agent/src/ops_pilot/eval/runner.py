@@ -334,7 +334,8 @@ def _extra_tools_for_cases(cases: tuple[Any, ...]) -> tuple[Any, ...]:
     if "replay" in sources:
         if sources != {"replay"}:
             raise EvalDatasetError(
-                "Replay cases must run separately so deterministic telemetry tools are not exposed to live/static evals."
+                "Replay cases must run separately so deterministic telemetry tools "
+                "are not exposed to live/static evals."
             )
         return tuple(get_replay_tools())
 
