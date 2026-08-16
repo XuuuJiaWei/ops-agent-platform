@@ -58,7 +58,7 @@ def main(argv: list[str] | None = None) -> int:
     rca100_agent.add_argument(
         "--knowledge-profile",
         choices=("baseline", "context-v1", "context-v2"),
-        default="context-v1",
+        default="baseline",
         help="Versioned SRE Skills and Memory composition.",
     )
 

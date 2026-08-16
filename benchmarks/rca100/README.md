@@ -126,6 +126,9 @@ The bundled agent exposes three reproducible knowledge variants:
   guidance, but must not be activated unless a same-task gate and a separate holdout
   both pass.
 
+`baseline` is the active default because both context candidates failed the current
+quality gate. Candidates must always be selected explicitly for an experiment.
+
 Use `compare --tasks t103 ...` to project two larger artifacts onto an identical
 subset. This is useful for validating a feedback candidate without rerunning or
 silently comparing different task sets.

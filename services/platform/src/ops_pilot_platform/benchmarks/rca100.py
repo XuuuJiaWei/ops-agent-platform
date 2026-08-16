@@ -202,7 +202,7 @@ class IncidentDiagnosis(BaseModel):
 
 def build_rca100_agent_spec(
     *,
-    knowledge_profile: SREKnowledgeProfile = "context-v1",
+    knowledge_profile: SREKnowledgeProfile = "baseline",
     telemetry: RCABenchmarkTelemetry | None = None,
 ) -> RuntimeSpec:
     """Contribute RCA100 policy through the runtime's official injection fields."""
@@ -223,7 +223,7 @@ def build_rca100_agent_spec(
     return apply_sre_knowledge(spec, knowledge_profile)
 
 
-async def run_rca100_agent(knowledge_profile: SREKnowledgeProfile = "context-v1") -> None:
+async def run_rca100_agent(knowledge_profile: SREKnowledgeProfile = "baseline") -> None:
     """Read one blind request from stdin and emit only the agent prediction."""
 
     request = RCA100Request.model_validate_json(sys.stdin.read())
