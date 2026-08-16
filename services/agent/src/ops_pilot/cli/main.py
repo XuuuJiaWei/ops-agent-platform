@@ -11,7 +11,7 @@ from typing import Any
 import uvicorn
 
 from ops_pilot.agent.runtime import build_agent_runtime
-from ops_pilot.benchmark.aiopslab import run_aiopslab_problem
+from ops_pilot.benchmarks.aiopslab import run_aiopslab_problem
 from ops_pilot.config.mcp_schema import MCPConfig
 from ops_pilot.config.settings import load_settings
 from ops_pilot.health.status import build_runtime_status, health_snapshot
@@ -39,28 +39,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     smoke_subcommands.add_parser("agent", help="Build the DeepAgent and invoke a simple prompt.")
     smoke_subcommands.add_parser("a2a", help="Build the A2A agent card and app route table.")
 
-    benchmark = subcommands.add_parser("benchmark", help="Run the AIOpsLab benchmark.")
+    benchmark = subcommands.add_parser("benchmark", help="Run an installed benchmark adapter.")
     benchmark.add_argument("--problem", required=True, help="AIOpsLab problem id.")
-    benchmark.add_argument(
-        "--base-url",
-        default="http://127.0.0.1:1819",
-        help="AIOpsLab bridge URL (default: http://127.0.0.1:1819).",
-    )
-    benchmark.add_argument("--deadline-seconds", type=float, default=300.0)
-    persistent = benchmark.add_mutually_exclusive_group()
-    persistent.add_argument(
-        "--persistent",
-        dest="persistent",
-        action="store_true",
-        default=None,
-        help="Reuse the deployed app across runs (warm mode).",
-    )
-    persistent.add_argument(
-        "--no-persistent",
-        dest="persistent",
-        action="store_false",
-        help="Use the official one-shot lifecycle (deploy + teardown each run).",
-    )
+    benchmark.add_argument("--max-steps", type=int, default=30, help="Maximum AIOpsLab agent actions (default: 30).")
 
     args = parser.parse_args(argv)
     if args.command == "settings":
@@ -82,9 +63,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 async def _run_benchmark(args: argparse.Namespace) -> int:
     result = await run_aiopslab_problem(
         args.problem,
-        base_url=args.base_url,
-        deadline_seconds=args.deadline_seconds,
-        persistent=args.persistent,
+        max_steps=args.max_steps,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0

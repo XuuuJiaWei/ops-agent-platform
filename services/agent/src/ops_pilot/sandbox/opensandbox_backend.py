@@ -119,9 +119,9 @@ def create_sandbox_runtime(settings: Settings) -> SandboxRuntime | None:
 
     symbols = _load_opensandbox_symbols()
     connection = symbols.connection_config_cls(
+        api_key=settings.open_sandbox_api_key,
         domain=settings.open_sandbox_domain,
         protocol=settings.open_sandbox_protocol,
-        api_key=settings.open_sandbox_api_key,
         use_server_proxy=settings.open_sandbox_use_server_proxy,
         disable_metrics=settings.open_sandbox_disable_metrics,
     )

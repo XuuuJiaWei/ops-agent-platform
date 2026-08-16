@@ -14,6 +14,7 @@ from typing import Any
 
 from langchain_core.runnables import RunnableConfig
 
+from ops_pilot.agent.extensions import RuntimeExtensionFactory
 from ops_pilot.agent.runtime import AgentRuntime, build_agent_runtime
 from ops_pilot.config.settings import Settings
 
@@ -43,10 +44,12 @@ class AgentRuntimeManager:
         settings: Settings,
         runtime: AgentRuntime | None,
         attach_checkpointer: bool = True,
+        extensions: tuple[RuntimeExtensionFactory, ...] = (),
     ) -> None:
         self.settings = settings
         self._runtime = runtime
         self._attach_checkpointer = attach_checkpointer
+        self._extensions = extensions
         self._generation = 0
         self._reloaded_at = _now_iso()
         self._lock = asyncio.Lock()
@@ -119,6 +122,7 @@ class AgentRuntimeManager:
         next_runtime = await build_agent_runtime(
             self.settings,
             attach_checkpointer=self._attach_checkpointer,
+            extensions=self._extensions,
         )
         self._runtime = next_runtime
         if previous_runtime is not None:

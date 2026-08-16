@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from ops_pilot.backend import create_backend_app
 from ops_pilot.config.settings import load_settings
 from ops_pilot.mcp.status import MCPLoadStatus
-from ops_pilot.spaces import MemorySpaceRepository
+from ops_pilot.spaces import MemorySpaceRepository, SpacesRuntimeExtension
 
 
 class DummyRuntime:
@@ -17,6 +17,10 @@ class DummyRuntime:
 
     async def ainvoke_text(self, text: str, **_: object) -> str:
         return f"ok: {text}"
+
+    def extension(self, extension_type):
+        assert extension_type is SpacesRuntimeExtension
+        return SpacesRuntimeExtension(self.spaces)
 
 
 class CloseTrackingRuntime(DummyRuntime):
@@ -81,7 +85,7 @@ def test_backend_builds_runtime_inside_lifespan(monkeypatch) -> None:
 
     created: list[CloseTrackingRuntime] = []
 
-    async def fake_build_agent_runtime(_settings):
+    async def fake_build_agent_runtime(_settings, **_kwargs):
         runtime = CloseTrackingRuntime()
         created.append(runtime)
         return runtime

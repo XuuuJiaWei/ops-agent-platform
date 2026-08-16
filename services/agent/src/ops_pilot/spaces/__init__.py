@@ -3,6 +3,7 @@
 from ops_pilot.spaces.factory import create_space_repository
 from ops_pilot.spaces.models import CardDraft, CardSize, CardType, Space, SpaceCard, SpaceSummary
 from ops_pilot.spaces.repository import MemorySpaceRepository, SpaceRepository
+from ops_pilot.spaces.runtime import SpacesRuntimeExtension, create_spaces_runtime_extension
 from ops_pilot.spaces.tools import build_space_tools
 
 __all__ = [
@@ -14,6 +15,8 @@ __all__ = [
     "SpaceCard",
     "SpaceRepository",
     "SpaceSummary",
+    "SpacesRuntimeExtension",
     "build_space_tools",
     "create_space_repository",
+    "create_spaces_runtime_extension",
 ]

@@ -72,10 +72,7 @@ def test_create_sandbox_runtime_builds_opensandbox_backend(monkeypatch) -> None:
     assert FakeSandbox.created_kwargs is not None
     assert FakeSandbox.created_kwargs["entrypoint"] == ["tail", "-f", "/dev/null"]
     assert FakeSandbox.created_kwargs["resource"] == {"cpu": "250m", "memory": "256Mi"}
-    assert FakeSandbox.created_kwargs["resource_requests"] == {
-        "cpu": "100m",
-        "memory": "128Mi",
-    }
+    assert FakeSandbox.created_kwargs["resource_requests"] == {"cpu": "100m", "memory": "128Mi"}
     assert FakeSandbox.created_kwargs["env"] == {}
     timeout = FakeSandbox.created_kwargs["timeout"]
     ready_timeout = FakeSandbox.created_kwargs["ready_timeout"]

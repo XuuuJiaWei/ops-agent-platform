@@ -12,6 +12,7 @@ from deepagents import create_deep_agent
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import MemorySaver
 
+from ops_pilot.agent.extensions import RuntimeExtension, RuntimeExtensionFactory
 from ops_pilot.agent.results import extract_result_text
 from ops_pilot.config.settings import Settings, load_settings
 from ops_pilot.mcp.registry import MCPRegistry, create_mcp_registry
@@ -22,7 +23,6 @@ from ops_pilot.reliability.run import RunController
 from ops_pilot.sandbox import SandboxManager, SandboxRuntime, create_sandbox_manager
 from ops_pilot.skills.resolver import resolve_skill_paths
 from ops_pilot.skills.sync import sync_skill_paths_to_backend
-from ops_pilot.spaces import MemorySpaceRepository, SpaceRepository, build_space_tools, create_space_repository
 
 if TYPE_CHECKING:
     from ops_pilot.eval.trace import AgentTrace
@@ -39,8 +39,7 @@ class AgentRuntime:
     sandbox: SandboxManager | SandboxRuntime | None = None
     model_metadata: dict[str, Any] = field(default_factory=dict)
     checkpointer_closer: Callable[[], Awaitable[None]] | None = None
-    spaces: SpaceRepository = field(default_factory=MemorySpaceRepository)
-    space_repository_closer: Callable[[], Awaitable[None]] | None = None
+    extensions: tuple[RuntimeExtension, ...] = field(default_factory=tuple)
     run_controller: RunController = field(default_factory=RunController)
 
     def close(self) -> None:
@@ -53,11 +52,9 @@ class AgentRuntime:
                 if self.checkpointer_closer is not None:
                     await self.checkpointer_closer()
             finally:
-                try:
-                    if self.space_repository_closer is not None:
-                        await self.space_repository_closer()
-                finally:
-                    self.close()
+                for extension in reversed(self.extensions):
+                    await extension.aclose()
+                self.close()
         finally:
             flush_tracing(self.tracing)
 
@@ -170,6 +167,14 @@ class AgentRuntime:
     async def cancel_run(self, run_id: str, *, reason: str = "cancel requested") -> bool:
         return await self.run_controller.cancel(run_id, reason=reason)
 
+    def extension(self, extension_type: type[Any]) -> Any:
+        """Return one explicitly-composed host extension by its concrete type."""
+
+        for extension in self.extensions:
+            if isinstance(extension, extension_type):
+                return extension
+        raise RuntimeError(f"Runtime extension is not enabled: {extension_type.__name__}.")
+
 
 async def build_agent_runtime(
     settings: Settings | None = None,
@@ -177,6 +182,7 @@ async def build_agent_runtime(
     attach_checkpointer: bool = True,
     bypass_hitl: bool = False,
     extra_tools: Sequence[Any] = (),
+    extensions: Sequence[RuntimeExtensionFactory] = (),
 ) -> AgentRuntime:
     """Build the shared DeepAgent runtime.
 
@@ -198,12 +204,16 @@ async def build_agent_runtime(
 
     sandbox: SandboxManager | None = None
     checkpointer_closer: Callable[[], Awaitable[None]] | None = None
-    space_repository: SpaceRepository | None = None
-    space_repository_closer: Callable[[], Awaitable[None]] | None = None
+    runtime_extensions: list[RuntimeExtension] = []
     try:
         middleware = _create_runtime_middleware(resolved_settings, mcp_registry.retry_tools)
-        space_repository, space_repository_closer = await create_space_repository(resolved_settings)
-        tools = [*mcp_registry.tools, *build_space_tools(space_repository), *extra_tools]
+        for create_extension in extensions:
+            runtime_extensions.append(await create_extension(resolved_settings))
+        tools = [
+            *mcp_registry.tools,
+            *(tool for extension in runtime_extensions for tool in extension.tools),
+            *extra_tools,
+        ]
         checkpointer, checkpointer_closer = (
             await _create_checkpointer(resolved_settings) if attach_checkpointer else (None, None)
         )
@@ -214,22 +224,24 @@ async def build_agent_runtime(
             model=model,
             tools=tools,
             skills=list(skills),
-            system_prompt=_system_prompt(resolved_settings.system_prompt),
+            system_prompt=_system_prompt(
+                resolved_settings.system_prompt,
+                *(fragment for extension in runtime_extensions for fragment in extension.prompt_fragments),
+            ),
             checkpointer=checkpointer,
             backend=sandbox.backend if sandbox is not None else None,
             interrupt_on=interrupt_on,
-            middleware=middleware,
+            middleware=[*middleware, *(item for extension in runtime_extensions for item in extension.middleware)],
         )
     except Exception:
         if checkpointer_closer is not None:
             await checkpointer_closer()
-        if space_repository_closer is not None:
-            await space_repository_closer()
+        for extension in reversed(runtime_extensions):
+            await extension.aclose()
         if sandbox is not None:
             sandbox.close()
         flush_tracing(tracing)
         raise
-    assert space_repository is not None
     return AgentRuntime(
         graph=graph,
         settings=resolved_settings,
@@ -240,29 +252,13 @@ async def build_agent_runtime(
         sandbox=sandbox,
         model_metadata=model_metadata,
         checkpointer_closer=checkpointer_closer,
-        spaces=space_repository,
-        space_repository_closer=space_repository_closer,
+        extensions=tuple(runtime_extensions),
         run_controller=run_controller,
     )
 
 
-def _system_prompt(configured_prompt: str | None) -> str:
-    spaces_prompt = """You can create agent-native visual experiences with Space tools.
-Use render_ui for a transient card that belongs in the current conversation.
-Use create_space and the card-in-space tools when the user wants a persistent dashboard.
-Before changing an existing Space, use list_spaces or get_space when you do not already have its current ids.
-Cards are declarative data: choose the card type that best communicates the result and keep labels concise.
-For a live (auto-refreshing) card, set a binding to a read-only source_tool; the backend stores only the tool's
-raw response, and a binding.transform (a small JS function transform(raw) replayed deterministically in the
-frontend sandbox) normalizes that raw output into content. Call the source tool once first to see its real
-shape, then write the transform — one JS transform is the single normalization layer for every source, so do
-not maintain per-source query languages or decoders. After writing a transform, ALWAYS call
-validate_card_transform (pass the transform code, the raw you just observed from the source tool, and the
-card_type) and only add or update the card once it returns ok; if it fails, fix the JS per the message and
-re-validate — never persist a transform that has not passed."""
-    if configured_prompt:
-        return f"{configured_prompt}\n\n{spaces_prompt}"
-    return spaces_prompt
+def _system_prompt(configured_prompt: str | None, *fragments: str) -> str | None:
+    return "\n\n".join(fragment for fragment in (configured_prompt, *fragments) if fragment) or None
 
 
 def _resolve_backend_skill_paths(
@@ -334,24 +330,12 @@ def _create_deep_agent(
     if interrupt_on:
         kwargs["interrupt_on"] = interrupt_on
 
-    copilotkit_middleware = _create_copilotkit_middleware()
-    configured_middleware = list(middleware)
-    if copilotkit_middleware is not None:
-        configured_middleware.insert(0, copilotkit_middleware)
-    kwargs["middleware"] = configured_middleware
+    kwargs["middleware"] = list(middleware)
 
     if checkpointer is not None:
         kwargs["checkpointer"] = checkpointer
 
     return create_deep_agent(**kwargs)
-
-
-def _create_copilotkit_middleware() -> Any | None:
-    try:
-        from copilotkit import CopilotKitMiddleware
-    except ImportError:
-        return None
-    return CopilotKitMiddleware()
 
 
 async def _create_checkpointer(

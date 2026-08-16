@@ -11,21 +11,29 @@ uv run ops_pilot smoke agent
 uv run pytest
 ```
 
-Run the external AIOpsLab localization benchmark after the bridge is available:
+Run the official AIOpsLab benchmark adapter after installing AIOpsLab itself
+(its upstream project is intentionally not a service dependency):
 
 ```bash
+git clone --recurse-submodules https://github.com/microsoft/AIOpsLab.git
+cd AIOpsLab && uv pip install -e .
+cd ../ops-agent-platform/services/agent
 uv run ops_pilot benchmark \
-  --base-url http://127.0.0.1:1819 \
-  --problem astronomy_shop_payment_service_failure-localization-1
+  --problem astronomy_shop_payment_service_failure-localization-1 \
+  --max-steps 30
 ```
 
-AIOpsLab is intentionally not installed into this service environment. The benchmark bridge runs inside the AIOpsLab environment; this service remains the Agent under test and uses its own configured MCP tools.
+AIOpsLab owns the benchmark lifecycle, action parser, session trace, and
+evaluation. OpsPilot only adapts its generic text-agent interface to the
+official `Agent.get_action` interface. Additional benchmarks belong under
+`ops_pilot.benchmarks` and must not add business tools, prompt fragments, or
+repositories to the core runtime.
 
 ## Runtime
 
 The backend exposes AG-UI under `/chat`, A2A JSON-RPC at `/a2a/jsonrpc`, agent-card discovery at `/a2a/.well-known/agent-card.json`, and health/status endpoints. These protocol surfaces share the same DeepAgents runtime.
 
-Runtime guardrails reuse framework primitives where available: LangChain model/tool call limits and retry middleware, DeepAgents human approval, LangGraph checkpoints, and the configured sandbox backend. `RunController` provides the outer deadline/cancellation boundary.
+Runtime guardrails reuse framework primitives where available: LangChain model/tool call limits and retry middleware, DeepAgents human approval, LangGraph checkpoints, and the configured sandbox backend. `RunController` provides the outer deadline/cancellation boundary. The core runtime is business-neutral; the backend explicitly composes its Spaces and CopilotKit extensions.
 
 ## Sandbox
 

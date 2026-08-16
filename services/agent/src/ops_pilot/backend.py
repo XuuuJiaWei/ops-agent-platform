@@ -12,12 +12,15 @@ from fastapi import FastAPI
 from ops_pilot.a2a.agent_card import build_agent_card
 from ops_pilot.a2a.executor import create_executor
 from ops_pilot.a2a.task_store import create_task_store
+from ops_pilot.agent.extensions import RuntimeExtensionFactory
 from ops_pilot.agent.manager import AgentRuntimeManager
 from ops_pilot.agent.runtime import build_agent_runtime
 from ops_pilot.agui.resilient import create_resilient_agui_agent
+from ops_pilot.agui.runtime import create_copilotkit_runtime_extension
 from ops_pilot.api.errors import register_exception_handlers
 from ops_pilot.config.settings import Settings, get_settings
 from ops_pilot.health.app import router as health_router
+from ops_pilot.spaces import SpacesRuntimeExtension, create_spaces_runtime_extension
 from ops_pilot.spaces.api import create_spaces_router
 from ops_pilot.spaces.resolver import CardResolver
 
@@ -27,6 +30,10 @@ logger = logging.getLogger("uvicorn.error")
 def create_backend_app(
     settings: Settings | None = None,
     runtime: Any | None = None,
+    runtime_extensions: tuple[RuntimeExtensionFactory, ...] = (
+        create_spaces_runtime_extension,
+        create_copilotkit_runtime_extension,
+    ),
 ) -> FastAPI:
     """Create the standard backend with AG-UI, A2A, and health routes."""
 
@@ -39,7 +46,11 @@ def create_backend_app(
     from copilotkit.langgraph import copilotkit_customize_config
 
     resolved_settings = settings or get_settings()
-    runtime_manager = AgentRuntimeManager(settings=resolved_settings, runtime=runtime)
+    runtime_manager = AgentRuntimeManager(
+        settings=resolved_settings,
+        runtime=runtime,
+        extensions=runtime_extensions if runtime is None else (),
+    )
 
     def _mount_protocol_routes(app: FastAPI, task_store: Any) -> None:
         agui_config = copilotkit_customize_config(
@@ -90,7 +101,9 @@ def create_backend_app(
         task_store_closer = None
         try:
             if runtime is None:
-                runtime_manager.attach_runtime(await build_agent_runtime(resolved_settings))
+                runtime_manager.attach_runtime(
+                    await build_agent_runtime(resolved_settings, extensions=runtime_extensions)
+                )
             mcp_status = runtime_manager.current.mcp.status
             server_summary = ", ".join(
                 f"{server.name}={'ok' if server.ok else 'failed'}({server.tool_count})" for server in mcp_status.servers
@@ -104,7 +117,7 @@ def create_backend_app(
             if resolved_settings.spaces_resolver_enabled and not getattr(app.state, "resolver_task", None):
                 rt = runtime_manager.current
                 resolver = CardResolver(
-                    repository=rt.spaces,
+                    repository=rt.extension(SpacesRuntimeExtension).repository,
                     tools_by_name={tool.name: tool for tool in rt.mcp.tools},
                     hitl_tools=frozenset(rt.mcp.hitl_tools),
                     poll_interval_s=resolved_settings.spaces_resolver_poll_seconds,
@@ -134,7 +147,9 @@ def create_backend_app(
     register_exception_handlers(app)
     app.state.agent_runtime_manager = runtime_manager
     app.include_router(health_router)
-    app.include_router(create_spaces_router(lambda: runtime_manager.current.spaces))
+    app.include_router(
+        create_spaces_router(lambda: runtime_manager.current.extension(SpacesRuntimeExtension).repository)
+    )
 
     @app.get("/status")
     async def runtime_status() -> dict[str, Any]:
