@@ -22,6 +22,12 @@ jobs:
         working-directory: services/agent
     env:
       OPS_PILOT_CONFIG: ../../config/config.example.yaml
+      # config.example.yaml intentionally contains deployment placeholders. CI
+      # only parses that config; these reserved/dummy values are never contacted.
+      OTEL_SHOOT_DOMAIN: example.invalid
+      MCP_BASIC_AUTH_HEADER: Basic ZHVtbXk6ZHVtbXk=
+      OTEL_BASIC_AUTH_USER: dummy
+      OTEL_BASIC_AUTH_PASSWORD: dummy
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "case_id": "replay-kafka-backlog",
+  "origin": "synthetic_seed",
+  "captured_at": "2026-08-16T00:00:00Z",
+  "tools": {
+    "search_traces": {
+      "status": "ok",
+      "window_minutes": 15,
+      "component": "kafka",
+      "consumer": "order processing",
+      "queue_depth_samples": [120, 244, 391, 588, 742, 871],
+      "consumer_processing_p95_seconds": 4.8,
+      "producer_p95_seconds": 0.09,
+      "evidence": "Queue depth grows throughout the window while consumer-side processing spans stretch to 4.8s p95; producer latency remains low."
+    },
+    "query": {
+      "status": "no_signal",
+      "summary": "The seed fixture keeps queue/backlog evidence in the trace replay for this case."
+    }
+  }
+}

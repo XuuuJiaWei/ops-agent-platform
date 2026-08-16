@@ -33,6 +33,8 @@ from ops_pilot.eval.graders import (
     pass_rate_wilson_lower,
     run_performance_metrics,
 )
+from ops_pilot.eval.replay import activate_replay_case, get_replay_tools, reset_replay_case
+from ops_pilot.eval.token_metrics import run_token_metrics, token_usage_metrics
 from ops_pilot.tools.smoke_tools import get_smoke_tools
 
 
@@ -111,7 +113,10 @@ async def run_eval(
         # regardless; connectivity only affects whether traces are uploaded.
         langfuse = get_client()
         items = [case.to_experiment_item() for case in cases]
-        item_evaluators = build_item_evaluators(resolved_settings, include_judge=True)
+        item_evaluators = [
+            *build_item_evaluators(resolved_settings, include_judge=True),
+            token_usage_metrics,
+        ]
 
         def execute_experiment() -> ExperimentResult:
             return langfuse.run_experiment(
@@ -131,6 +136,7 @@ async def run_eval(
                     infrastructure_error_rates,
                     category_pass_rates,
                     run_performance_metrics,
+                    run_token_metrics,
                 ],
                 max_concurrency=concurrency,
                 metadata=_run_metadata(runtime, dataset_name=dataset_name),
@@ -192,25 +198,36 @@ def _build_task(runtime: Any, *, run_name: str) -> Any:
                 "tool_calls": [],
                 "steps": 0,
                 "latency_s": 0.0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "total_tokens": 0,
+                "token_usage_available": False,
                 "error": None,
             }
 
         timeout_s = _timeout_s(metadata)
         started = time.perf_counter()
+        replay_token = None
         try:
-            trace = await runtime.ainvoke_trace(
-                input_text,
-                protocol="eval",
-                thread_id=f"eval-{case_id}",
-                run_id=f"{run_name}:{case_id}",
-                extra_metadata={
-                    "eval_case_id": case_id,
-                    "eval_category": metadata.get("category"),
-                    "eval_run_name": run_name,
-                    "eval_timeout_seconds": timeout_s,
-                },
-                deadline_seconds=timeout_s,
-            )
+            if metadata.get("source") == "replay":
+                replay_token = activate_replay_case(case_id)
+            try:
+                trace = await runtime.ainvoke_trace(
+                    input_text,
+                    protocol="eval",
+                    thread_id=f"eval-{case_id}",
+                    run_id=f"{run_name}:{case_id}",
+                    extra_metadata={
+                        "eval_case_id": case_id,
+                        "eval_category": metadata.get("category"),
+                        "eval_run_name": run_name,
+                        "eval_timeout_seconds": timeout_s,
+                    },
+                    deadline_seconds=timeout_s,
+                )
+            finally:
+                if replay_token is not None:
+                    reset_replay_case(replay_token)
             return trace.as_output()
         except Exception as exc:  # noqa: BLE001 - task errors are scored by no_error.
             error_type, error = _exception_details(exc)
@@ -219,6 +236,10 @@ def _build_task(runtime: Any, *, run_name: str) -> Any:
                 "tool_calls": [],
                 "steps": 0,
                 "latency_s": time.perf_counter() - started,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "total_tokens": 0,
+                "token_usage_available": False,
                 "error": error,
                 "error_type": error_type,
                 "recursion_limit_hit": _is_recursion_limit_exception(exc),
@@ -301,13 +322,24 @@ def _runtime_tool_names(runtime: Any) -> tuple[str, ...]:
 
 def _extra_tools_for_cases(cases: tuple[Any, ...]) -> tuple[Any, ...]:
     categories = {str(case.category) for case in cases}
-    if "smoke" not in categories:
-        return ()
-    if categories != {"smoke"}:
-        raise EvalDatasetError(
-            "Smoke cases must run from their own case file so local smoke tools are not exposed to other evals."
-        )
-    return tuple(get_smoke_tools())
+    sources = {str(case.source) for case in cases}
+
+    if "smoke" in categories:
+        if categories != {"smoke"}:
+            raise EvalDatasetError(
+                "Smoke cases must run from their own case file so local smoke tools are not exposed to other evals."
+            )
+        return tuple(get_smoke_tools())
+
+    if "replay" in sources:
+        if sources != {"replay"}:
+            raise EvalDatasetError(
+                "Replay cases must run separately so deterministic telemetry tools "
+                "are not exposed to live/static evals."
+            )
+        return tuple(get_replay_tools())
+
+    return ()
 
 
 def _run_metadata(runtime: Any, *, dataset_name: str) -> dict[str, Any]:
@@ -315,7 +347,7 @@ def _run_metadata(runtime: Any, *, dataset_name: str) -> dict[str, Any]:
     fingerprint = hashlib.sha256("\0".join(names).encode()).hexdigest()
     return {
         "runner": "ops_pilot.eval",
-        "evaluator_version": 2,
+        "evaluator_version": 3,
         "dataset_name": dataset_name,
         "toolset_size": len(names),
         "toolset_sha256": fingerprint,

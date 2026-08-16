@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "case_id": "replay-payment-charge-failure",
+  "origin": "synthetic_seed",
+  "captured_at": "2026-08-16T00:00:00Z",
+  "tools": {
+    "search_traces": {
+      "status": "ok",
+      "window_minutes": 15,
+      "service": "paymentservice",
+      "operation": "oteldemo.PaymentService/Charge",
+      "sampled_spans": 64,
+      "error_spans": 31,
+      "error_fraction": 0.484,
+      "dominant_error": "charge request returned error status",
+      "evidence": "31 of 64 sampled Charge spans are error spans; adjacent checkout spans point to paymentservice as the failing downstream dependency."
+    },
+    "query": {
+      "status": "no_signal",
+      "summary": "No replayed metric series is required for this trace-focused case."
+    }
+  }
+}

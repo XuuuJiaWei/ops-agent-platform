@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "case_id": "replay-ad-cpu-saturation",
+  "origin": "synthetic_seed",
+  "captured_at": "2026-08-16T00:00:00Z",
+  "tools": {
+    "search_traces": {
+      "status": "ok",
+      "summary": "Ad request spans are slower than baseline but do not show a corresponding downstream error spike."
+    },
+    "query": {
+      "status": "ok",
+      "service": "adservice",
+      "window_minutes": 15,
+      "metric": "process_cpu_usage",
+      "samples": [0.39, 0.52, 0.78, 0.94, 0.97],
+      "request_error_rate": 0.002,
+      "evidence": "CPU rises to sustained >0.9 utilization while request errors remain near baseline, consistent with resource saturation rather than application errors."
+    }
+  }
+}
