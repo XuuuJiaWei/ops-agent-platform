@@ -13,7 +13,7 @@ The core runtime consumes `RuntimeSpec` only. It must not load a profile file, i
 
 ## Configuration and lifecycle
 
-Use the entrypoint-scoped `RuntimeEnvironment` Pydantic Settings model for deployment values. It reads only `OPS_PILOT_<ENTRY>_*` capability-independent values; secrets that an SDK must read directly use documented global aliases. Keep capability selection in the Python entrypoint, never in YAML or a process-wide settings singleton.
+Use the entrypoint-scoped `RuntimeEnvironment` Pydantic Settings module to load `config/entries/<entry>.yaml`. Each YAML file declares only that entrypoint's non-sensitive runtime composition; `.env` supplies explicit credential aliases. Keep capability selection local to its entrypoint, never in a process-wide singleton.
 
 Use official SDK abstractions before hand-written adapters:
 

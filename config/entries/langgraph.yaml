@@ -1,0 +1,22 @@
+# The LangGraph Platform composition. Secrets belong in the repository .env.
+environment: local
+assistant_id: ops-pilot-langgraph
+
+model_provider: deepseek
+model_name: deepseek-v4-pro
+model_base_url: https://api.deepseek.com
+model_temperature: 0.0
+model_max_tokens: 16384
+model_timeout_seconds: 120
+model_reasoning_mode: adaptive
+model_reasoning_effort: medium
+
+open_sandbox_enabled: false
+reliability_enabled: true
+run_deadline_seconds: 600
+model_call_limit: 50
+tool_call_limit: 200
+
+kubeconfig: null
+jaeger_mcp_url: null
+prometheus_mcp_url: null

@@ -26,7 +26,7 @@ if (!supportedModes.has(mode)) {
 if (process.env.OPS_PILOT_DEV_ENV_READY !== "1") {
   assertWorkspace();
 }
-const devEnv = mode === "langgraph" ? { ...process.env } : resolveDevEnvironment();
+const devEnv = mode === "langgraph" ? { ...process.env } : resolveDevEnvironment(loadWebDevelopmentConfig());
 
 if (mode === "check") {
   console.log("Local development preflight passed.");
@@ -153,29 +153,56 @@ function assertWorkspace() {
   }
 }
 
-function resolveDevEnvironment() {
+function resolveDevEnvironment(webConfig) {
   if (process.env.OPS_PILOT_DEV_ENV_READY === "1") {
     return { ...process.env };
   }
 
-  const backendHost = process.env.OPS_PILOT_WEB_HOST || "127.0.0.1";
-  const backendPort = process.env.OPS_PILOT_WEB_PORT || "8123";
-  const chatPath = normalizePath(process.env.OPS_PILOT_WEB_CHAT_BASE_PATH || "/chat");
+  const backendHost = webConfig.backend_host;
+  const backendPort = String(webConfig.backend_port);
+  const chatPath = normalizePath(webConfig.chat_base_path);
   const backendUrl = `http://${backendHost}:${backendPort}`;
-  const assistantId = process.env.OPS_PILOT_WEB_ASSISTANT_ID || "agent";
+  const assistantId = webConfig.assistant_id;
 
   return {
     ...process.env,
-    COPILOTKIT_AGUI_AGENT_URL: process.env.COPILOTKIT_AGUI_AGENT_URL || `${backendUrl}${chatPath}`,
-    COPILOTKIT_AGENT_ID: process.env.COPILOTKIT_AGENT_ID || assistantId,
+    COPILOTKIT_AGUI_AGENT_URL: `${backendUrl}${chatPath}`,
+    COPILOTKIT_AGENT_ID: assistantId,
+    COPILOTKIT_BASE_PATH: normalizePath(webConfig.copilot_runtime_base_path),
+    COPILOTKIT_EVENT_STORE_BACKEND: webConfig.copilot_event_store_backend,
+    COPILOTKIT_EVENT_STORE_SETUP_ON_START: String(webConfig.copilot_event_store_setup_on_start),
+    COPILOT_RUNTIME_HOST: webConfig.copilot_runtime_host,
+    COPILOT_RUNTIME_PORT: String(webConfig.copilot_runtime_port),
     BACKEND_HOST: backendHost,
     BACKEND_PORT: backendPort,
     BACKEND_URL: backendUrl,
     CHAT_PATH: chatPath,
+    COPILOT_RUNTIME_URL: `http://${webConfig.copilot_runtime_host}:${webConfig.copilot_runtime_port}`,
+    WEB_PORT: String(webConfig.frontend_port),
     OPS_PILOT_DEV_ENV_READY: "1",
-    VITE_BACKEND_URL: process.env.VITE_BACKEND_URL || backendUrl,
-    VITE_ASSISTANT_ID: process.env.VITE_ASSISTANT_ID || assistantId,
+    VITE_BACKEND_URL: backendUrl,
+    VITE_ASSISTANT_ID: assistantId,
+    VITE_COPILOT_RUNTIME_URL: normalizePath(webConfig.copilot_runtime_base_path),
   };
+}
+
+function loadWebDevelopmentConfig() {
+  const result = spawnSync("uv", ["run", "ops_pilot", "web-development-config"], {
+    cwd: agentDir,
+    env: process.env,
+    encoding: "utf8",
+  });
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    throw new Error(`Unable to load config/entries/web.yaml:\n${result.stderr || result.stdout}`);
+  }
+  try {
+    return JSON.parse(result.stdout);
+  } catch (error) {
+    throw new Error(`web-development-config returned invalid JSON: ${error}`);
+  }
 }
 
 function normalizePath(value) {

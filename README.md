@@ -1,127 +1,96 @@
 # OpsPilot
 
-OpsPilot is an operations agent platform built around explicitly composed
-DeepAgents runtimes. There is no process-wide agent configuration: each host
-declares the model, MCP catalog, tools, policies, persistence, sandbox, and
-extensions it needs.
+OpsPilot composes one DeepAgents runtime per entrypoint. The runtime capability
+catalog is declarative and entry-local; credentials never belong in it.
 
 ```
-web entry          → web RuntimeSpec + Spaces + CopilotKit/AG-UI adapter
-eval entry         → eval RuntimeSpec only
-benchmark entry    → AIOpsLab RuntimeSpec only
-LangGraph entry    → LangGraph RuntimeSpec only
+config/entries/web.yaml        → Web runtime + Spaces + CopilotKit/AG-UI
+config/entries/eval.yaml       → stateless evaluation runtime
+config/entries/benchmark.yaml  → isolated AIOpsLab runtime
+config/entries/langgraph.yaml  → LangGraph Platform runtime
+.env                           → model, database, MCP, sandbox, and tracing secrets
 ```
 
-The browser owns its CopilotKit declaration and frontend tools. The Node
-CopilotKit service is a protocol/event-journal adapter only; it does not select
-the business agent runtime. Backend-only credentials and MCP process details
-never reach the browser.
+The browser owns CopilotKit's frontend tool declarations. The Node bridge only
+adapts the Web runtime to CopilotKit; it does not choose models or tools.
 
-## Configure and run the web application
+## Configure once
 
-Secrets and deployment values live in `.env` (copy `.env.example`). Runtime
-choices use entry-specific environment variables, for example:
-
-```dotenv
-OPS_PILOT_WEB_MODEL_PROVIDER=openai
-OPS_PILOT_WEB_MODEL_NAME=gpt-4.1
-OPS_PILOT_WEB_KUBECONFIG=C:/Users/you/.kube/config
-OPS_PILOT_BENCHMARK_MODEL_PROVIDER=openai
-OPS_PILOT_BENCHMARK_MODEL_NAME=gpt-4.1
-OPS_PILOT_BENCHMARK_PROMETHEUS_MCP_URL=https://prometheus.example/mcp
-MODEL_API_KEY=...
-```
-
-Inspect the declared combinations without initializing a model:
-
-```bash
-cd services/agent
-uv run ops_pilot profiles
-```
-
-Install once:
-
-```bash
+```powershell
 pnpm install
-cd services/agent && uv sync
-cd ../..
-copy .env.example .env
-copy apps/web/.env.example apps/web/.env
-copy apps/copilot-runtime/.env.example apps/copilot-runtime/.env
+cd services/agent; uv sync; cd ../..
+Copy-Item .env.example .env
 ```
 
-Set the Web entry's model and optional MCP catalog in the repository `.env`.
-For example:
+Choose models, MCP endpoints, ports, persistence, and feature flags by editing
+the relevant file under `config/entries/`. For example, the default Web entry
+is in [config/entries/web.yaml](config/entries/web.yaml):
+
+```yaml
+model_provider: deepseek
+model_name: deepseek-v4-pro
+model_base_url: https://api.deepseek.com
+port: 8123
+frontend_port: 3000
+```
+
+Put only secrets in `.env`:
 
 ```dotenv
-OPS_PILOT_WEB_MODEL_PROVIDER=openai
-OPS_PILOT_WEB_MODEL_NAME=gpt-4.1
 MODEL_API_KEY=...
+DATABASE_URL=...                 # only for a YAML entry using postgres
+MCP_BASIC_AUTH_HEADER=...         # only for authenticated MCP endpoints
+OPEN_SANDBOX_API_KEY=...          # only for an enabled sandbox
 ```
 
-Start the complete local application:
+## Start the local Web stack
 
-```bash
-# Vite: http://127.0.0.1:3000
-# FastAPI/AG-UI: http://127.0.0.1:8123
-# CopilotKit bridge: http://127.0.0.1:4001
+```powershell
 pnpm dev
+```
 
-# Or start one process at a time.
+The command reads `config/entries/web.yaml` and starts Vite, FastAPI/AG-UI, and
+the CopilotKit bridge with one consistent host, port, agent id, and transport
+configuration. Start processes separately only when diagnosing one layer:
+
+```powershell
 pnpm run dev:backend
 pnpm run dev:copilot
 pnpm run dev:web
 ```
 
-`scripts/dev.mjs` reads the repository `.env` before deriving the three
-processes' host, port, agent id, and bridge URL. Override the defaults with
-`OPS_PILOT_WEB_HOST`, `OPS_PILOT_WEB_PORT`, and
-`OPS_PILOT_WEB_CHAT_BASE_PATH` in that file.
-
 ## Run AIOpsLab benchmarks
 
-Bootstrap AIOpsLab once. The setup script clones the official repository with
-submodules, writes its `aiopslab/config.yml`, and verifies it as an ephemeral
-editable dependency; it does not alter the OpsPilot virtual environment.
+Bootstrap AIOpsLab once:
 
 ```powershell
 pnpm benchmark:setup
 ```
 
-Then add this isolated benchmark configuration to the repository `.env`:
+Then edit [config/entries/benchmark.yaml](config/entries/benchmark.yaml):
 
-```dotenv
-OPS_PILOT_AIOPSLAB_DIR=D:/dev/projects/AIOpsLab
-OPS_PILOT_BENCHMARK_MODEL_PROVIDER=openai
-OPS_PILOT_BENCHMARK_MODEL_NAME=gpt-4.1
-MODEL_API_KEY=...
-
-# Optional: allow the benchmark runtime's explicit Kubernetes MCP declaration.
-OPS_PILOT_BENCHMARK_KUBECONFIG=C:/Users/you/.kube/config
+```yaml
+aiopslab_dir: D:/dev/projects/AIOpsLab
+model_provider: deepseek
+model_name: deepseek-v4-pro
+model_base_url: https://api.deepseek.com
+kubeconfig: null
 ```
 
-Run a problem from the root:
+`MODEL_API_KEY` remains in `.env`. Run a problem with its fully isolated
+runtime:
 
-```bash
+```powershell
 pnpm benchmark:status
 pnpm benchmark -- --problem <aiopslab-problem-id> --max-steps 30
 pnpm benchmark -- --problem <aiopslab-problem-id> --results-dir ./artifacts/aiopslab
 ```
 
-The launcher uses `uv run --with-editable` for that one command, so the
-benchmark package and its dependencies remain separate from normal Web, eval,
-and development runtime environments.
+The launcher layers the editable AIOpsLab checkout only into this one `uv run`
+command, leaving normal Web, eval, and development environments untouched.
 
 ## Validate
 
-```bash
-pnpm lint
-pnpm run format:check
-pnpm typecheck
-pnpm test
+```powershell
+pnpm check
 ```
-
-MCP transport behavior follows the official LangChain MCP adapter; runtime
-guardrails use DeepAgents/LangChain primitives; client tools use CopilotKit v2
-`useFrontendTool`. See the entrypoint modules under
-`services/agent/src/ops_pilot/entrypoints` for the concrete compositions.

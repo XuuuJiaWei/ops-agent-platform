@@ -1,0 +1,39 @@
+# The Web application composition. Secrets belong in the repository .env.
+environment: local
+assistant_id: agent
+
+model_provider: deepseek
+model_name: deepseek-v4-pro
+model_base_url: https://api.deepseek.com
+model_temperature: 0.0
+model_max_tokens: 16384
+model_timeout_seconds: 120
+model_reasoning_mode: adaptive
+model_reasoning_effort: medium
+
+persistence_backend: memory
+open_sandbox_enabled: false
+reliability_enabled: true
+run_deadline_seconds: 600
+model_call_limit: 50
+tool_call_limit: 200
+
+# Declare non-secret MCP endpoints or a kubeconfig path here when needed.
+kubeconfig: null
+jaeger_mcp_url: null
+prometheus_mcp_url: null
+
+host: 127.0.0.1
+port: 8123
+chat_base_path: /chat
+a2a_base_path: /a2a
+enable_spaces: true
+enable_a2a: true
+
+# Local web-stack transport settings; these are not browser secrets.
+frontend_port: 3000
+copilot_runtime_host: 127.0.0.1
+copilot_runtime_port: 4001
+copilot_runtime_base_path: /api/copilotkit
+copilot_event_store_backend: memory
+copilot_event_store_setup_on_start: true

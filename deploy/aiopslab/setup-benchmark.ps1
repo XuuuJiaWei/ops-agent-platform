@@ -70,11 +70,11 @@ try {
 }
 
 Write-Host ""
-Write-Host "AIOpsLab is ready. Add the following to $RepoRoot\.env:"
-Write-Host "  OPS_PILOT_AIOPSLAB_DIR=$AIOpsLabDir"
-Write-Host "  OPS_PILOT_BENCHMARK_MODEL_PROVIDER=<sap|openai|deepseek|anthropic|...>"
-Write-Host "  OPS_PILOT_BENCHMARK_MODEL_NAME=<tool-calling-model>"
-Write-Host "  MODEL_API_KEY=<required for non-SAP providers>"
-Write-Host "  OPS_PILOT_BENCHMARK_KUBECONFIG=<optional kubeconfig for Kubernetes MCP>"
+Write-Host "AIOpsLab is ready. Update $RepoRoot\config\entries\benchmark.yaml:"
+Write-Host "  aiopslab_dir: $AIOpsLabDir"
+Write-Host "  model_provider: <sap|openai|deepseek|anthropic|...>"
+Write-Host "  model_name: <tool-calling-model>"
+Write-Host "  kubeconfig: <optional read-only Kubernetes MCP path>"
+Write-Host "Keep MODEL_API_KEY (or SAP AICORE_* credentials) in $RepoRoot\.env."
 Write-Host ""
 Write-Host "Run: pnpm benchmark -- --problem <problem-id> --max-steps 30"

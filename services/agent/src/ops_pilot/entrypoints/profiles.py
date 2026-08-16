@@ -1,8 +1,4 @@
-"""Small, reusable building blocks for explicit runtime profiles.
-
-The helpers only resolve values named by the calling entrypoint.  They never
-read a profile file and never choose capabilities on the host's behalf.
-"""
+"""Small, reusable builders over one already-loaded entrypoint configuration."""
 
 from __future__ import annotations
 

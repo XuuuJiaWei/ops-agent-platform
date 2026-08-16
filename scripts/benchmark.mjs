@@ -11,11 +11,9 @@ const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const agentDir = join(rootDir, "services", "agent");
 
 loadRootEnvironment();
-const aiopsLabDir = process.env.OPS_PILOT_AIOPSLAB_DIR?.trim();
+const aiopsLabDir = loadBenchmarkConfig().aiopslab_dir?.trim();
 if (!aiopsLabDir) {
-  throw new Error(
-    "OPS_PILOT_AIOPSLAB_DIR is required. Run `pnpm benchmark:setup` first, then set it in the repository .env.",
-  );
+  throw new Error("config/entries/benchmark.yaml requires aiopslab_dir. Run `pnpm benchmark:setup` first.");
 }
 if (!existsSync(aiopsLabDir)) {
   throw new Error(`OPS_PILOT_AIOPSLAB_DIR does not exist: ${aiopsLabDir}`);
@@ -35,5 +33,24 @@ function loadRootEnvironment() {
     if (error?.code !== "ENOENT") {
       throw error;
     }
+  }
+}
+
+function loadBenchmarkConfig() {
+  const result = spawnSync("uv", ["run", "ops_pilot", "benchmark-launch-config"], {
+    cwd: agentDir,
+    env: process.env,
+    encoding: "utf8",
+  });
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    throw new Error(`Unable to load config/entries/benchmark.yaml:\n${result.stderr || result.stdout}`);
+  }
+  try {
+    return JSON.parse(result.stdout);
+  } catch (error) {
+    throw new Error(`benchmark-launch-config returned invalid JSON: ${error}`);
   }
 }

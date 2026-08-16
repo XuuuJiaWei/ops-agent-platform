@@ -13,9 +13,9 @@ Runtime combinations live in `ops_pilot.entrypoints`:
   extensions.
 - `langgraph.py` owns the LangGraph Platform surface.
 
-Each entry reads only environment variables with its own prefix. For example,
-`OPS_PILOT_WEB_*` cannot alter the benchmark runtime, and
-`OPS_PILOT_BENCHMARK_*` cannot alter the web runtime.
+Each entry reads exactly one non-sensitive configuration file from
+`config/entries/<entry>.yaml`. `.env` supplies only explicit credential aliases
+such as `MODEL_API_KEY`, `DATABASE_URL`, and `MCP_BASIC_AUTH_HEADER`.
 
 ```bash
 uv run ops_pilot profiles
@@ -31,10 +31,9 @@ pnpm benchmark:setup
 pnpm benchmark -- --problem <problem-id> --max-steps 30
 ```
 
-The root launcher requires `OPS_PILOT_AIOPSLAB_DIR` and layers that editable
-AIOpsLab checkout over this project only for the benchmark process. Configure
-the benchmark runtime with `OPS_PILOT_BENCHMARK_*`; see the root `.env.example`
-for the full model, MCP, and optional persistence settings.
+The root launcher reads `aiopslab_dir` from `config/entries/benchmark.yaml` and
+layers that editable AIOpsLab checkout over this project only for the benchmark
+process. The same file declares its model, MCP, and optional persistence.
 
 The core runtime accepts model, MCP catalog, tools, middleware, sandbox,
 checkpointer, tracing, and lifecycle configuration from the entry-owned

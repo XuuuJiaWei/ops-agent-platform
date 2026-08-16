@@ -14,6 +14,7 @@ import uvicorn
 from ops_pilot.agent.runtime import build_agent_runtime
 from ops_pilot.benchmarks.aiopslab import run_aiopslab_problem
 from ops_pilot.entrypoints.benchmark import build_benchmark_runtime_spec
+from ops_pilot.entrypoints.environment import RuntimeEnvironment
 from ops_pilot.entrypoints.eval import build_eval_runtime_spec
 from ops_pilot.entrypoints.web import build_web_application_spec
 from ops_pilot.health.status import build_runtime_status, health_snapshot
@@ -27,6 +28,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ops_pilot")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("profiles", help="Print the declared runtime compositions.")
+    commands.add_parser("web-development-config", help=argparse.SUPPRESS)
+    commands.add_parser("benchmark-launch-config", help=argparse.SUPPRESS)
 
     status = commands.add_parser("status", help="Build one declared runtime and print status metadata.")
     status.add_argument("--entry", choices=("web", "eval", "benchmark"), default="web")
@@ -52,6 +55,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "profiles":
         print(json.dumps({name: _describe_spec(spec) for name, spec in _profiles().items()}, indent=2, sort_keys=True))
         return 0
+    if args.command == "web-development-config":
+        print(json.dumps(_web_development_config(), sort_keys=True))
+        return 0
+    if args.command == "benchmark-launch-config":
+        print(json.dumps({"aiopslab_dir": RuntimeEnvironment.for_entrypoint("benchmark").aiopslab_dir}))
+        return 0
     if args.command == "status":
         return asyncio.run(_print_status(_profiles()[args.entry]))
     if args.command == "health":
@@ -71,6 +80,23 @@ def _profiles() -> dict[str, RuntimeSpec]:
         "web": build_web_application_spec().runtime,
         "eval": build_eval_runtime_spec(),
         "benchmark": build_benchmark_runtime_spec(),
+    }
+
+
+def _web_development_config() -> dict[str, object]:
+    application = build_web_application_spec()
+    environment = RuntimeEnvironment.for_entrypoint("web")
+    return {
+        "assistant_id": application.runtime.assistant_id,
+        "backend_host": application.host,
+        "backend_port": application.port,
+        "chat_base_path": application.chat_base_path,
+        "frontend_port": environment.frontend_port,
+        "copilot_runtime_host": environment.copilot_runtime_host,
+        "copilot_runtime_port": environment.copilot_runtime_port,
+        "copilot_runtime_base_path": environment.copilot_runtime_base_path,
+        "copilot_event_store_backend": environment.copilot_event_store_backend,
+        "copilot_event_store_setup_on_start": environment.copilot_event_store_setup_on_start,
     }
 
 

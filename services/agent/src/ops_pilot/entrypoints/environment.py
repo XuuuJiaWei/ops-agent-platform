@@ -1,31 +1,69 @@
-"""Validated, entrypoint-scoped deployment settings."""
+"""Entrypoint-local runtime configuration and environment-only secrets."""
 
 from __future__ import annotations
 
 from dotenv import load_dotenv
 from pydantic import AliasChoices, Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+    YamlConfigSettingsSource,
+)
 
 from ops_pilot.config.paths import REPO_ROOT
 from ops_pilot.runtime.spec import ModelProvider, PersistenceBackend, ReasoningEffort, ReasoningMode, SandboxScope
 
+ENTRYPOINT_CONFIG_DIR = REPO_ROOT / "config" / "entries"
+_SECRET_FIELD_NAMES = frozenset(
+    {
+        "model_api_key",
+        "langfuse_public_key",
+        "langfuse_secret_key",
+        "database_url",
+        "open_sandbox_api_key",
+        "mcp_basic_auth_header",
+    }
+)
+_SHARED_MODEL_CONFIG = {
+    "env_file": REPO_ROOT / ".env",
+    "env_file_encoding": "utf-8",
+    "env_ignore_empty": True,
+    "env_prefix": "OPS_PILOT_SECRET_",
+    # The shared .env also contains credentials consumed directly by SAP and
+    # deployment tooling. This settings model intentionally selects only its
+    # explicit aliases from that file.
+    "extra": "ignore",
+    "frozen": True,
+    "yaml_file_encoding": "utf-8",
+}
+
+
+class _EntrypointYamlSource(YamlConfigSettingsSource):
+    """Reject credentials in a declarative runtime composition file."""
+
+    def __call__(self) -> dict[str, object]:
+        values = super().__call__()
+        unknown_fields = set(values).difference(self.settings_cls.model_fields)
+        if unknown_fields:
+            names = ", ".join(sorted(unknown_fields))
+            raise ValueError(f"Unknown entrypoint YAML fields: {names}")
+        declared_secrets = _SECRET_FIELD_NAMES.intersection(values)
+        if declared_secrets:
+            names = ", ".join(sorted(declared_secrets))
+            raise ValueError(f"Secrets must be supplied through .env, not an entrypoint YAML file: {names}")
+        return values
+
 
 class RuntimeEnvironment(BaseSettings):
-    """One entrypoint's typed deployment values, never a capability catalog.
+    """Validated values for one runtime composition.
 
-    ``for_entrypoint`` assigns an environment prefix such as
-    ``OPS_PILOT_WEB_``.  Runtime capabilities remain declared by the matching
-    Python entrypoint; this model only validates values that deployment passes
-    to that entrypoint.
+    Non-sensitive values come from one entrypoint YAML file.  Credentials use
+    explicit aliases in `.env`; no `OPS_PILOT_<ENTRY>_*` environment variable
+    can select models, tools, MCP servers, or other runtime capabilities.
     """
 
-    model_config = SettingsConfigDict(
-        env_file=REPO_ROOT / ".env",
-        env_file_encoding="utf-8",
-        env_ignore_empty=True,
-        extra="ignore",
-        frozen=True,
-    )
+    model_config = SettingsConfigDict(**_SHARED_MODEL_CONFIG, yaml_file=None)
 
     model_provider: ModelProvider = "sap"
     model_name: str = "anthropic--claude-4.6-sonnet"
@@ -67,7 +105,7 @@ class RuntimeEnvironment(BaseSettings):
     kubeconfig: str | None = None
     jaeger_mcp_url: str | None = None
     prometheus_mcp_url: str | None = None
-    mcp_basic_auth_header: str | None = None
+    mcp_basic_auth_header: str | None = Field(default=None, validation_alias=AliasChoices("MCP_BASIC_AUTH_HEADER"))
 
     host: str = "127.0.0.1"
     port: int = 8123
@@ -75,13 +113,58 @@ class RuntimeEnvironment(BaseSettings):
     a2a_base_path: str = "/a2a"
     enable_spaces: bool = True
     enable_a2a: bool = True
+    frontend_port: int = 3000
+    copilot_runtime_host: str = "127.0.0.1"
+    copilot_runtime_port: int = 4001
+    copilot_runtime_base_path: str = "/api/copilotkit"
+    copilot_event_store_backend: PersistenceBackend = "memory"
+    copilot_event_store_setup_on_start: bool = True
+
+    aiopslab_dir: str | None = None
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            _EntrypointYamlSource(settings_cls),
+            file_secret_settings,
+        )
 
     @classmethod
     def for_entrypoint(cls, name: str) -> RuntimeEnvironment:
-        """Read the process environment for exactly one named host."""
+        """Load one named composition from `config/entries/<name>.yaml`."""
 
-        # Pydantic Settings reads this file for this model. Loading it into the
-        # process as well is intentional: SAP's official SDK reads its own
-        # AICORE_* variables directly from the process environment.
         load_dotenv(REPO_ROOT / ".env", override=False)
-        return cls(_env_prefix=f"OPS_PILOT_{name.upper()}_")  # type: ignore[reportCallIssue]
+        try:
+            environment_type = _ENTRYPOINT_ENVIRONMENTS[name]
+        except KeyError as exc:
+            known = ", ".join(sorted(_ENTRYPOINT_ENVIRONMENTS))
+            raise ValueError(f"Unknown runtime entrypoint {name!r}. Expected one of: {known}.") from exc
+        return environment_type()
+
+
+def _entrypoint_environment(name: str) -> type[RuntimeEnvironment]:
+    return type(
+        f"{name.title()}RuntimeEnvironment",
+        (RuntimeEnvironment,),
+        {
+            "model_config": SettingsConfigDict(
+                **_SHARED_MODEL_CONFIG,
+                yaml_file=ENTRYPOINT_CONFIG_DIR / f"{name}.yaml",
+            )
+        },
+    )
+
+
+_ENTRYPOINT_ENVIRONMENTS: dict[str, type[RuntimeEnvironment]] = {
+    name: _entrypoint_environment(name) for name in ("web", "eval", "benchmark", "langgraph")
+}
