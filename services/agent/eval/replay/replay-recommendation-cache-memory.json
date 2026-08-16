@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "case_id": "replay-recommendation-cache-memory",
+  "origin": "synthetic_seed",
+  "captured_at": "2026-08-16T00:00:00Z",
+  "tools": {
+    "search_traces": {
+      "status": "ok",
+      "summary": "Recommendation request latency rises gradually; no dominant downstream error span is present."
+    },
+    "query": {
+      "status": "ok",
+      "service": "recommendationservice",
+      "window_minutes": 25,
+      "metric": "process_resident_memory_bytes",
+      "memory_mib": [220, 305, 418, 566, 731, 842],
+      "cache_entries": [4100, 6900, 10800, 16200, 23700, 30100],
+      "evidence": "Resident memory and cache-entry count rise together throughout the window without returning toward baseline."
+    }
+  }
+}
