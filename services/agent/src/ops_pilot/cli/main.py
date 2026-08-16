@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import json
 from dataclasses import replace
+from pathlib import Path
 from typing import Any, cast
 
 import uvicorn
@@ -43,6 +44,9 @@ def main(argv: list[str] | None = None) -> int:
     benchmark = commands.add_parser("benchmark", help="Run the isolated AIOpsLab composition.")
     benchmark.add_argument("--problem", required=True, help="AIOpsLab problem id.")
     benchmark.add_argument("--max-steps", type=int, default=30)
+    benchmark.add_argument(
+        "--results-dir", type=Path, default=None, help="Optional directory for AIOpsLab result files."
+    )
 
     args = parser.parse_args(argv)
     if args.command == "profiles":
@@ -112,7 +116,7 @@ def _serve_web(host: str | None, port: int | None) -> int:
 
 
 async def _run_benchmark(args: argparse.Namespace) -> int:
-    result = await run_aiopslab_problem(args.problem, max_steps=args.max_steps)
+    result = await run_aiopslab_problem(args.problem, max_steps=args.max_steps, results_dir=args.results_dir)
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 

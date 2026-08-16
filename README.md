@@ -17,7 +17,7 @@ CopilotKit service is a protocol/event-journal adapter only; it does not select
 the business agent runtime. Backend-only credentials and MCP process details
 never reach the browser.
 
-## Configure an entry
+## Configure and run the web application
 
 Secrets and deployment values live in `.env` (copy `.env.example`). Runtime
 choices use entry-specific environment variables, for example:
@@ -39,24 +39,78 @@ cd services/agent
 uv run ops_pilot profiles
 ```
 
-## Run
+Install once:
 
 ```bash
 pnpm install
 cd services/agent && uv sync
+cd ../..
+copy .env.example .env
+copy apps/web/.env.example apps/web/.env
+copy apps/copilot-runtime/.env.example apps/copilot-runtime/.env
+```
 
-# web, backend and CopilotKit protocol adapter
+Set the Web entry's model and optional MCP catalog in the repository `.env`.
+For example:
+
+```dotenv
+OPS_PILOT_WEB_MODEL_PROVIDER=openai
+OPS_PILOT_WEB_MODEL_NAME=gpt-4.1
+MODEL_API_KEY=...
+```
+
+Start the complete local application:
+
+```bash
+# Vite: http://127.0.0.1:3000
+# FastAPI/AG-UI: http://127.0.0.1:8123
+# CopilotKit bridge: http://127.0.0.1:4001
 pnpm dev
 
-# one entrypoint at a time
-pnpm run dev:web
+# Or start one process at a time.
 pnpm run dev:backend
 pnpm run dev:copilot
-
-# the isolated benchmark composition
-cd services/agent
-uv run ops_pilot benchmark --problem <aiopslab-problem-id>
+pnpm run dev:web
 ```
+
+`scripts/dev.mjs` reads the repository `.env` before deriving the three
+processes' host, port, agent id, and bridge URL. Override the defaults with
+`OPS_PILOT_WEB_HOST`, `OPS_PILOT_WEB_PORT`, and
+`OPS_PILOT_WEB_CHAT_BASE_PATH` in that file.
+
+## Run AIOpsLab benchmarks
+
+Bootstrap AIOpsLab once. The setup script clones the official repository with
+submodules, writes its `aiopslab/config.yml`, and verifies it as an ephemeral
+editable dependency; it does not alter the OpsPilot virtual environment.
+
+```powershell
+pnpm benchmark:setup
+```
+
+Then add this isolated benchmark configuration to the repository `.env`:
+
+```dotenv
+OPS_PILOT_AIOPSLAB_DIR=D:/dev/projects/AIOpsLab
+OPS_PILOT_BENCHMARK_MODEL_PROVIDER=openai
+OPS_PILOT_BENCHMARK_MODEL_NAME=gpt-4.1
+MODEL_API_KEY=...
+
+# Optional: allow the benchmark runtime's explicit Kubernetes MCP declaration.
+OPS_PILOT_BENCHMARK_KUBECONFIG=C:/Users/you/.kube/config
+```
+
+Run a problem from the root:
+
+```bash
+pnpm benchmark:status
+pnpm benchmark -- --problem <aiopslab-problem-id> --max-steps 30
+pnpm benchmark -- --problem <aiopslab-problem-id> --results-dir ./artifacts/aiopslab
+```
+
+The launcher uses `uv run --with-editable` for that one command, so the
+benchmark package and its dependencies remain separate from normal Web, eval,
+and development runtime environments.
 
 ## Validate
 

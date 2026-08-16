@@ -16,6 +16,8 @@ const webDir = join(rootDir, "apps", "web");
 const mode = process.argv[2] ?? "all";
 const supportedModes = new Set(["all", "backend", "check", "copilot", "langgraph", "web"]);
 
+loadRootEnvironment();
+
 if (!supportedModes.has(mode)) {
   console.error(`Unknown dev mode '${mode}'. Expected one of: ${[...supportedModes].join(", ")}.`);
   process.exit(2);
@@ -203,6 +205,16 @@ async function waitForBackends(env, signal) {
     },
   );
   await waitForUrl("Backend", healthUrl, timeoutSeconds, signal);
+}
+
+function loadRootEnvironment() {
+  try {
+    process.loadEnvFile(join(rootDir, ".env"));
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      throw error;
+    }
+  }
 }
 
 async function waitForUrl(label, url, timeoutSeconds, shutdownSignal, options = {}) {

@@ -1,155 +1,80 @@
-# One-click restore of the AIOpsLab benchmark environment (idempotent).
+# Bootstrap a local AIOpsLab checkout for OpsPilot benchmark runs.
 #
-# What it does:
-#   1. Ensures helm / kubectl / git / uv / node are available (installs helm
-#      via winget when missing).
-#   2. Ensures Python 3.12 (uv) and the AIOpsLab checkout + venv + deps.
-#   3. Writes aiopslab/config.yml with k8s_host: localhost.
-#   4. Creates the injection-plane admin ServiceAccount + static kubeconfig
-#      (the Kubernetes Python client cannot use the gardenlogin exec plugin).
-#   5. Creates the astronomy-shop namespace + read-only observer RBAC and
-#      generates the observer kubeconfig for the agent's Kubernetes MCP.
-#   6. Prints the benchmark entrypoint variables and launch commands.
+# This script follows AIOpsLab's official editable-install workflow, but keeps
+# the checkout outside the OpsPilot virtual environment. `pnpm benchmark`
+# layers it into a one-command uv environment with --with-editable.
 #
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File deploy/aiopslab/setup-benchmark.ps1
 
 param(
     [string]$AIOpsLabDir = "D:\dev\projects\AIOpsLab",
-    [string]$AdminKubeconfig = "",
-    [string]$ObserverKubeconfig = ""
+    [ValidateSet("localhost", "kind")]
+    [string]$KubernetesHost = "localhost"
 )
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
-if (-not $AdminKubeconfig) { $AdminKubeconfig = Join-Path $AIOpsLabDir "aiopslab-admin.kubeconfig" }
-if (-not $ObserverKubeconfig) { $ObserverKubeconfig = Join-Path $HOME ".kube\ops-pilot-observer.kubeconfig" }
-
-function Refresh-Path {
-    $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
-    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-    $env:Path = "$machinePath;$userPath"
-}
+$AgentDir = Join-Path $RepoRoot "services\agent"
 
 function Assert-Command {
     param([string]$Name, [string]$Hint)
+
     if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
         throw "$Name not found on PATH. $Hint"
     }
 }
 
-function Invoke-Kubectl {
-    param([string[]]$Arguments)
-    & kubectl @Arguments
+function Invoke-Checked {
+    param([string]$FilePath, [string[]]$Arguments)
+
+    & $FilePath @Arguments
     if ($LASTEXITCODE -ne 0) {
-        throw "kubectl $($Arguments -join ' ') failed with exit code $LASTEXITCODE"
+        throw "$FilePath $($Arguments -join ' ') failed with exit code $LASTEXITCODE"
     }
 }
 
-function New-AdminToken {
-    for ($attempt = 1; $attempt -le 3; $attempt++) {
-        $token = & kubectl @("create", "token", "aiopslab-admin", "-n", "kube-system", "--duration=24h")
-        if ($LASTEXITCODE -eq 0 -and $token) {
-            return ($token | Select-Object -Last 1).Trim()
-        }
-        Write-Warning "kubectl create token failed (attempt $attempt/3); retrying..."
-        Start-Sleep -Seconds 5
-    }
-    throw "kubectl create token failed after 3 attempts"
-}
-
-Write-Host "==> 1. Toolchain (helm / kubectl / git / uv / node)"
-Refresh-Path
-if (-not (Get-Command helm -ErrorAction SilentlyContinue)) {
-    Write-Host "Installing helm via winget..."
-    winget install Helm.Helm --silent --accept-package-agreements --accept-source-agreements | Out-Null
-    Refresh-Path
-}
-Assert-Command helm "Install it with: winget install Helm.Helm"
-Assert-Command kubectl "Point kubectl at the shoot (kubectl config use-context ...)."
 Assert-Command git "Install Git for Windows."
-Assert-Command uv "Install uv (https://docs.astral.sh/uv/)."
-Assert-Command npx "Install Node.js (required by the kubernetes MCP server)."
+Assert-Command helm "Install it with: winget install Helm.Helm"
+Assert-Command kubectl "Install kubectl and select the target cluster context."
+Assert-Command uv "Install uv from https://docs.astral.sh/uv/."
 
-Write-Host "Current kubectl context: $(kubectl config current-context)"
+Write-Host "Current kubectl context:"
+Invoke-Checked kubectl @("config", "current-context")
 
-Write-Host "==> 2. Python 3.12 (uv)"
-uv python install 3.12 | Out-Null
-
-Write-Host "==> 3. AIOpsLab checkout + venv"
 if (-not (Test-Path (Join-Path $AIOpsLabDir ".git"))) {
-    git clone --depth 1 https://github.com/microsoft/AIOpsLab $AIOpsLabDir
+    Write-Host "Cloning AIOpsLab with submodules into $AIOpsLabDir ..."
+    Invoke-Checked git @("clone", "--recurse-submodules", "https://github.com/microsoft/AIOpsLab", $AIOpsLabDir)
 }
-Push-Location $AIOpsLabDir
+
+$AIOpsLabConfig = Join-Path $AIOpsLabDir "aiopslab\config.yml"
+if (-not (Test-Path $AIOpsLabConfig)) {
+    Copy-Item (Join-Path $AIOpsLabDir "aiopslab\config.yml.example") $AIOpsLabConfig
+}
+$config = Get-Content $AIOpsLabConfig -Raw
+if ($config -match "(?m)^k8s_host:\s*") {
+    $config = $config -replace "(?m)^k8s_host:\s*.*$", "k8s_host: $KubernetesHost"
+} else {
+    $config += "`nk8s_host: $KubernetesHost`n"
+}
+Set-Content -Path $AIOpsLabConfig -Value $config -Encoding utf8
+
+Push-Location $AgentDir
 try {
-    if (-not (Test-Path ".venv\Scripts\python.exe")) {
-        uv venv --python 3.12
-    }
-    uv pip install -e . | Out-Null
-    uv pip install uvicorn | Out-Null
+    Invoke-Checked uv @("sync")
+    # This validates the exact ephemeral dependency mechanism used by
+    # `pnpm benchmark`; it does not install AIOpsLab into .venv.
+    Invoke-Checked uv @("run", "--with-editable", $AIOpsLabDir, "python", "-c", "import aiopslab; print(aiopslab.__file__)")
 } finally {
     Pop-Location
 }
 
-Write-Host "==> 4. aiopslab/config.yml (k8s_host: localhost)"
-$cfgPath = Join-Path $AIOpsLabDir "aiopslab\config.yml"
-if (-not (Test-Path $cfgPath)) {
-    Copy-Item (Join-Path $AIOpsLabDir "aiopslab\config.yml.example") $cfgPath
-}
-$cfg = Get-Content $cfgPath -Raw
-$cfg = $cfg -replace "k8s_host: control_node_hostname.*", "k8s_host: localhost"
-Set-Content -Path $cfgPath -Value $cfg -Encoding utf8
-
-Write-Host "==> 5. Injection-plane admin kubeconfig"
-kubectl create serviceaccount aiopslab-admin -n kube-system --dry-run=client -o yaml | kubectl apply -f - | Out-Null
-kubectl create clusterrolebinding aiopslab-admin --clusterrole=cluster-admin --serviceaccount=kube-system:aiopslab-admin --dry-run=client -o yaml | kubectl apply -f - | Out-Null
-$token = New-AdminToken
-$server = (Invoke-Kubectl @("config", "view", "--raw", "--minify", "-o", "jsonpath={.clusters[0].cluster.server}")).Trim()
-$caData = (Invoke-Kubectl @("config", "view", "--raw", "--minify", "-o", "jsonpath={.clusters[0].cluster.certificate-authority-data}")).Trim()
-if (-not $caData) {
-    $caFile = (Invoke-Kubectl @("config", "view", "--raw", "--minify", "-o", "jsonpath={.clusters[0].cluster.certificate-authority}")).Trim()
-    if ($caFile) { $caData = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path $caFile))) }
-}
-$cluster = @{ server = $server }
-if ($caData) { $cluster["certificate-authority-data"] = $caData } else { $cluster["insecure-skip-tls-verify"] = $true }
-$kubeconfig = [ordered]@{
-    apiVersion = "v1"
-    kind = "Config"
-    clusters = @(@{ name = "aiopslab-admin"; cluster = $cluster })
-    contexts = @(@{ name = "aiopslab-admin"; context = @{ cluster = "aiopslab-admin"; user = "aiopslab-admin" } })
-    "current-context" = "aiopslab-admin"
-    users = @(@{ name = "aiopslab-admin"; user = @{ token = $token } })
-}
-$kubeconfig | ConvertTo-Json -Depth 6 | Set-Content -Path $AdminKubeconfig -Encoding utf8
-Write-Host "Admin kubeconfig: $AdminKubeconfig"
-
-Write-Host "==> 6. Observer RBAC + kubeconfig (agent's read-only identity)"
-kubectl create namespace astronomy-shop --dry-run=client -o yaml | kubectl apply -f - | Out-Null
-$observerScript = Join-Path $RepoRoot "benchmarks\aiopslab_bridge\rbac\create-observer-kubeconfig.ps1"
-if (-not (Test-Path $observerScript)) {
-    throw "Observer kubeconfig script not found: $observerScript"
-}
-powershell -NoProfile -ExecutionPolicy Bypass -File $observerScript -OutFile $ObserverKubeconfig
-Write-Host "Observer kubeconfig: $ObserverKubeconfig"
-
-Write-Host "==> 7. OpsPilot benchmark entrypoint"
-Write-Host "Add these non-secret values to the repository .env (or set them in Terminal B):"
-Write-Host "  OPS_PILOT_BENCHMARK_KUBECONFIG=$ObserverKubeconfig"
-Write-Host "  OPS_PILOT_BENCHMARK_MODEL_PROVIDER=<sap|openai|deepseek|...>"
+Write-Host ""
+Write-Host "AIOpsLab is ready. Add the following to $RepoRoot\.env:"
+Write-Host "  OPS_PILOT_AIOPSLAB_DIR=$AIOpsLabDir"
+Write-Host "  OPS_PILOT_BENCHMARK_MODEL_PROVIDER=<sap|openai|deepseek|anthropic|...>"
 Write-Host "  OPS_PILOT_BENCHMARK_MODEL_NAME=<tool-calling-model>"
-if (-not (Test-Path (Join-Path $RepoRoot ".env"))) {
-    Write-Warning ".env missing - copy .env.example and add MODEL_API_KEY (or AICORE_* credentials)."
-}
-
+Write-Host "  MODEL_API_KEY=<required for non-SAP providers>"
+Write-Host "  OPS_PILOT_BENCHMARK_KUBECONFIG=<optional kubeconfig for Kubernetes MCP>"
 Write-Host ""
-Write-Host "==> Done. Launch the benchmark:"
-Write-Host ""
-Write-Host "Terminal A (bridge, injection plane):"
-Write-Host "  cd $AIOpsLabDir"
-Write-Host "  `$env:KUBECONFIG = '$AdminKubeconfig'"
-Write-Host "  .venv\Scripts\python.exe $RepoRoot\benchmarks\aiopslab_bridge\app.py"
-Write-Host ""
-Write-Host "Terminal B (OpsPilot agent):"
-Write-Host "  cd $RepoRoot\services\agent"
-Write-Host "  `$env:OPS_PILOT_BENCHMARK_KUBECONFIG = '$ObserverKubeconfig'"
-Write-Host "  uv run ops_pilot benchmark --problem astronomy_shop_payment_pod_kill-localization-1"
+Write-Host "Run: pnpm benchmark -- --problem <problem-id> --max-steps 30"
