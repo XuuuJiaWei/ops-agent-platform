@@ -1,0 +1,25 @@
+services:
+  opensandbox-server:
+    image: opensandbox/server:latest
+    container_name: opensandbox-server
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./config.toml:/etc/opensandbox/config.toml:ro
+      - opensandbox-data:/var/lib/opensandbox
+    environment:
+      SANDBOX_CONFIG_PATH: /etc/opensandbox/config.toml
+      OPENSANDBOX_SERVER_API_KEY: ${OPEN_SANDBOX_API_KEY:?OPEN_SANDBOX_API_KEY must be set in the project .env}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - opensandbox-net
+
+networks:
+  opensandbox-net:
+    driver: bridge
+
+volumes:
+  opensandbox-data:
