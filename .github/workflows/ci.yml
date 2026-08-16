@@ -22,6 +22,9 @@ jobs:
         working-directory: services/agent
     env:
       OPS_PILOT_CONFIG: ../../config/config.example.yaml
+      # config.example.yaml intentionally requires a sandbox domain. CI does not
+      # contact OpenSandbox, so use a reserved non-routable domain for config parsing.
+      OTEL_SHOOT_DOMAIN: example.invalid
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
