@@ -31,7 +31,13 @@ function addDefaultArtifact(commandArgs) {
     return;
   }
   const taskIndex = runnerArgs.indexOf("--task");
-  const requestedScope = taskIndex >= 0 ? runnerArgs[taskIndex + 1] : "suite";
+  const tasksIndex = runnerArgs.indexOf("--tasks");
+  const requestedScope =
+    taskIndex >= 0
+      ? runnerArgs[taskIndex + 1]
+      : tasksIndex >= 0
+        ? "subset"
+        : "suite";
   const scope = String(requestedScope || "suite").replaceAll(/[^a-zA-Z0-9._-]/g, "_");
   const timestamp = new Date().toISOString().replaceAll(":", "-").replace(".", "-");
   const output = join(rootDir, "artifacts", "rca100", `${timestamp}-${scope}.json`);

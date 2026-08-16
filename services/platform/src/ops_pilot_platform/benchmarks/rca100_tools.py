@@ -1,6 +1,7 @@
 """Read-only observability tools contributed by the RCA100 benchmark host."""
 
 import json
+import math
 from collections import Counter, defaultdict, deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -176,7 +177,13 @@ def query_metric(
         filter=expression,
     )
     latest_by_series: dict[tuple[str, ...], dict[str, Any]] = {}
+    invalid_samples = 0
     for row in table.to_pylist():
+        value = _finite_float(row.get("value"))
+        if row.get("time") is None or value is None:
+            invalid_samples += 1
+            continue
+        row["value"] = value
         key = tuple(
             str(row.get(field) or "") for field in ("domain", "entity_set", "entity_id", "entity_name", "service")
         )
@@ -210,6 +217,8 @@ def query_metric(
             "lookback_seconds": lookback_seconds,
             "returned_series": len(result),
             "total_series": len(latest_by_series),
+            "valid_samples": table.num_rows - invalid_samples,
+            "invalid_samples": invalid_samples,
             "limit": limit,
             "truncated": len(latest_by_series) > limit,
             "filters": _present(
@@ -223,6 +232,7 @@ def query_metric(
         empty_message=(
             "No sample exists at or before this time within lookback_seconds. Change one selector or lookback."
         ),
+        warnings=_invalid_metric_warnings(invalid_samples),
     )
 
 
@@ -241,7 +251,8 @@ def query_metric_range(
 ) -> str:
     """Explore one metric over a range and return compact Prometheus-style matrix series."""
 
-    _validate_window(start_time, end_time)
+    if error := _window_validation_error(start_time, end_time):
+        return _error("invalid_time_window", error, meta={"time_range": _window(start_time, end_time)})
     dataset = _dataset(runtime, "metrics")
     expression = _and(
         _equals("metric", metric),
@@ -258,11 +269,16 @@ def query_metric_range(
     )
     groups: dict[tuple[str, ...], list[tuple[int, float]]] = defaultdict(list)
     labels: dict[tuple[str, ...], dict[str, str]] = {}
+    invalid_samples = 0
     for row in table.to_pylist():
+        value = _finite_float(row.get("value"))
+        if row.get("time") is None or value is None:
+            invalid_samples += 1
+            continue
         key = tuple(
             str(row.get(field) or "") for field in ("domain", "entity_set", "entity_id", "entity_name", "service")
         )
-        groups[key].append((int(row["time"]), float(row["value"])))
+        groups[key].append((int(row["time"]), value))
         labels[key] = {
             name: str(row[name])
             for name in ("domain", "entity_set", "entity_id", "entity_name", "service")
@@ -300,7 +316,8 @@ def query_metric_range(
             "source": "metrics",
             "returned_series": len(result),
             "total_series": len(groups),
-            "total_samples": table.num_rows,
+            "total_samples": table.num_rows - invalid_samples,
+            "invalid_samples": invalid_samples,
             "limit": limit,
             "sample_limit": sample_limit,
             "truncated": len(groups) > limit or samples_were_reduced,
@@ -314,6 +331,7 @@ def query_metric_range(
             ),
         },
         empty_message="No samples matched this valid query. Use list_metric_names or change one selector/time range.",
+        warnings=_invalid_metric_warnings(invalid_samples),
     )
 
 
@@ -328,7 +346,8 @@ def query_log_stats(
 ) -> str:
     """Count matching log streams before retrieving lines, following Grafana Loki's low-cost stats pattern."""
 
-    _validate_window(start_time, end_time)
+    if error := _window_validation_error(start_time, end_time):
+        return _error("invalid_time_window", error, meta={"time_range": _window(start_time, end_time)})
     stats, matching_lines, truncated = _aggregate_log_stats(
         runtime,
         start_time,
@@ -374,7 +393,8 @@ def query_logs(
 ) -> str:
     """Return bounded application log lines; use query_log_stats first to avoid empty-stream searches."""
 
-    _validate_window(start_time, end_time)
+    if error := _window_validation_error(start_time, end_time):
+        return _error("invalid_time_window", error, meta={"time_range": _window(start_time, end_time)})
     dataset = _dataset(runtime, "logs")
     expression = _log_expression(start_time, end_time, pod_name, namespace)
     rows, truncated = _scan_rows(
@@ -432,7 +452,8 @@ def query_traces(
 ) -> str:
     """Search bounded trace spans; pass a returned trace_id to retrieve that trace's spans."""
 
-    _validate_window(start_time, end_time)
+    if error := _window_validation_error(start_time, end_time):
+        return _error("invalid_time_window", error, meta={"time_range": _window(start_time, end_time)})
     dataset = _dataset(runtime, "traces")
     expression = _and(
         _equals("serviceName", service_name),
@@ -501,7 +522,8 @@ def query_events(
 ) -> str:
     """Query compact Kubernetes event records over a bounded time range."""
 
-    _validate_window(start_time, end_time)
+    if error := _window_validation_error(start_time, end_time):
+        return _error("invalid_time_window", error, meta={"time_range": _window(start_time, end_time)})
     table = _dataset(runtime, "events").to_table(columns=["eventId", "hostname", "level", "pod_name", "clusterName"])
     events: list[dict[str, Any]] = []
     for row in table.to_pylist():
@@ -565,7 +587,8 @@ def query_alerts(
 ) -> str:
     """Query compact alert lifecycle records over a bounded time range."""
 
-    _validate_window(start_time, end_time)
+    if error := _window_validation_error(start_time, end_time):
+        return _error("invalid_time_window", error, meta={"time_range": _window(start_time, end_time)})
     dataset = _dataset(runtime, "alerts")
     expression = _and(
         _equals("id", alert_id),
@@ -876,6 +899,19 @@ def _success(
     )
 
 
+def _error(code: str, message: str, *, meta: dict[str, Any]) -> str:
+    return json.dumps(
+        {
+            "status": "error",
+            "error": {"code": code, "message": message, "retryable": False},
+            "data": None,
+            "meta": meta,
+            "warnings": ["Change the invalid argument before retrying; do not repeat an unchanged query."],
+        },
+        ensure_ascii=False,
+    )
+
+
 def _is_empty(data: Any) -> bool:
     if isinstance(data, list):
         return not data
@@ -893,6 +929,20 @@ def _is_empty(data: Any) -> bool:
 def _increment(counter: Counter[str], value: Any) -> None:
     if value not in (None, ""):
         counter[str(value)] += 1
+
+
+def _finite_float(value: Any) -> float | None:
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    return result if math.isfinite(result) else None
+
+
+def _invalid_metric_warnings(count: int) -> list[str]:
+    if not count:
+        return []
+    return [f"Skipped {count} metric samples with a null or non-finite timestamp/value."]
 
 
 def _counter_rows(counter: Counter[str], limit: int = 10) -> list[dict[str, Any]]:
@@ -974,11 +1024,12 @@ def _window(start_time: datetime, end_time: datetime) -> dict[str, str]:
     return {"start": start_time.isoformat(), "end": end_time.isoformat()}
 
 
-def _validate_window(start_time: datetime, end_time: datetime) -> None:
+def _window_validation_error(start_time: datetime, end_time: datetime) -> str | None:
     if end_time < start_time:
-        raise ValueError("end_time must be greater than or equal to start_time.")
+        return "end_time must be greater than or equal to start_time."
     if end_time - start_time > _MAX_QUERY_WINDOW:
-        raise ValueError("The maximum observability query window is 1 hour; narrow the incident interval.")
+        return "The maximum observability query window is 1 hour; narrow the incident interval."
+    return None
 
 
 def _time_range(values: Any, *, unit: Literal["us", "ns"]) -> dict[str, str] | None:

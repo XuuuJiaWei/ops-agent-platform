@@ -54,7 +54,13 @@ def main(argv: list[str] | None = None) -> int:
     benchmark.add_argument(
         "--results-dir", type=Path, default=None, help="Optional directory for AIOpsLab result files."
     )
-    commands.add_parser("rca100-agent", help="Run the RCA100 JSON-over-stdio adapter.")
+    rca100_agent = commands.add_parser("rca100-agent", help="Run the RCA100 JSON-over-stdio adapter.")
+    rca100_agent.add_argument(
+        "--knowledge-profile",
+        choices=("baseline", "context-v1", "context-v2"),
+        default="context-v1",
+        help="Versioned SRE Skills and Memory composition.",
+    )
 
     args = parser.parse_args(argv)
     if args.command == "profiles":
@@ -81,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "rca100-agent":
         from ops_pilot_platform.benchmarks.rca100 import run_rca100_agent
 
-        asyncio.run(run_rca100_agent())
+        asyncio.run(run_rca100_agent(args.knowledge_profile))
         return 0
     return 2
 

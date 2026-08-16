@@ -17,7 +17,6 @@ from ops_pilot.runtime.spec import (
 )
 
 from ops_pilot_platform.entrypoints.environment import RuntimeEnvironment
-from ops_pilot_platform.paths import resolve_repo_path
 
 
 def runtime_spec_from_environment(
@@ -74,7 +73,7 @@ def deepagent_fields_from_environment(environment: RuntimeEnvironment) -> dict[s
     deepagent = environment.deepagent
     return {
         "system_prompt": deepagent.system_prompt,
-        "skills": tuple(resolve_repo_path(path) for path in deepagent.skills),
+        "skills": deepagent.skills,
         "memory": deepagent.memory,
         "permissions": tuple(
             FilesystemPermissionSpec(

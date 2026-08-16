@@ -73,8 +73,7 @@ deepagent:
         url: null
       prometheus:
         url: null
-  skills:
-    - skills
+  skills: []
   memory: []
   permissions: []
   middleware:

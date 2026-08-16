@@ -87,4 +87,45 @@ Run the full manifest and persist results:
 uv run rca100-benchmark run --dataset-dir D:/datasets/RCA100 --all --output ../../artifacts/rca100.json --agent-command python D:/agents/my_rca_agent.py
 ```
 
+Run a stratified subset and resume it after interruption. The runner validates
+the dataset root, ordered task set, and variant before reusing an artifact; it
+skips completed cases and retries failed cases:
+
+```powershell
+uv run rca100-benchmark run `
+  --dataset-dir D:/datasets/RCA100 `
+  --tasks t001 t065 t073 t084 t091 t103 `
+  --variant context-v1 `
+  --output ../../artifacts/rca100/context-v1.json `
+  --agent-command python D:/agents/my_rca_agent.py
+
+# Add --resume to the same command after an interruption.
+```
+
+Compare two same-task artifacts. Quality deltas are reported in percentage
+points and execution-cost deltas as relative percentages. The deterministic
+gate recommends `activate`, `hold`, or `rollback`:
+
+```powershell
+uv run rca100-benchmark compare `
+  --baseline ../../artifacts/rca100/baseline.json `
+  --candidate ../../artifacts/rca100/context-v1.json `
+  --output ../../artifacts/rca100/context-v1-comparison.json
+```
+
 Pass `--answer-key-dir` only in a controlled evaluator environment. The key is loaded after the agent command exits, never included in the input contract, and scored as `0.4 × Entity + 0.3 × Fault + 0.3 × Process`. Fault partial credit follows the publisher's taxonomy (`1.0` exact, `0.5` same L2, `0.25` same L1). Process gives equal weight to causal-node and numeric observability-checkpoint matches.
+
+The bundled agent exposes three reproducible knowledge variants:
+
+- `ops_pilot rca100-agent --knowledge-profile baseline` disables Skills and Memory.
+- `ops_pilot rca100-agent --knowledge-profile context-v1` enables seven generic
+  SRE diagnostic Skills and one compact semantic Memory file through DeepAgents'
+  official read-only `FilesystemBackend`. Neither profile can access the answer key.
+- `ops_pilot rca100-agent --knowledge-profile context-v2` is a rejected feedback
+  candidate kept for reproducibility. It adds generic dependency-order and stopping
+  guidance, but must not be activated unless a same-task gate and a separate holdout
+  both pass.
+
+Use `compare --tasks t103 ...` to project two larger artifacts onto an identical
+subset. This is useful for validating a feedback candidate without rerunning or
+silently comparing different task sets.

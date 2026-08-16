@@ -7,6 +7,7 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import Any, cast
 
 from deepagents import create_deep_agent
@@ -128,7 +129,6 @@ async def build_agent_runtime(spec: RuntimeSpec) -> AgentRuntime:
         # Human approval is a create_deep_agent(interrupt_on=...) declaration,
         # not an incidental property of an MCP transport definition.
         mcp_registry = replace(mcp_registry, hitl_tools=tuple(spec.interrupt_on))
-        local_skills = tuple(path.as_posix() for path in resolve_skill_paths(spec.skills))
         tracing = create_callback_handler(spec.observability)
         lifecycle.push_async_callback(_flush_tracing, tracing)
         run_controller = RunController(
@@ -154,7 +154,7 @@ async def build_agent_runtime(spec: RuntimeSpec) -> AgentRuntime:
         checkpointer, checkpointer_closer = await _create_checkpointer(spec.persistence)
         if checkpointer_closer is not None:
             lifecycle.push_async_callback(checkpointer_closer)
-        skills = _resolve_backend_skill_paths(local_skills, sandbox)
+        skills = _resolve_backend_skill_paths(spec.skills, sandbox)
         graph = _create_deep_agent(
             model=model,
             tools=tools,
@@ -212,11 +212,18 @@ async def _flush_tracing(tracing: TracingSetup) -> None:
 
 
 def _resolve_backend_skill_paths(
-    local_skills: tuple[str, ...],
+    configured_skills: tuple[str | Path, ...],
     sandbox: SandboxManager | SandboxRuntime | None,
 ) -> tuple[str, ...]:
-    if sandbox is None or not local_skills:
-        return local_skills
+    if not configured_skills:
+        return ()
+    if sandbox is None:
+        # Paths are interpreted by the explicitly composed DeepAgents backend.
+        # In particular, FilesystemBackend virtual paths such as ``/skills``
+        # must not be resolved against the host filesystem here.
+        return tuple(str(path) for path in configured_skills)
+
+    local_skills = tuple(path.as_posix() for path in resolve_skill_paths(configured_skills))
     configure_skills = getattr(sandbox, "configure_skills", None)
     if configure_skills is not None:
         return configure_skills(local_skills)

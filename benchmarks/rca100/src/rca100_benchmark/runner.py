@@ -60,10 +60,14 @@ class CommandAgent:
             )
         except subprocess.TimeoutExpired as exc:
             _terminate_process_tree(process)
-            process.communicate()
-            raise TimeoutError(f"Agent command exceeded {self.timeout_seconds:g} seconds.") from exc
+            _, stderr = process.communicate()
+            diagnostic = _stderr_diagnostic(stderr)
+            suffix = f" Last stderr:\n{diagnostic}" if diagnostic else ""
+            raise TimeoutError(f"Agent command exceeded {self.timeout_seconds:g} seconds.{suffix}") from exc
         if process.returncode != 0:
-            raise RuntimeError(f"Agent command exited with status {process.returncode}.")
+            diagnostic = _stderr_diagnostic(stderr)
+            suffix = f" Last stderr:\n{diagnostic}" if diagnostic else ""
+            raise RuntimeError(f"Agent command exited with status {process.returncode}.{suffix}")
         return AgentExecution(
             output=stdout,
             metrics=_parse_agent_metrics(stderr),
@@ -128,17 +132,32 @@ class RCA100Runner:
         self,
         task_ids: Sequence[str],
         *,
+        initial_runs: Sequence[dict[str, Any]] = (),
         on_progress: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
-        runs: list[dict[str, Any]] = []
+        if len(set(task_ids)) != len(task_ids):
+            raise ValueError("RCA100 task selection contains duplicate ids.")
+        requested = set(task_ids)
+        runs_by_task: dict[str, dict[str, Any]] = {}
+        for run in initial_runs:
+            task_id = str(run.get("task_id", ""))
+            if task_id not in requested:
+                raise ValueError(f"Resume artifact contains unrequested task {task_id!r}.")
+            if task_id in runs_by_task:
+                raise ValueError(f"Resume artifact contains duplicate task {task_id!r}.")
+            runs_by_task[task_id] = run
+
         for task_id in task_ids:
+            previous = runs_by_task.get(task_id)
+            if previous is not None and "error" not in previous:
+                continue
             try:
-                runs.append(self.run_task(task_id))
+                runs_by_task[task_id] = self.run_task(task_id)
             except Exception as exc:  # noqa: BLE001 - retain results for every independently runnable task.
-                runs.append({"benchmark": "rca100", "task_id": task_id, "error": str(exc)})
+                runs_by_task[task_id] = {"benchmark": "rca100", "task_id": task_id, "error": str(exc)}
             if on_progress is not None:
-                on_progress(_suite_result(task_ids, runs))
-        return _suite_result(task_ids, runs)
+                on_progress(_suite_result(task_ids, _ordered_runs(task_ids, runs_by_task)))
+        return _suite_result(task_ids, _ordered_runs(task_ids, runs_by_task))
 
 
 def _suite_result(task_ids: Sequence[str], runs: Sequence[dict[str, Any]]) -> dict[str, Any]:
@@ -158,6 +177,10 @@ def _suite_result(task_ids: Sequence[str], runs: Sequence[dict[str, Any]]) -> di
             "mean_final_score": sum(scores) / len(scores) if scores else None,
         },
     }
+
+
+def _ordered_runs(task_ids: Sequence[str], runs_by_task: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    return [runs_by_task[task_id] for task_id in task_ids if task_id in runs_by_task]
 
 
 def parse_prediction(response: str) -> RCA100Prediction:
@@ -182,6 +205,7 @@ AgentFactory = Callable[[], RCA100Agent]
 
 
 _METRICS_PREFIX = "RCA100_METRICS:"
+_STDERR_DIAGNOSTIC_LIMIT = 6000
 
 
 def _parse_agent_metrics(stderr: str) -> dict[str, Any]:
@@ -194,6 +218,16 @@ def _parse_agent_metrics(stderr: str) -> dict[str, Any]:
             return {"telemetry_error": "invalid agent metrics JSON"}
         return value if isinstance(value, dict) else {"telemetry_error": "agent metrics must be an object"}
     return {}
+
+
+def _stderr_diagnostic(stderr: str) -> str:
+    """Retain a bounded traceback tail without duplicating routine event logs."""
+
+    lines = [line for line in stderr.splitlines() if line and not line.startswith(("RCA100_EVENT:", _METRICS_PREFIX))]
+    rendered = "\n".join(lines)
+    if len(rendered) <= _STDERR_DIAGNOSTIC_LIMIT:
+        return rendered
+    return "…" + rendered[-_STDERR_DIAGNOSTIC_LIMIT:]
 
 
 def _terminate_process_tree(process: subprocess.Popen[str]) -> None:

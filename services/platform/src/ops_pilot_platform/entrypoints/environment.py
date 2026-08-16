@@ -257,7 +257,7 @@ class DeepAgentConfiguration(_RuntimeConfiguration):
     tools: ToolsConfiguration = Field(default_factory=ToolsConfiguration)
     system_prompt: str | None = None
     middleware: MiddlewareConfiguration = Field(default_factory=MiddlewareConfiguration)
-    skills: tuple[str, ...] = ("skills",)
+    skills: tuple[str, ...] = ()
     memory: tuple[str, ...] = ()
     permissions: tuple[FilesystemPermissionConfiguration, ...] = ()
     backend: BackendConfiguration = Field(default_factory=BackendConfiguration)

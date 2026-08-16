@@ -1,174 +1,127 @@
-# OpsPilot：可观测数据驱动的云原生故障诊断 Agent
+# OpsPilot：Eval 驱动的云原生故障诊断 Agent
+
+## 项目定位
+
+OpsPilot 解决的不是“如何跑一个 benchmark”，而是云原生故障调查中的真实工程
+问题：on-call 需要在 Metrics、Logs、Traces、Kubernetes Events、Alerts 和
+Topology 之间反复切换，依赖个人经验提出假设，容易产生重复查询、错误归因和
+不可复核结论。项目构建可恢复的 SRE Agent Runtime Harness，由场景化 Skills、
+分层 Memory 和只读可观测工具形成证据驱动调查链，再用 RCA100 作为离线验收环境。
+
+项目名建议：`OpsPilot｜Eval 驱动的云原生故障诊断 Agent`
+
+关键词：`Agent Runtime Harness`、`Context Engineering`、`Skills`、`Memory`、
+`LangGraph Persistence`、`Tool Calling`、`Agent Observability`、`Agent Evaluation`、
+`AIOps`、`Kubernetes`。
 
 ## 可直接写入简历
 
-**项目背景**：面向 Kubernetes 微服务告警，解决 on-call 需要在指标、日志、Trace、事件、告警和拓扑系统之间反复跳转，难以按统一时间窗和实体上下文形成根因证据链的问题。
+**项目简介**：面向 Kubernetes 微服务告警，构建可恢复、可观测、可评测的 SRE
+故障诊断 Agent。将碎片化遥测转化为根因实体、故障类型、传播路径和数值证据，
+并通过场景化 Skills、分层 Memory 与 Eval 门禁形成知识候选、验证、激活/回滚闭环。
 
-**职责与结果**：
+**项目亮点**：
 
-- 负责 SRE Agent 的运行时与调查链路设计，将 `告警上下文 → 假设生成 → 多模态查询 → 跨服务关联 → 根因实体/传播路径/影响面` 组合为模型驱动的只读工具循环；通用 Agent harness 不依赖 Web 协议或 RCA100 domain，业务能力由 host 通过 tools、context 和 middleware 注入。
-- 建设 9 个可观测查询工具，统一 metrics/logs/traces/events/alerts/topology 的时间、实体和状态语义；通过有界查询、错误模式聚合、幂等证据缓存、filesystem deny 和逐轮 telemetry，控制空结果重试、重复调用、上下文膨胀与越权执行。
-- 使用 RCA100 `t001` 的 **1,202,614** 行观测数据离线验收：Agent 从 checkout 错误告警定位到 `payment` 根因服务，并关联 `Invalid token` 日志/Trace 证据；相对基线，模型调用 **19→10**、工具调用 **44→27**、Token **499,909→209,354**、时延 **73.86s→50.51s**，根因实体 Precision/Recall **0.50/1.00→1.00/1.00**。
+1. **Agent Runtime Harness**：基于 DeepAgents/LangGraph 官方生命周期统一组合模型、
+   Tools、Middleware、Checkpointer、Store、Sandbox 与 Trace；将通用 runtime 与
+   Web/RCA100/SRE domain 解耦，资源由 FastAPI lifespan/运行入口显式创建和关闭，
+   支持 thread checkpoint、任务取消、断点续跑和执行回放。
+2. **场景化 Skills 与分层 Memory**：从 RCA100 故障空间抽象 7 条可迁移调查路径，
+   覆盖请求失败、延迟、资源饱和、依赖连通性、Kubernetes 可用性、流量异常和变更
+   回归；通过 DeepAgents `SKILL.md` 渐进披露降低上下文噪声，并将 working、semantic、
+   episodic、procedural memory 按生命周期分层，长期知识只读、版本化且经 Eval 后发布。
+3. **AI-Ready 可观测工具**：建设 9 个基于 LangChain `@tool` + Pydantic Schema 的只读
+   查询工具，统一 Metrics/Logs/Traces/Events/Alerts/Topology 的时间窗、实体和错误
+   envelope；修复空值指标、非有限数值和越界时间窗导致的 worker 崩溃，将错误转化为
+   可判定、不可重试的 observation，避免依靠提高 recursion limit 掩盖无限调用。
+4. **可恢复 Benchmark Harness**：每个 case 作为独立故障域原子落盘，artifact 绑定
+   dataset root、任务集 SHA 和知识 variant；`--resume` 跳过成功项、只重跑失败项，
+   模型异常保留有界诊断，避免分组中断后重复消耗全部 Token。
+5. **Eval 驱动反馈闭环**：记录逐轮模型/工具调用、Token、耗时及参数/结果指纹，按
+   Entity/Fault/Process/Final 与执行成本做同组对照；失败 Trace 只生成候选知识，
+   必须满足完成、解析、评分 100% 且质量分量不回退才激活，支持 hold/rollback 和版本复现。
+6. **量化验证**：在 6 个跨场景 RCA100 case 上完成 12 次 baseline/candidate 对照，
+   两组完成率、解析率、评分覆盖率均为 **100%**。场景知识使平均模型调用下降
+   **20.19%**、工具调用下降 **14.66%**、Token 下降 **33.16%**、时延下降
+   **27.42%**，Fault/Process 分别提升 **16.67/2.78 个百分点**；同时门禁发现
+   Entity 下降 **16.67 个百分点**、Final 下降 **0.83 个百分点**，自动判定回滚，
+   阻止“成本优化但质量退化”的知识版本上线。
 
-建议项目名：`OpsPilot｜可观测数据驱动的云原生故障诊断 Agent`
+## 面试时如何讲这组结果
 
-建议关键词：`Agent Runtime`、`Task Planning`、`Tool Calling`、`Context Engineering`、`MCP`、`Reliable Execution`、`Agent Observability`、`Agent Evaluation`、`AIOps`、`Kubernetes`。
+这不是一组“全都变好”的包装数据，而是一次完整的 Agent 工程闭环：
 
-## 真实场景与 Agent 工程解法
+- baseline 和 candidate 使用相同模型、system prompt、工具、任务顺序和 timeout；
+  唯一变量是 Skills/Memory profile。
+- candidate 的平均成本显著下降，说明渐进披露和场景 SOP 缩短了搜索路径；但知识也
+  让 t103 走向错误的因果分支，导致总体质量轻微回退。
+- Evaluator 没有因为 Token 更低就激活候选，而是按质量分量给出 `rollback`。
+- 根据失败 Trace 形成 context-v2 候选；它使 t103 从 v1 的 0% 恢复到 26.67%，但仍
+  低于 baseline 40%，所以再次回滚。这说明闭环能工作，也说明后续必须用独立 holdout，
+  不能继续对 smoke set 过拟合。
 
-[Google SRE](https://sre.google/resources/practices-and-processes/ai-engineering-reliable-operations/) 将当前故障诊断痛点概括为：工程师需要在碎片化工具间手工关联 metrics、logs 和 traces，增加认知负担并延迟根因定位；AI 系统应围绕具体告警生成假设、验证步骤和相关证据。[OpenTelemetry](https://opentelemetry.io/docs/specs/otel/logs/) 也指出，不同后端、采集方式和数据模型会让日志与指标、Trace 的关联脆弱。
+因此最有价值的百分比不是虚构的“准确率大幅提升”，而是：**100% 可恢复完成，成本
+下降 14.66%～33.16%，并由 Eval 门禁准确拦截 0.83 pp 的总体质量回退。** 这对应生产
+Agent 的真实痛点——知识更新需要可追踪、可验证、可回滚，而不是让模型在线自改 prompt。
 
-这个场景适合 Agent，而不是固定工作流：故障类型、依赖方向和下一项有效证据无法在运行前完全枚举。模型需要根据上一轮 observation 动态决定下一项工具和参数；可预测的数据加载、权限和评分仍由确定性代码负责。该边界符合 [Anthropic 对 workflow 与 agent 的区分](https://www.anthropic.com/engineering/building-effective-agents)：固定代码路径用于可预测流程，模型驱动的工具选择用于需要灵活决策的任务。
+## 六例对照明细
 
-| 关键词 | 在本项目中的准确含义 | 解决的痛点 | 可核验证据 |
-| --- | --- | --- | --- |
-| Agent Runtime | 持有 model、MCP、checkpointer、sandbox、tracing 的构建与关闭路径 | 资源跨请求泄漏、入口能力混用 | `RuntimeSpec` + async lifecycle |
-| Task Planning | system policy 约束调查阶段，模型按 observation 动态选择下一项证据；没有自研独立 planner | 固定 runbook 难覆盖未知故障路径 | model/tool trajectory artifact |
-| Tool Calling | Pydantic schema + LangChain `@tool`，参数和返回值有界、可解释 | 参数猜测、空结果重试、返回体挤占上下文 | 9 个只读工具及调用指纹 |
-| Context Engineering | 告警、schema 和 case 依赖分层；`ToolRuntime` 隐藏本地依赖，只暴露必要字段 | 把路径、凭据、评测答案或无关数据塞进 prompt | `RCA100Context` 与 answer-key 隔离 |
-| MCP | 通用 runtime 可接入 MCP server 的 prompts/resources/tools；RCA100 本地数据走直接 tool injection | domain 能力写死在 Agent harness | MCP registry 与 host composition；不宣称“RCA100 MCP” |
-| Memory / Skill | 作为入口级可选能力，不与模型或 runtime 全局绑定 | 不同入口需要不同知识与行为模块 | runtime 已支持；本轮 benchmark 主动关闭，未声称收益 |
-| Reliable Execution | 幂等缓存、1h 查询窗、流式日志聚合、只读权限、独立 worker | 无限工具循环、扫描放大、越权副作用 | 完成态 artifact；无 recursion-limit 调参 |
-| Observability | 记录每轮 Token、工具名、参数键/指纹、结果规模/指纹和耗时 | 只看到最终答案，无法定位循环与成本增长 | model/tool telemetry |
-| Agent Evaluation | 验证最终根因输出，同时比较执行轨迹的调用、Token 和时延 | LLM 非确定性导致改动无法比较 | RCA100 scorer + before/after artifact |
-
-这里没有为了关键词强行加入 Multi-Agent：当前故障调查由一个专用 Agent 和少量高价值工具即可完成。只有在出现可独立并行、具有独立上下文和可单独评分的子任务时，才值得引入多 Agent；这符合“先使用最简单可组合方案，再按业务价值增加复杂度”的 Agent 工程原则。
-
-## 系统边界与数据流
-
-```mermaid
-flowchart LR
-    A["Kubernetes / APM 告警"] --> B["SRE Agent host"]
-    B --> C["RuntimeSpec + DeepAgents harness"]
-    C --> D["模型驱动调查循环"]
-    D --> E["9 个只读观测工具"]
-    E --> F["metrics / logs / traces / events / alerts / topology"]
-    F --> D
-    D --> G["根因实体 + 因果证据 + 影响路径"]
-    D --> H["model/tool telemetry"]
-    I["RCA100 public case"] -. "离线输入" .-> B
-    G -. "Entity / Fault / Process" .-> J["evaluator"]
-    H --> K["ignored JSON artifact"]
-    J --> K
-```
-
-- `services/agent` 只提供 host-neutral harness：模型、工具、middleware、context、persistence 和 lifecycle 的组合接口。
-- `services/platform` 持有可执行入口、Web adapter、RCA100 domain 和数据访问。
-- 评测 host 注入 prompt、tools、context 与 telemetry；Agent 子进程看不到 `answer_key`，scorer 在子进程结束后读取答案。
-- RCA100 worker 关闭 skills、memory、subagent 和 filesystem tool surface，使本轮实验聚焦于工具与运行时契约。
-
-## 我的职责与实现
-
-### 1. 把告警转换为可执行调查链路
-
-SRE system policy 约束调查阶段：先确认影响和时间窗，再映射实体与拓扑，随后提出少量可证伪假设，按需查询观测数据，最后输出 origin → propagation → impact。模型决定下一项查询，确定性代码负责数据范围、权限、schema 和输出校验。
-
-### 2. 把可观测平台能力变成 Agent 可理解的工具
-
-- `query_metric`：告警时刻的有界 Prometheus-style instant vector；
-- `query_metric_range`：趋势探索所需的有界 matrix 与统计摘要；
-- `query_log_stats` / `query_logs`：先流式聚合 pod、container 和结构化错误模式，再下钻有限原文；
-- `query_traces`：按 OpenTelemetry `UNSET / OK / ERROR` 语义查询 span 和父子关系；
-- `query_events` / `query_alerts` / `query_topology`：补充变更、告警生命周期和服务依赖证据；
-- `list_metric_names`：先发现合法 signal，避免模型猜 metric 名称。
-
-工具使用 LangChain `@tool` 与 Pydantic 生成 JSON Schema；`ToolRuntime[RCA100Context]` 将 case 路径作为执行上下文注入，不出现在模型参数中。返回统一 `{status,data,meta,warnings}` envelope，空结果明确告诉模型应该修改 selector，而不是原样重试。
-
-### 3. 让 Agent 循环可控、可观测、可复核
-
-- DeepAgents `HarnessProfile.excluded_tools` 移除内建 filesystem tools，deny-all `FilesystemPermission` 阻断执行侧读写；
-- 相同只读查询命中缓存时返回原始证据，避免“缓存命中但证据丢失”导致二次调用；
-- 查询窗口最大 1h，日志统计最多聚合 100,000 条匹配记录，超限显式标记 lower bound；
-- benchmark telemetry 记录逐轮 Token、tool、duration、result size 与 SHA-256，不保存工具实参或工具原始返回；
-- runner 启动时创建 `running` artifact，每个 task 原子 checkpoint，失败运行同样留档。
-
-这种设计对应 [Anthropic 的 Agent 四层边界](https://www.anthropic.com/research/trustworthy-agents)：model、harness、tools、environment 需要共同约束；只在 prompt 中写“请只读”不能形成执行安全边界。
-
-## RCA100 离线验收
-
-Benchmark 是验收手段，不是项目本身。它验证三件事：Agent 能否结束、是否定位正确实体、工具循环成本是否可度量。
-
-### 数据规模与约束
-
-本地实际可用样本为 RCA100 `t001`：
-
-| 数据面 | 数量 |
-| --- | ---: |
-| Metrics | 92,155 rows |
-| Logs | 600,000 rows |
-| Traces | 510,000 rows |
-| Events | 449 rows |
-| Alerts | 10 rows |
-| Topology | 277 entities / 353 edges |
-| 合计 | 1,202,614 observation rows |
-
-约束：同一任务、`deepseek-v4-flash`、公开观测数据和 evaluator；Baseline / Final 分别配置 90s / 120s timeout，但均在 74s 内完成。没有把 taxonomy、per-case ground truth 或 `answer_key` 注入 Agent，也没有提高 recursion limit 或硬编码 t001 答案。
-
-### 结果
-
-| 指标 | Baseline | Final | 变化 |
+| 指标 | Baseline | context-v1 | 变化 |
 | --- | ---: | ---: | ---: |
-| 完成状态 | completed | completed | 均正常结束 |
-| Elapsed | 73.8555s | 50.5129s | -31.6% |
-| Model calls | 19 | 10 | -47.4% |
-| Tool calls | 44 | 27 | -38.6% |
-| Total tokens | 499,909 | 209,354 | -58.1% |
-| Entity precision | 0.50 | 1.00 | +0.50 |
-| Entity recall | 1.00 | 1.00 | 持平 |
-| Entity F1 | 0.6667 | 1.0000 | +50.0% |
-| Final score | 0.2667 | 0.4000 | +50.0% |
+| Completion / Parse / Eval coverage | 100% / 100% / 100% | 100% / 100% / 100% | 持平 |
+| Entity F1 | 50.00% | 33.33% | -16.67 pp |
+| Fault score | 0.00% | 16.67% | +16.67 pp |
+| Process score | 0.00% | 2.78% | +2.78 pp |
+| Final score | 20.00% | 19.17% | -0.83 pp |
+| Mean model calls | 17.33 | 13.83 | -20.19% |
+| Mean tool calls | 38.67 | 33.00 | -14.66% |
+| Mean total tokens | 565,461 | 377,970 | -33.16% |
+| Mean elapsed | 77.93 s | 56.56 s | -27.42% |
 
-最终输出将 checkout 告警的根因实体收敛为 `payment`，并从日志和 Trace 中提取 `Payment request failed. Invalid token` 证据。这组结果能支持的主张是：**Agent 工具与执行契约降低了单例调查成本，并改善了根因实体定位。** 它不能证明生产 MTTR、线上 QPS 或 103 例总体准确率。
+实验任务为 `t001/t065/t073/t084/t091/t103`，只代表六例跨场景工程验证，不宣称
+RCA100 全量准确率或生产 MTTR。answer key 位于 Agent 进程之外，只有 Agent 退出后
+Evaluator 才读取；Skills/Memory 不含 task id、服务名、答案标签或精确 checkpoint。
+
+## 设计依据
+
+- [Google SRE：AI Engineering for Reliable Operations](https://sre.google/resources/practices-and-processes/ai-engineering-reliable-operations/)：
+  用服务知识、历史事件、当前上下文与可观测数据降低故障调查认知负担。
+- [Google SRE：Effective Troubleshooting](https://sre.google/sre-book/effective-troubleshooting/)：
+  从观测建立可证伪假设，区分相关性、传播影响与真正原因。
+- [DeepAgents Skills](https://docs.langchain.com/oss/python/deepagents/skills)：
+  通过元数据发现和按需读取实现过程知识渐进披露。
+- [DeepAgents Memory](https://docs.langchain.com/oss/python/deepagents/memory)：
+  使用 `AGENTS.md` 持久化语义记忆，并按作用域和写入时机管理长期知识。
+- [LangGraph Persistence](https://docs.langchain.com/oss/python/langgraph/persistence)：
+  通过 thread/checkpoint/store 支持恢复、回放和跨线程记忆。
+- [LangSmith Evaluation](https://docs.langchain.com/langsmith/evaluation)：
+  将生产 Trace 回流数据集，对候选版本执行离线、在线和对照评测。
+- [Anthropic：Context Engineering for Agents](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents)：
+  以有限上下文、少量高价值工具、结构化记录和渐进披露减少上下文腐化。
 
 ## 可核验证据
 
-| 主张 | 证据 |
+| 主张 | 代码/产物 |
 | --- | --- |
-| 通用 Agent harness / lifecycle | `services/agent/src/ops_pilot/agent/runtime.py` |
-| SRE host 与 RCA100 domain 边界 | `services/platform/src/ops_pilot_platform/benchmarks/rca100.py` |
-| 六类观测数据工具 | `services/platform/src/ops_pilot_platform/benchmarks/rca100_tools.py` |
-| 独立 runner / evaluator | `benchmarks/rca100/src/rca100_benchmark/runner.py`；`scoring.py` |
-| Baseline | `artifacts/rca100/2026-08-17-t001-baseline-1f1e0f7.json` |
-| Final（正确 harness） | `artifacts/rca100/2026-08-16T18-36-12-217Z-t001.json` |
-| SDK 契约失败也留档 | `artifacts/rca100/2026-08-16T18-35-11-268Z-t001.json` |
-| 工程门禁 | 根目录 `pnpm check`；standalone RCA100 `ruff + pyright + pytest` |
+| Host-neutral runtime 与生命周期 | `services/agent/src/ops_pilot/agent/runtime.py` |
+| SRE 知识 profile 与只读 backend | `services/platform/src/ops_pilot_platform/sre/knowledge.py` |
+| 7 个场景 Skills / 分层 Memory | `services/platform/src/ops_pilot_platform/sre/knowledge/` |
+| 9 个观测工具与结构化错误 | `services/platform/src/ops_pilot_platform/benchmarks/rca100_tools.py` |
+| 原子 checkpoint / resume | `benchmarks/rca100/src/rca100_benchmark/runner.py` |
+| 确定性比较与激活门禁 | `benchmarks/rca100/src/rca100_benchmark/feedback.py` |
+| 六例原始结果 | `artifacts/rca100/2026-08-17-six-{baseline,context-v1}.json` |
+| 对照与 rollback 决策 | `artifacts/rca100/2026-08-17-six-comparison.json` |
 
-复现：
+`artifacts/` 默认不提交，避免把大体积 Trace 或环境信息带入仓库；实验命令和指标口径
+保存在架构文档与 benchmark README 中，可以在相同 dataset/task/variant 上复现。
 
-```powershell
-pnpm benchmark:rca100 -- run `
-  --dataset-dir D:\dev\datasets\agenticopseval `
-  --task t001 `
-  --answer-key-dir D:\dev\datasets\agenticopseval-answer-key `
-  --timeout-seconds 120 `
-  --agent-command uv run `
-    --project D:\dev\projects\ops-agent-platform\services `
-    --package ops-pilot-platform --extra rca100 `
-    ops_pilot rca100-agent
-```
+## 下一轮正确方向
 
-## 现在还没有完成的事
-
-以下内容不写成已交付成果：
-
-1. **Fault / Process 准确率**：最终样本均为 0；公开 Agent 输入尚未提供可用 taxonomy contract，继续针对 t001 写标签映射会造成评测泄漏。
-2. **多样本泛化**：本地只有 t001，缺少其余 102 个 case；下一步应先补 5 个不同 fault L1 的公开样本，再统计均值与 P50/P95。
-3. **生产收益**：还没有线上 incident 数据，不能宣称 MTTR、可用性或人效提升。
-4. **Memory / Skill / Multi-Agent 收益**：runtime 有组合接口，但没有对照实验；不要为了 JD 关键词提前增加复杂度。
-5. **Trajectory quality evaluator**：当前已记录轨迹成本，下一步可按 [final response / single step / trajectory](https://docs.langchain.com/langsmith/evaluation-approaches) 分层增加工具选择与参数正确性评分。
-6. **上线前安全与规模项**：共享 preview 日志仍需统一 text redactor；artifact 应移除任意 raw stdout；events/metric range 应改为有界 batch 聚合。历史 artifacts 按要求保留在本地 ignored 目录，不对外分发。
-
-## 资料与岗位锚点
-
-- [阿里巴巴 2027 AI SRE](https://www.nowcoder.com/jobs/detail/439655)：SRE Agent、可观测数据、故障诊断、AI-Ready 基础设施、可靠性与 Kubernetes。
-- [拼多多 2027 AI Agent 研发](https://www.nowcoder.com/jobs/detail/454245)：任务规划、上下文管理、工具调用、MCP、安全与评测可观测。
-- [携程 2027 Agent 开发](https://www.nowcoder.com/jobs/detail/434803)：Agent 框架、记忆、评测、观测与管理。
-- [Google SRE：AI Engineering for Reliable Operations](https://sre.google/resources/practices-and-processes/ai-engineering-reliable-operations/)：碎片化观测工具、告警上下文、自动假设与验证证据。
-- [Google SRE Incident Management Guide](https://sre.google/resources/practices-and-processes/incident-management-guide/)：自动化影响分析、RCA 和缓解建议，让 on-call 聚焦问题解决。
-- [Anthropic：Building Effective Agents](https://www.anthropic.com/engineering/building-effective-agents)：workflow / agent 边界、简单可组合模式、Agent 的成本与延迟权衡。
-- [Anthropic：Writing Effective Tools for Agents](https://www.anthropic.com/engineering/writing-tools-for-agents)：tool/ACI 描述、少量高价值工具与基于 eval 的迭代。
-- [Model Context Protocol](https://modelcontextprotocol.io/specification/2025-06-18/server/index)：prompts、resources、tools 的控制边界。
-- [LangSmith Agent Evaluation](https://docs.langchain.com/langsmith/evaluation-approaches)：最终答案、单步与 trajectory 评测。
-- [ASu Resume Skills](https://github.com/Claycui828/ASu-resume-skills)：原子主张、指标口径、角色边界和可验证证据。
-
-实现依据：[LangChain tools](https://docs.langchain.com/oss/python/langchain/tools)、[LangChain middleware](https://docs.langchain.com/oss/python/langchain/middleware/custom)、[Prometheus HTTP API](https://prometheus.io/docs/prometheus/latest/querying/api/)、[OpenTelemetry signals](https://opentelemetry.io/docs/concepts/signals/)、[RCA100](https://www.aiops.cn/gitlab/aiops-live-benchmark/agenticopseval)。
+1. 将 RCA100 划为 candidate-generation、validation 和 holdout，禁止同一 case 既归因
+   又决定激活；六例 smoke 只验证系统闭环，不继续人工调参。
+2. 将失败 Trace 归一为脱敏 incident record，按环境/服务作用域去重；只有跨 case
+   复现的规律进入 semantic/episodic memory 候选。
+3. 增加 trajectory evaluator，评价工具选择、参数有效率、重复查询率和证据充分性，
+   让“为什么分数变化”比只看 final answer 更可解释。
+4. 全量 103 例运行后再报告均值、P50/P95、bootstrap 置信区间和按场景分层指标；接入
+   生产后改用 MTTR、误报率、人工接管率和无效查询率验证业务价值。

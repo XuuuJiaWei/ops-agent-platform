@@ -12,7 +12,7 @@ class RCA100Evidence(BaseModel):
 
     source_type: Literal["metric", "log", "trace", "event", "alert", "topology"]
     signal: str = Field(description="Exact observability signal name, without an entity-name prefix.")
-    comparator: str = Field(min_length=1, max_length=32, description="Comparator reported by the observation.")
+    comparator: str = Field(min_length=1, description="Comparator reported by the observation.")
     value: float
     unit: str = Field(default="", description="Unit reported by the observation tool; preserve it exactly.")
 

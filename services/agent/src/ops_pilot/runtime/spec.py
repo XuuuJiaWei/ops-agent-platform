@@ -131,7 +131,10 @@ class RuntimeSpec:
     model: ModelSpec
     mcp: MCPServerCatalog = field(default_factory=MCPServerCatalog)
     system_prompt: str | None = None
-    skills: tuple[Path, ...] = field(default_factory=tuple)
+    # DeepAgents accepts backend-visible skill source paths. Local sandbox
+    # sources may still be declared as ``Path`` objects and are synchronized
+    # before graph construction.
+    skills: tuple[str | Path, ...] = field(default_factory=tuple)
     memory: tuple[str, ...] = field(default_factory=tuple)
     permissions: tuple[FilesystemPermissionSpec, ...] = field(default_factory=tuple)
     filesystem_tools: tuple[str, ...] | None = None

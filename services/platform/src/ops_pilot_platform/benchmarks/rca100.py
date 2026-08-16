@@ -19,11 +19,12 @@ from langchain_core.output_parsers import PydanticOutputParser
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 from ops_pilot.agent.runtime import agent_runtime
-from ops_pilot.runtime.spec import FilesystemPermissionSpec, RuntimeSpec
+from ops_pilot.runtime.spec import RuntimeSpec
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ops_pilot_platform.benchmarks.rca100_tools import RCA100_TOOLS, RCA100Context, RCA100ToolCacheMiddleware
 from ops_pilot_platform.entrypoints.benchmark import build_rca100_runtime_spec
+from ops_pilot_platform.sre import SREKnowledgeProfile, apply_sre_knowledge
 
 _FILESYSTEM_TOOLS = frozenset({"delete", "edit_file", "execute", "glob", "grep", "ls", "read_file", "write_file"})
 
@@ -165,7 +166,7 @@ class IncidentEvidence(BaseModel):
 
     source_type: Literal["metric", "log", "trace", "event", "alert", "topology"]
     signal: str = Field(description="Exact observability signal name, without an entity-name prefix.")
-    comparator: str = Field(min_length=1, max_length=32, description="Comparator reported by the observation.")
+    comparator: str = Field(min_length=1, description="Comparator reported by the observation.")
     value: float
     unit: str = Field(default="", description="Unit reported by the observation tool; preserve it exactly.")
 
@@ -201,6 +202,7 @@ class IncidentDiagnosis(BaseModel):
 
 def build_rca100_agent_spec(
     *,
+    knowledge_profile: SREKnowledgeProfile = "context-v1",
     telemetry: RCABenchmarkTelemetry | None = None,
 ) -> RuntimeSpec:
     """Contribute RCA100 policy through the runtime's official injection fields."""
@@ -209,17 +211,8 @@ def build_rca100_agent_spec(
         tools=RCA100_TOOLS,
         context_schema=RCA100Context,
     )
-    return replace(
+    spec = replace(
         base_spec,
-        skills=(),
-        memory=(),
-        permissions=(
-            FilesystemPermissionSpec(
-                operations=("read", "write"),
-                paths=("/**",),
-                mode="deny",
-            ),
-        ),
         filesystem_tools=None,
         middleware=(
             *base_spec.middleware,
@@ -227,17 +220,18 @@ def build_rca100_agent_spec(
             *((telemetry,) if telemetry is not None else ()),
         ),
     )
+    return apply_sre_knowledge(spec, knowledge_profile)
 
 
-async def run_rca100_agent() -> None:
+async def run_rca100_agent(knowledge_profile: SREKnowledgeProfile = "context-v1") -> None:
     """Read one blind request from stdin and emit only the agent prediction."""
 
     request = RCA100Request.model_validate_json(sys.stdin.read())
     telemetry = RCABenchmarkTelemetry()
-    spec = build_rca100_agent_spec(telemetry=telemetry)
+    spec = build_rca100_agent_spec(knowledge_profile=knowledge_profile, telemetry=telemetry)
     telemetry.model_provider = spec.model.provider
     telemetry.model_name = spec.model.name
-    _configure_isolated_harness(spec)
+    _configure_isolated_harness(spec, knowledge_profile=knowledge_profile)
     try:
         async with agent_runtime(spec) as runtime:
             prediction = await runtime.ainvoke_text(
@@ -246,7 +240,11 @@ async def run_rca100_agent() -> None:
                 thread_id=f"rca100:{request.task_id}",
                 run_id=f"rca100:{request.task_id}",
                 context=RCA100Context(case_directory=request.case_directory),
-                extra_metadata={"benchmark": "rca100", "task_id": request.task_id},
+                extra_metadata={
+                    "benchmark": "rca100",
+                    "task_id": request.task_id,
+                    "sre_knowledge_profile": knowledge_profile,
+                },
             )
             diagnosis = PydanticOutputParser(pydantic_object=IncidentDiagnosis).parse(prediction)
             sys.stdout.write(diagnosis.model_dump_json())
@@ -254,14 +252,16 @@ async def run_rca100_agent() -> None:
         sys.stderr.write("RCA100_METRICS:" + json.dumps(telemetry.snapshot(), ensure_ascii=False) + "\n")
 
 
-def _configure_isolated_harness(spec: RuntimeSpec) -> None:
+def _configure_isolated_harness(spec: RuntimeSpec, *, knowledge_profile: SREKnowledgeProfile) -> None:
     """Configure the official process-wide harness profile for this worker."""
 
     provider = "openai" if spec.model.provider == "deepseek" else spec.model.provider
     register_harness_profile(
         f"{provider}:{spec.model.name}",
         HarnessProfile(
-            excluded_tools=_FILESYSTEM_TOOLS,
+            excluded_tools=(
+                _FILESYSTEM_TOOLS if knowledge_profile == "baseline" else _FILESYSTEM_TOOLS - {"read_file"}
+            ),
             general_purpose_subagent=GeneralPurposeSubagentProfile(enabled=False),
         ),
     )
