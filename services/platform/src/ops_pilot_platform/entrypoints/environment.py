@@ -21,7 +21,7 @@ from ops_pilot_platform.paths import REPO_ROOT
 
 RUNTIME_CONFIG_FILE = REPO_ROOT / "config" / "runtime.yaml"
 RUNTIME_CONFIG_EXAMPLE_FILE = REPO_ROOT / "config" / "runtime.example.yaml"
-RUNTIME_ENTRYPOINTS = ("web", "eval", "benchmark", "langgraph")
+RUNTIME_ENTRYPOINTS = ("web", "eval", "benchmark", "rca100", "langgraph")
 
 
 def _kebab_case(name: str) -> str:

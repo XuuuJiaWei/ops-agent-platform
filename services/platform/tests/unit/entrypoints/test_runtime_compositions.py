@@ -59,7 +59,7 @@ def test_entrypoint_yaml_does_not_allow_environment_capability_selection(monkeyp
     monkeypatch.setenv("OPS_PILOT_SECRET_DEBUG", "true")
     monkeypatch.setenv("OPEN_SANDBOX_API_KEY", "test-key")
 
-    expected_model = "dots-studio/dots-3-note-preview:free"
+    expected_model = "openai/gpt-5-nano"
     assert build_web_application_spec().runtime.model.name == expected_model
     assert build_benchmark_runtime_spec().model.name == expected_model
     assert build_eval_runtime_spec().model.name == expected_model

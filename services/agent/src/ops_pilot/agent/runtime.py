@@ -149,6 +149,7 @@ async def build_agent_runtime(spec: RuntimeSpec) -> AgentRuntime:
             interrupt_on=spec.interrupt_on,
             middleware=[*middleware, *spec.middleware],
             context_schema=spec.context_schema,
+            response_format=spec.response_format,
             debug=spec.debug,
             name=spec.name,
         )
@@ -250,6 +251,7 @@ def _create_deep_agent(
     interrupt_on: dict[str, Any] | None = None,
     middleware: Sequence[Any] = (),
     context_schema: type[Any] | None = None,
+    response_format: Any | None = None,
     debug: bool = False,
     name: str | None = None,
 ) -> Any:
@@ -273,6 +275,8 @@ def _create_deep_agent(
     kwargs["middleware"] = list(middleware)
     if context_schema is not None:
         kwargs["context_schema"] = context_schema
+    if response_format is not None:
+        kwargs["response_format"] = response_format
 
     if checkpointer is not None:
         kwargs["checkpointer"] = checkpointer

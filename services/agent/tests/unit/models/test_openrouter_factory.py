@@ -33,4 +33,7 @@ def test_openrouter_uses_openai_compatibility_and_enables_reasoning(monkeypatch)
     assert received["model_provider"] == "openai"
     assert received["base_url"] == "https://openrouter.ai/api/v1"
     assert received["api_key"] == "test-key"
-    assert received["extra_body"] == {"reasoning": {"enabled": True}}
+    assert received["extra_body"] == {
+        "reasoning": {"enabled": True},
+        "provider": {"require_parameters": True},
+    }

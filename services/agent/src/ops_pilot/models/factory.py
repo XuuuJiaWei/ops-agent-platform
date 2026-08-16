@@ -53,7 +53,10 @@ def _create_langchain_chat_model(spec: ModelSpec) -> Any:
     if spec.api_key:
         kwargs["api_key"] = spec.api_key
     if _is_openrouter(spec):
-        kwargs["extra_body"] = {"reasoning": {"enabled": spec.reasoning_mode != "disabled"}}
+        kwargs["extra_body"] = {
+            "reasoning": {"enabled": spec.reasoning_mode != "disabled"},
+            "provider": {"require_parameters": True},
+        }
 
     try:
         model = init_chat_model(**kwargs)

@@ -28,6 +28,7 @@ def runtime_spec_from_environment(
     tools: tuple[Any, ...] = (),
     middleware: tuple[Any, ...] = (),
     context_schema: type[Any] | None = None,
+    response_format: Any | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> RuntimeSpec:
     """Compose the host-neutral runtime once from a validated entrypoint view."""
@@ -46,6 +47,7 @@ def runtime_spec_from_environment(
         tools=tools,
         middleware=middleware,
         context_schema=context_schema,
+        response_format=response_format,
         metadata=metadata or {},
     )
 

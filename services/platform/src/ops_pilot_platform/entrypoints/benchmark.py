@@ -26,16 +26,18 @@ def build_rca100_runtime_spec(
     *,
     tools: tuple[Any, ...] = (),
     context_schema: type[Any] | None = None,
+    response_format: Any | None = None,
 ) -> RuntimeSpec:
     """Compose the RCA100 host through DeepAgents' official injection points."""
 
-    environment = environment or RuntimeEnvironment.for_entrypoint("benchmark")
+    environment = environment or RuntimeEnvironment.for_entrypoint("rca100")
     return runtime_spec_from_environment(
         environment,
         id="benchmark-rca100",
         entrypoint="benchmark:rca100",
-        default_assistant_id="ops-pilot-rca100",
+        default_assistant_id="ops-pilot-sre-diagnosis",
         tools=tools,
         context_schema=context_schema,
+        response_format=response_format,
         metadata={"benchmark": "rca100"},
     )

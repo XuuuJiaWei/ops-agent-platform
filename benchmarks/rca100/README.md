@@ -4,7 +4,7 @@ Standalone, framework-neutral integration for [AgenticOpsEval RCA100 v1.1](https
 
 ## Setup
 
-Obtain the publisher's public `RCA100/` data locally. The directory must contain `manifest.txt` and `cases/t001` through `cases/t103`; its published size is about 3.43 GB. Keep the controlled `answer_key/` in a separate directory outside the public dataset root.
+Obtain the publisher's public `RCA100/` data locally. The directory must contain `manifest.txt` and `cases/t001` through `cases/t103`; its published size is about 3.43 GB. Keep the controlled `answer_key/` in a separate directory outside the public dataset root. The official repository publishes the dataset and scoring contracts, not an agent SDK or required tool API.
 
 ```powershell
 cd benchmarks/rca100
@@ -54,8 +54,9 @@ The command reads the public files under that single `case_directory` and writes
 
 No specific agent framework, API client, or runtime lifecycle is imposed. The
 OpsPilot adapter lives in `ops_pilot_platform.benchmarks.rca100`, outside the agent
-harness. It injects a case-scoped PyArrow query tool through LangChain's
-official `tools` and `ToolRuntime` context interfaces.
+harness. It injects the case-scoped `query_metric`, `query_logs`,
+`query_traces`, `query_events`, `query_alerts`, and `query_topology` tools
+through LangChain's official `tools` and `ToolRuntime` context interfaces.
 
 ## Run
 

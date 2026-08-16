@@ -137,6 +137,7 @@ class RuntimeSpec:
     tools: tuple[Any, ...] = field(default_factory=tuple)
     middleware: tuple[Any, ...] = field(default_factory=tuple)
     context_schema: type[Any] | None = None
+    response_format: Any | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def with_tools(self, tools: Sequence[Any]) -> RuntimeSpec:

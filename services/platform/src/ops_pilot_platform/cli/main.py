@@ -32,7 +32,7 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser("benchmark-launch-config", help=argparse.SUPPRESS)
 
     status = commands.add_parser("status", help="Build one declared runtime and print status metadata.")
-    status.add_argument("--entry", choices=("web", "eval", "benchmark"), default="web")
+    status.add_argument("--entry", choices=("web", "eval", "benchmark", "rca100"), default="web")
 
     commands.add_parser("health", help="Print lightweight web-entry health metadata.")
     serve = commands.add_parser("serve", help="Start the web application runtime.")
@@ -64,7 +64,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"aiopslab_dir": environment.benchmark.aiopslab.directory}))
         return 0
     if args.command == "status":
-        return asyncio.run(_print_status(_profiles()[args.entry]))
+        return asyncio.run(_print_status(_status_spec(args.entry)))
     if args.command == "health":
         print(json.dumps(health_snapshot(build_web_application_spec().runtime), indent=2, sort_keys=True))
         return 0
@@ -88,6 +88,14 @@ def _profiles() -> dict[str, RuntimeSpec]:
         "eval": build_eval_runtime_spec(),
         "benchmark": build_benchmark_runtime_spec(),
     }
+
+
+def _status_spec(entry: str) -> RuntimeSpec:
+    if entry == "rca100":
+        from ops_pilot_platform.benchmarks.rca100 import build_rca100_agent_spec
+
+        return build_rca100_agent_spec()
+    return _profiles()[entry]
 
 
 def _web_development_config() -> dict[str, object]:

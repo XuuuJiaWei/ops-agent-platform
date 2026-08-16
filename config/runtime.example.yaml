@@ -3,7 +3,7 @@
 deepagent:
   model:
     provider: openai
-    name: dots-studio/dots-3-note-preview:free
+    name: openai/gpt-5-nano
     base-url: https://openrouter.ai/api/v1
     temperature: 0.0
     max-tokens: 16384
@@ -87,6 +87,33 @@ entrypoints:
     benchmark:
       aiopslab:
         directory: null
+
+  rca100:
+    deepagent:
+      name: ops-pilot-sre-diagnosis
+      tools:
+        mcp:
+          kubernetes:
+            kubeconfig: null
+          jaeger:
+            url: null
+          prometheus:
+            url: null
+      skills: []
+      memory: []
+      permissions: []
+      middleware:
+        todo-list: false
+        filesystem:
+          tools: null
+        reliability:
+          enabled: true
+          run-deadline-seconds: 600
+          model-call-limit: 50
+          tool-call-limit: 200
+          recursion-limit: 256
+      checkpointer:
+        backend: none
 
   langgraph:
     deepagent:
