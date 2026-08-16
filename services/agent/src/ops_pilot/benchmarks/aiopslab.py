@@ -15,7 +15,8 @@ from typing import Any
 
 from ops_pilot.agent.runtime import build_agent_runtime
 from ops_pilot.benchmarks.contracts import RuntimeFactory, TextAgent
-from ops_pilot.config.settings import Settings, load_settings
+from ops_pilot.entrypoints.benchmark import build_benchmark_runtime_spec
+from ops_pilot.runtime.spec import RuntimeSpec
 
 
 class AIOpsLabAgent:
@@ -71,7 +72,7 @@ async def run_aiopslab_problem(
     problem_id: str,
     *,
     max_steps: int = 30,
-    settings: Settings | None = None,
+    runtime_spec: RuntimeSpec | None = None,
     results_dir: Path | None = None,
     runtime_factory: RuntimeFactory = build_agent_runtime,
     orchestrator_type: type[Any] | None = None,
@@ -84,7 +85,7 @@ async def run_aiopslab_problem(
     if orchestrator_type is None:
         orchestrator_type = _load_orchestrator()
 
-    runtime = await runtime_factory(settings or load_settings())
+    runtime = await runtime_factory(runtime_spec or build_benchmark_runtime_spec())
     try:
         agent = AIOpsLabAgent(runtime, problem_id=problem_id)
         orchestrator = orchestrator_type(results_dir=results_dir)

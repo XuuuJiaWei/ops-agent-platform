@@ -1,56 +1,29 @@
-# ops_pilot service
+# OpsPilot agent service
 
-Python 3.12 service managed by `uv`.
+The agent package exposes a host-neutral `build_agent_runtime(RuntimeSpec)`.
+It never loads a global YAML file or picks a default model, MCP server, or host
+extension.
 
-## Commands
+Runtime combinations live in `ops_pilot.entrypoints`:
 
-```bash
-uv sync
-uv run ops_pilot serve --host 127.0.0.1 --port 8123
-uv run ops_pilot smoke agent
-uv run pytest
-```
+- `web.py` owns the AG-UI/A2A web surface and opts into Spaces and the
+  CopilotKit middleware.
+- `eval.py` owns the stateless evaluation surface.
+- `benchmark.py` owns the AIOpsLab surface and intentionally excludes web
+  extensions.
+- `langgraph.py` owns the LangGraph Platform surface.
 
-Run the official AIOpsLab benchmark adapter after installing AIOpsLab itself
-(its upstream project is intentionally not a service dependency):
-
-```bash
-git clone --recurse-submodules https://github.com/microsoft/AIOpsLab.git
-cd AIOpsLab && uv pip install -e .
-cd ../ops-agent-platform/services/agent
-uv run ops_pilot benchmark \
-  --problem astronomy_shop_payment_service_failure-localization-1 \
-  --max-steps 30
-```
-
-AIOpsLab owns the benchmark lifecycle, action parser, session trace, and
-evaluation. OpsPilot only adapts its generic text-agent interface to the
-official `Agent.get_action` interface. Additional benchmarks belong under
-`ops_pilot.benchmarks` and must not add business tools, prompt fragments, or
-repositories to the core runtime.
-
-## Runtime
-
-The backend exposes AG-UI under `/chat`, A2A JSON-RPC at `/a2a/jsonrpc`, agent-card discovery at `/a2a/.well-known/agent-card.json`, and health/status endpoints. These protocol surfaces share the same DeepAgents runtime.
-
-Runtime guardrails reuse framework primitives where available: LangChain model/tool call limits and retry middleware, DeepAgents human approval, LangGraph checkpoints, and the configured sandbox backend. `RunController` provides the outer deadline/cancellation boundary. The core runtime is business-neutral; the backend explicitly composes its Spaces and CopilotKit extensions.
-
-## Sandbox
-
-Set the OpenSandbox endpoint in root `.env` / `config/config.yaml` to isolate filesystem and command execution. Configured local skills are synchronized into the sandbox before the graph is created.
-
-## Durable execution
-
-By default the runtime uses an in-memory LangGraph checkpointer and in-memory A2A task store. Set `persistence.backend: postgres` and `DATABASE_URL` to persist checkpoints/tasks across process restarts.
-
-```yaml
-persistence:
-  backend: postgres
-  setup_on_start: true
-```
+Each entry reads only environment variables with its own prefix. For example,
+`OPS_PILOT_WEB_*` cannot alter the benchmark runtime, and
+`OPS_PILOT_BENCHMARK_*` cannot alter the web runtime.
 
 ```bash
-DATABASE_URL=postgresql://ops_pilot:ops_pilot@127.0.0.1:5433/ops_pilot
+uv run ops_pilot profiles
+uv run ops_pilot serve
+uv run ops_pilot status --entry benchmark
+uv run ops_pilot benchmark --problem <problem-id>
 ```
 
-A local Postgres stack remains under `deploy/postgres` for development. Integration tests for PostgreSQL paths run only when `TEST_DATABASE_URL` is set.
+The core runtime accepts model, MCP catalog, tools, middleware, sandbox,
+checkpointer, tracing, and lifecycle configuration from the entry-owned
+`RuntimeSpec`, matching DeepAgents' application-supplied composition model.

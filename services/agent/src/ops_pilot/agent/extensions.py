@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Sequence
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
-from ops_pilot.config.settings import Settings
+if TYPE_CHECKING:
+    from ops_pilot.runtime.spec import RuntimeSpec
 
 
 class RuntimeExtension(Protocol):
@@ -23,4 +24,4 @@ class RuntimeExtension(Protocol):
     async def aclose(self) -> None: ...
 
 
-RuntimeExtensionFactory = Callable[[Settings], Awaitable[RuntimeExtension]]
+RuntimeExtensionFactory = Callable[["RuntimeSpec"], Awaitable[RuntimeExtension]]

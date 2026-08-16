@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
-from ops_pilot.config.settings import Settings
+from ops_pilot.runtime.spec import RuntimeSpec
 
 
 class TextAgent(Protocol):
@@ -24,4 +24,4 @@ class TextAgent(Protocol):
     async def aclose(self) -> None: ...
 
 
-RuntimeFactory = Callable[[Settings], Awaitable[TextAgent]]
+RuntimeFactory = Callable[[RuntimeSpec], Awaitable[TextAgent]]

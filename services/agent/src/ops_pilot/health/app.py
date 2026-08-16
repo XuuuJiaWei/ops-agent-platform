@@ -6,21 +6,24 @@ from fastapi import APIRouter, FastAPI
 
 from ops_pilot.agent.runtime import AgentRuntime
 from ops_pilot.api.errors import register_exception_handlers
-from ops_pilot.config.settings import get_settings
 from ops_pilot.health.status import build_runtime_status, health_snapshot
-
-router = APIRouter()
-
-
-@router.get("/health")
-async def health() -> dict[str, object]:
-    return health_snapshot(get_settings())
+from ops_pilot.runtime.spec import RuntimeSpec
 
 
-def create_health_app(runtime: AgentRuntime | None = None) -> FastAPI:
+def create_health_router(spec: RuntimeSpec) -> APIRouter:
+    router = APIRouter()
+
+    @router.get("/health")
+    async def health() -> dict[str, object]:
+        return health_snapshot(spec)
+
+    return router
+
+
+def create_health_app(spec: RuntimeSpec, runtime: AgentRuntime | None = None) -> FastAPI:
     app = FastAPI(title="ops_pilot Health", version="0.1.0")
     register_exception_handlers(app)
-    app.include_router(router)
+    app.include_router(create_health_router(spec))
 
     if runtime is not None:
 
@@ -31,4 +34,4 @@ def create_health_app(runtime: AgentRuntime | None = None) -> FastAPI:
     return app
 
 
-__all__ = ["build_runtime_status", "create_health_app", "health_snapshot", "router"]
+__all__ = ["build_runtime_status", "create_health_app", "create_health_router", "health_snapshot"]

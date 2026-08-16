@@ -1,106 +1,90 @@
-"""Developer command line interface."""
+"""Developer commands over explicitly declared runtime compositions."""
 
 from __future__ import annotations
 
 import argparse
 import asyncio
 import json
-from collections.abc import Sequence
-from typing import Any
+from dataclasses import replace
+from typing import Any, cast
 
 import uvicorn
 
 from ops_pilot.agent.runtime import build_agent_runtime
 from ops_pilot.benchmarks.aiopslab import run_aiopslab_problem
-from ops_pilot.config.mcp_schema import MCPConfig
-from ops_pilot.config.settings import load_settings
+from ops_pilot.entrypoints.benchmark import build_benchmark_runtime_spec
+from ops_pilot.entrypoints.eval import build_eval_runtime_spec
+from ops_pilot.entrypoints.web import build_web_application_spec
 from ops_pilot.health.status import build_runtime_status, health_snapshot
 from ops_pilot.mcp.status import MCPLoadStatus
 from ops_pilot.models.smoke import smoke_bind_tools, smoke_invoke, smoke_model_invocation
-from ops_pilot.spaces import MemorySpaceRepository
+from ops_pilot.runtime.spec import RuntimeSpec
 from ops_pilot.tools.smoke_tools import get_smoke_tools
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ops_pilot")
-    subcommands = parser.add_subparsers(dest="command", required=True)
+    commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("profiles", help="Print the declared runtime compositions.")
 
-    subcommands.add_parser("settings", help="Print non-secret resolved settings.")
-    subcommands.add_parser("status", help="Build the runtime and print status metadata.")
-    subcommands.add_parser("health", help="Print lightweight health metadata without model init.")
+    status = commands.add_parser("status", help="Build one declared runtime and print status metadata.")
+    status.add_argument("--entry", choices=("web", "eval", "benchmark"), default="web")
 
-    serve = subcommands.add_parser("serve", help="Start the unified backend server.")
+    commands.add_parser("health", help="Print lightweight web-entry health metadata.")
+    serve = commands.add_parser("serve", help="Start the web application runtime.")
     serve.add_argument("--host", default=None)
     serve.add_argument("--port", type=int, default=None)
 
-    smoke = subcommands.add_parser("smoke", help="Run local smoke checks.")
+    smoke = commands.add_parser("smoke", help="Run local smoke checks.")
     smoke_subcommands = smoke.add_subparsers(dest="smoke_command", required=True)
-    smoke_subcommands.add_parser("model", help="Run model invocation and bind_tools checks.")
-    smoke_subcommands.add_parser("agent", help="Build the DeepAgent and invoke a simple prompt.")
-    smoke_subcommands.add_parser("a2a", help="Build the A2A agent card and app route table.")
+    for name in ("model", "agent", "a2a"):
+        smoke_subcommands.add_parser(name)
 
-    benchmark = subcommands.add_parser("benchmark", help="Run an installed benchmark adapter.")
+    benchmark = commands.add_parser("benchmark", help="Run the isolated AIOpsLab composition.")
     benchmark.add_argument("--problem", required=True, help="AIOpsLab problem id.")
-    benchmark.add_argument("--max-steps", type=int, default=30, help="Maximum AIOpsLab agent actions (default: 30).")
+    benchmark.add_argument("--max-steps", type=int, default=30)
 
     args = parser.parse_args(argv)
-    if args.command == "settings":
-        return _print_settings()
+    if args.command == "profiles":
+        print(json.dumps({name: _describe_spec(spec) for name, spec in _profiles().items()}, indent=2, sort_keys=True))
+        return 0
     if args.command == "status":
-        return asyncio.run(_print_status())
+        return asyncio.run(_print_status(_profiles()[args.entry]))
     if args.command == "health":
-        print(json.dumps(health_snapshot(load_settings()), indent=2, sort_keys=True))
+        print(json.dumps(health_snapshot(build_web_application_spec().runtime), indent=2, sort_keys=True))
         return 0
     if args.command == "serve":
-        return _serve_backend(args.host, args.port)
+        return _serve_web(args.host, args.port)
     if args.command == "smoke":
         return _smoke(args.smoke_command)
     if args.command == "benchmark":
-        return _run_server(_run_benchmark(args))
+        return asyncio.run(_run_benchmark(args))
     return 2
 
 
-async def _run_benchmark(args: argparse.Namespace) -> int:
-    result = await run_aiopslab_problem(
-        args.problem,
-        max_steps=args.max_steps,
-    )
-    print(json.dumps(result, indent=2, sort_keys=True))
-    return 0
-
-
-def _run_server(coro: Any) -> int:
-    try:
-        return asyncio.run(coro)
-    except KeyboardInterrupt:
-        return 0
-
-
-def _print_settings() -> int:
-    settings = load_settings()
-    payload = {
-        "app_env": settings.app_env,
-        "assistant_id": settings.assistant_id,
-        "model_max_tokens": settings.model_max_tokens,
-        "model_name": settings.model_name,
-        "system_prompt_configured": bool(settings.system_prompt),
-        "mcp_servers": [server.name for server in settings.mcp.servers],
-        "mcp_hitl_tools": sorted(settings.mcp.hitl_tool_names()),
-        "skills_paths": [str(path) for path in settings.skills_paths],
-        "langfuse_enabled": settings.langfuse_enabled,
-        "chat_base_path": settings.chat_base_path,
-        "chat_host": settings.chat_host,
-        "chat_port": settings.chat_port,
-        "a2a_base_path": settings.a2a_base_path,
-        "persistence_backend": settings.persistence_backend,
-        "persistence_setup_on_start": settings.persistence_setup_on_start,
+def _profiles() -> dict[str, RuntimeSpec]:
+    return {
+        "web": build_web_application_spec().runtime,
+        "eval": build_eval_runtime_spec(),
+        "benchmark": build_benchmark_runtime_spec(),
     }
-    print(json.dumps(payload, indent=2, sort_keys=True))
-    return 0
 
 
-async def _print_status() -> int:
-    runtime = await build_agent_runtime()
+def _describe_spec(spec: RuntimeSpec) -> dict[str, Any]:
+    return {
+        "id": spec.id,
+        "assistant_id": spec.assistant_id,
+        "entrypoint": spec.entrypoint,
+        "model": {"provider": spec.model.provider, "name": spec.model.name},
+        "mcp_servers": [server.name for server in spec.mcp.servers],
+        "persistence": spec.persistence.backend,
+        "sandbox_enabled": spec.sandbox.enabled,
+        "extensions": [factory.__name__ for factory in spec.extensions],
+    }
+
+
+async def _print_status(spec: RuntimeSpec) -> int:
+    runtime = await build_agent_runtime(spec)
     try:
         print(json.dumps(build_runtime_status(runtime), indent=2, sort_keys=True))
         return 0
@@ -108,15 +92,18 @@ async def _print_status() -> int:
         await runtime.aclose()
 
 
-def _serve_backend(host: str | None, port: int | None) -> int:
+def _serve_web(host: str | None, port: int | None) -> int:
     from ops_pilot.backend import create_backend_app
 
-    settings = load_settings()
-    settings = settings.model_copy(
-        update={"chat_host": host or settings.chat_host, "chat_port": port or settings.chat_port}
+    application = build_web_application_spec()
+    application = replace(application, host=host or application.host, port=port or application.port)
+    config = uvicorn.Config(
+        create_backend_app(application),
+        host=application.host,
+        port=application.port,
+        log_level="info",
+        loop="none",
     )
-    app = create_backend_app(settings)
-    config = uvicorn.Config(app, host=settings.chat_host, port=settings.chat_port, log_level="info", loop="none")
     try:
         uvicorn.Server(config).run()
     except KeyboardInterrupt:
@@ -124,63 +111,61 @@ def _serve_backend(host: str | None, port: int | None) -> int:
     return 0
 
 
+async def _run_benchmark(args: argparse.Namespace) -> int:
+    result = await run_aiopslab_problem(args.problem, max_steps=args.max_steps)
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
 def _smoke(command: str) -> int:
+    spec = build_eval_runtime_spec()
     if command == "model":
-        return _smoke_model()
+        results = [smoke_model_invocation(spec.model), smoke_bind_tools(spec.model)]
+        for result in results:
+            print(f"{'ok' if result.ok else 'fail'}: {result.name}: {result.detail}")
+        return 0 if all(result.ok for result in results) else 1
     if command == "agent":
-        return asyncio.run(_smoke_agent())
+        return asyncio.run(_smoke_agent(spec))
     if command == "a2a":
         return asyncio.run(_smoke_a2a())
     raise ValueError(f"Unknown smoke command: {command}")
 
 
-def _smoke_model() -> int:
-    results = [smoke_model_invocation(), smoke_bind_tools()]
-    for result in results:
-        prefix = "ok" if result.ok else "fail"
-        print(f"{prefix}: {result.name}: {result.detail}")
-    return 0 if all(result.ok for result in results) else 1
-
-
-async def _smoke_agent() -> int:
-    settings = load_settings().model_copy(update={"mcp": MCPConfig()})
-    runtime = await build_agent_runtime(settings=settings, extra_tools=get_smoke_tools())
+async def _smoke_agent(spec: RuntimeSpec) -> int:
+    runtime = await build_agent_runtime(spec.with_tools(get_smoke_tools()))
     try:
-        response = await runtime.ainvoke_text(
-            "Use add_numbers to compute 2 + 3, then reply with the result.",
-            protocol="smoke",
-            thread_id="smoke-agent",
+        print(
+            await runtime.ainvoke_text(
+                "Use add_numbers to compute 2 + 3, then reply with the result.",
+                protocol="smoke",
+                thread_id="smoke-agent",
+            )
         )
-        print(response)
         return 0
     finally:
         await runtime.aclose()
 
 
 async def _smoke_a2a() -> int:
-    from ops_pilot.a2a.agent_card import build_agent_card
     from ops_pilot.backend import create_backend_app
 
-    settings = load_settings().model_copy(update={"persistence_backend": "memory", "spaces_resolver_enabled": False})
-    card = build_agent_card(settings)
-    print(card)
-    app = create_backend_app(settings, runtime=_DummyRuntime())
+    application = replace(build_web_application_spec(), enable_spaces=False)
+    app = create_backend_app(application, runtime=cast(Any, _DummyRuntime(application.runtime)))
     async with app.router.lifespan_context(app):
-        print("routes:", ", ".join(_route_paths(app)))
+        print("routes:", ", ".join(sorted(app.openapi().get("paths", {}))))
     return 0
-
-
-def _smoke_invoke_for_compat() -> str:
-    return smoke_invoke(load_settings())
 
 
 class _DummyRuntime:
     graph = type("SmokeGraph", (), {"nodes": {}})()
     mcp = type("SmokeMCP", (), {"status": MCPLoadStatus(), "tools": (), "hitl_tools": ()})()
-    spaces = MemorySpaceRepository()
+    tools = ()
     run_controller = None
 
-    def runnable_config(self, **_: object) -> dict:
+    def __init__(self, spec: RuntimeSpec) -> None:
+        self.spec = spec
+
+    def runnable_config(self, **_: object) -> dict[str, Any]:
         return {}
 
     async def ainvoke_text(self, text: str, **_: object) -> str:
@@ -193,8 +178,8 @@ class _DummyRuntime:
         return None
 
 
-def _route_paths(app) -> list[str]:
-    return sorted(app.openapi().get("paths", {}))
+def _smoke_invoke_for_compat() -> str:
+    return smoke_invoke(build_eval_runtime_spec().model)
 
 
 if __name__ == "__main__":

@@ -21,11 +21,10 @@ LANGFUSE_PUBLIC_KEY=pk-lf-...
 LANGFUSE_SECRET_KEY=sk-lf-...
 ```
 
-Keep `config/config.yaml` pointed at the local server:
+Select the local endpoint for the entrypoint you are running:
 
-```yaml
-langfuse:
-  base_url: http://localhost:3001
+```dotenv
+OPS_PILOT_WEB_LANGFUSE_BASE_URL=http://localhost:3001
 ```
 
 ## Useful Commands

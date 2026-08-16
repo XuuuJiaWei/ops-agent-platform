@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, NamedTuple
 
-from ops_pilot.config.settings import Settings
+from ops_pilot.runtime.spec import SandboxSpec
 
 
 class _OpenSandboxSymbols(NamedTuple):
@@ -107,40 +107,32 @@ class SandboxRuntime:
                 close()
 
 
-def create_sandbox_runtime(settings: Settings) -> SandboxRuntime | None:
+def create_sandbox_runtime(spec: SandboxSpec) -> SandboxRuntime | None:
     """Create the configured DeepAgents sandbox backend, if enabled."""
 
-    if not settings.open_sandbox_enabled:
+    if not spec.enabled:
         return None
-    if not settings.open_sandbox_domain:
-        raise RuntimeError("OPEN_SANDBOX_DOMAIN is required when OPEN_SANDBOX_ENABLED is true.")
-    if not settings.open_sandbox_api_key:
-        raise RuntimeError("OPEN_SANDBOX_API_KEY is required when OPEN_SANDBOX_ENABLED is true.")
 
     symbols = _load_opensandbox_symbols()
     connection = symbols.connection_config_cls(
-        api_key=settings.open_sandbox_api_key,
-        domain=settings.open_sandbox_domain,
-        protocol=settings.open_sandbox_protocol,
-        use_server_proxy=settings.open_sandbox_use_server_proxy,
-        disable_metrics=settings.open_sandbox_disable_metrics,
+        api_key=spec.api_key,
+        domain=spec.domain,
+        protocol=spec.protocol,
+        use_server_proxy=spec.use_server_proxy,
+        disable_metrics=spec.disable_metrics,
     )
-    sandbox_timeout = (
-        timedelta(seconds=settings.open_sandbox_timeout_seconds)
-        if settings.open_sandbox_timeout_seconds is not None
-        else None
-    )
+    sandbox_timeout = timedelta(seconds=spec.timeout_seconds) if spec.timeout_seconds is not None else None
     sandbox = symbols.sandbox_cls.create(
-        settings.open_sandbox_image,
+        spec.image,
         timeout=sandbox_timeout,
-        ready_timeout=timedelta(seconds=settings.open_sandbox_ready_timeout_seconds),
+        ready_timeout=timedelta(seconds=spec.ready_timeout_seconds),
         resource={
-            "cpu": settings.open_sandbox_cpu_limit,
-            "memory": settings.open_sandbox_memory_limit,
+            "cpu": spec.cpu_limit,
+            "memory": spec.memory_limit,
         },
         resource_requests={
-            "cpu": settings.open_sandbox_cpu_request,
-            "memory": settings.open_sandbox_memory_request,
+            "cpu": spec.cpu_request,
+            "memory": spec.memory_request,
         },
         env={},
         entrypoint=["tail", "-f", "/dev/null"],
@@ -150,11 +142,11 @@ def create_sandbox_runtime(settings: Settings) -> SandboxRuntime | None:
     return SandboxRuntime(
         backend=backend,
         sandbox=sandbox,
-        image=settings.open_sandbox_image,
-        domain=settings.open_sandbox_domain,
-        protocol=settings.open_sandbox_protocol,
-        use_server_proxy=settings.open_sandbox_use_server_proxy,
-        timeout_seconds=settings.open_sandbox_timeout_seconds,
+        image=spec.image,
+        domain=spec.domain,
+        protocol=spec.protocol,
+        use_server_proxy=spec.use_server_proxy,
+        timeout_seconds=spec.timeout_seconds,
     )
 
 

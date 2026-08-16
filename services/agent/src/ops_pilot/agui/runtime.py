@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ops_pilot.config.settings import Settings
+from ops_pilot.runtime.spec import RuntimeSpec
 
 
 class CopilotKitRuntimeExtension:
@@ -26,5 +26,5 @@ class CopilotKitRuntimeExtension:
         return None
 
 
-async def create_copilotkit_runtime_extension(_: Settings) -> CopilotKitRuntimeExtension:
+async def create_copilotkit_runtime_extension(_: RuntimeSpec) -> CopilotKitRuntimeExtension:
     return CopilotKitRuntimeExtension()

@@ -133,7 +133,6 @@ function assertWorkspace() {
   const requiredFiles = [
     "package.json",
     "pnpm-workspace.yaml",
-    "config/config.example.yaml",
     "apps/web/package.json",
     "apps/copilot-runtime/package.json",
     "services/agent/pyproject.toml",
@@ -157,41 +156,23 @@ function resolveDevEnvironment() {
     return { ...process.env };
   }
 
-  const result = spawnSync("uv", ["run", "ops_pilot", "settings"], {
-    cwd: agentDir,
-    encoding: "utf8",
-    env: process.env,
-  });
-  if (result.error || result.status !== 0) {
-    const detail = result.stderr?.trim() || result.error?.message || `exit code ${result.status}`;
-    throw new Error(`Could not resolve backend settings: ${detail}`);
-  }
-
-  let settings;
-  try {
-    settings = JSON.parse(result.stdout);
-  } catch (error) {
-    throw new Error(`Backend settings returned invalid JSON: ${error.message}`, { cause: error });
-  }
-
-  const backendHost = process.env.CHAT_HOST || String(settings.chat_host);
-  const backendPort = process.env.CHAT_PORT || String(settings.chat_port);
-  const chatPath = normalizePath(String(settings.chat_base_path));
+  const backendHost = process.env.OPS_PILOT_WEB_HOST || "127.0.0.1";
+  const backendPort = process.env.OPS_PILOT_WEB_PORT || "8123";
+  const chatPath = normalizePath(process.env.OPS_PILOT_WEB_CHAT_BASE_PATH || "/chat");
   const backendUrl = `http://${backendHost}:${backendPort}`;
+  const assistantId = process.env.OPS_PILOT_WEB_ASSISTANT_ID || "agent";
 
   return {
     ...process.env,
-    AGUI_AGENT_URL: process.env.AGUI_AGENT_URL || `${backendUrl}${chatPath}`,
-    ASSISTANT: String(settings.assistant_id),
-    ASSISTANT_ID: process.env.ASSISTANT_ID || String(settings.assistant_id),
+    COPILOTKIT_AGUI_AGENT_URL: process.env.COPILOTKIT_AGUI_AGENT_URL || `${backendUrl}${chatPath}`,
+    COPILOTKIT_AGENT_ID: process.env.COPILOTKIT_AGENT_ID || assistantId,
     BACKEND_HOST: backendHost,
     BACKEND_PORT: backendPort,
     BACKEND_URL: backendUrl,
     CHAT_PATH: chatPath,
     OPS_PILOT_DEV_ENV_READY: "1",
-    OPS_PILOT_PERSISTENCE_BACKEND: String(settings.persistence_backend),
-    OPS_PILOT_PERSISTENCE_SETUP_ON_START: String(settings.persistence_setup_on_start),
     VITE_BACKEND_URL: process.env.VITE_BACKEND_URL || backendUrl,
+    VITE_ASSISTANT_ID: process.env.VITE_ASSISTANT_ID || assistantId,
   };
 }
 

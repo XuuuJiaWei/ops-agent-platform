@@ -6,11 +6,11 @@ from typing import Any
 
 from langchain_core.runnables import RunnableConfig
 
-from ops_pilot.config.settings import Settings
+from ops_pilot.runtime.spec import RuntimeSpec
 
 
 def build_trace_metadata(
-    settings: Settings,
+    runtime: RuntimeSpec,
     *,
     protocol: str,
     thread_id: str | None = None,
@@ -21,10 +21,10 @@ def build_trace_metadata(
 ) -> dict[str, Any]:
     session_id = thread_id or a2a_context_id
     metadata: dict[str, Any] = {
-        "assistant_id": settings.assistant_id,
+        "assistant_id": runtime.assistant_id,
         "protocol": protocol,
-        "model_provider": settings.model_provider,
-        "model_name": settings.model_name,
+        "model_provider": runtime.model.provider,
+        "model_name": runtime.model.name,
         "langfuse_trace_name": _trace_name(protocol),
         "langfuse_tags": _trace_tags(protocol),
     }
@@ -47,7 +47,7 @@ def build_trace_metadata(
 
 
 def build_runnable_config(
-    settings: Settings,
+    runtime: RuntimeSpec,
     *,
     callbacks: tuple[Any, ...] = (),
     protocol: str,
@@ -59,7 +59,7 @@ def build_runnable_config(
     extra_metadata: dict[str, Any] | None = None,
 ) -> RunnableConfig:
     metadata = build_trace_metadata(
-        settings,
+        runtime,
         protocol=protocol,
         thread_id=thread_id,
         run_id=run_id,
@@ -98,7 +98,7 @@ def _trace_name(protocol: str) -> str:
     return names.get(protocol, "run-agent")
 
 
-def build_model_metadata(settings: Settings, model: Any) -> dict[str, Any]:
+def build_model_metadata(runtime: RuntimeSpec, model: Any) -> dict[str, Any]:
     """Describe effective model capacity and policy without estimating usage."""
 
     profile = getattr(model, "profile", {})
@@ -110,7 +110,7 @@ def build_model_metadata(settings: Settings, model: Any) -> dict[str, Any]:
             for name in ("model_id", "model_name", "model")
             if isinstance((value := getattr(model, name, None)), str) and value
         ),
-        settings.model_name,
+        runtime.model.name,
     )
     return {
         # Langfuse's LangChain integration reads this standard metadata key to
@@ -119,11 +119,11 @@ def build_model_metadata(settings: Settings, model: Any) -> dict[str, Any]:
         "model_request_name": request_model,
         "model_context_window_tokens": profile.get("max_input_tokens"),
         "model_max_output_tokens": profile.get("max_output_tokens"),
-        "model_configured_max_output_tokens": settings.model_max_tokens,
-        "model_request_timeout_seconds": settings.model_request_timeout_seconds,
+        "model_configured_max_output_tokens": runtime.model.max_tokens,
+        "model_request_timeout_seconds": runtime.model.request_timeout_seconds,
         "model_reasoning_supported": bool(profile.get("reasoning_output", False)),
-        "model_reasoning_mode": settings.model_reasoning_mode,
-        "model_reasoning_effort": settings.model_reasoning_effort,
+        "model_reasoning_mode": runtime.model.reasoning_mode,
+        "model_reasoning_effort": runtime.model.reasoning_effort,
         "model_prompt_cache_strategy": "deepagents_provider_middleware",
     }
 

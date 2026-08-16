@@ -9,9 +9,8 @@ from typing import Any
 import httpx
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
-from ops_pilot.config.mcp_schema import MCPConfig, MCPServerConfig
-from ops_pilot.config.settings import Settings
 from ops_pilot.errors import safe_exception_summary
+from ops_pilot.mcp.spec import MCPServerCatalog, MCPServerSpec
 from ops_pilot.mcp.status import MCPLoadResult, MCPLoadStatus, MCPServerLoadStatus
 
 logger = logging.getLogger(__name__)
@@ -28,7 +27,7 @@ class RequiredMCPServerError(MCPLoadError):
     """Raised when a required MCP server fails initialization."""
 
 
-async def load_mcp_tools(settings: Settings | MCPConfig) -> MCPLoadResult:
+async def load_mcp_tools(catalog: MCPServerCatalog) -> MCPLoadResult:
     """Initialize configured servers and return loop-neutral LangChain tools.
 
     ``MultiServerMCPClient.get_tools`` owns the protocol lifecycle. The tools it
@@ -36,20 +35,18 @@ async def load_mcp_tools(settings: Settings | MCPConfig) -> MCPLoadResult:
     be invoked from Langfuse worker event loops without a local reconnect layer.
     """
 
-    config = settings if isinstance(settings, MCPConfig) else settings.mcp
-    config_path = None if isinstance(settings, MCPConfig) else "config.yaml"
-    if not config.servers:
-        return MCPLoadResult(tools=[], status=MCPLoadStatus(config_path=config_path))
+    if not catalog.servers:
+        return MCPLoadResult(tools=[], status=MCPLoadStatus())
 
     connections: dict[str, Any] = {}
-    for server in config.servers:
+    for server in catalog.servers:
         connection = dict(server.to_client_connection())
         if connection["transport"] == "streamable_http":
             connection["httpx_client_factory"] = _create_http_client
         connections[server.name] = connection
     client = MultiServerMCPClient(connections, handle_tool_errors=True)
 
-    async def load(server: MCPServerConfig) -> list[Any]:
+    async def load(server: MCPServerSpec) -> list[Any]:
         for attempt in range(1, MCP_LOAD_MAX_ATTEMPTS + 1):
             try:
                 return list(await client.get_tools(server_name=server.name))
@@ -66,14 +63,14 @@ async def load_mcp_tools(settings: Settings | MCPConfig) -> MCPLoadResult:
                 await asyncio.sleep(MCP_LOAD_RETRY_DELAY_SECONDS * attempt)
         raise AssertionError("unreachable")
 
-    loaded = await asyncio.gather(*(load(server) for server in config.servers), return_exceptions=True)
+    loaded = await asyncio.gather(*(load(server) for server in catalog.servers), return_exceptions=True)
     tools: list[Any] = []
     statuses: list[MCPServerLoadStatus] = []
     hitl_tools: list[str] = []
     retry_tools: list[str] = []
     tool_servers: dict[str, str] = {}
 
-    for server, result in zip(config.servers, loaded, strict=True):
+    for server, result in zip(catalog.servers, loaded, strict=True):
         if isinstance(result, BaseException):
             error = safe_exception_summary(result, limit=2000)
             statuses.append(
@@ -109,21 +106,21 @@ async def load_mcp_tools(settings: Settings | MCPConfig) -> MCPLoadResult:
 
     return MCPLoadResult(
         tools=tools,
-        status=MCPLoadStatus(config_path=config_path, servers=tuple(statuses)),
+        status=MCPLoadStatus(servers=tuple(statuses)),
         hitl_tools=tuple(dict.fromkeys(hitl_tools)),
         tool_servers=tool_servers,
         retry_tools=tuple(dict.fromkeys(retry_tools)),
     )
 
 
-def _allowed_tools(server: MCPServerConfig, tools: list[Any]) -> list[Any]:
+def _allowed_tools(server: MCPServerSpec, tools: list[Any]) -> list[Any]:
     if not server.allow_tools:
         return tools
     allowed = set(server.allow_tools)
     return [tool for tool in tools if _tool_name(tool) in allowed]
 
 
-def _warn_unknown_policy_tools(server: MCPServerConfig, loaded_names: set[str]) -> None:
+def _warn_unknown_policy_tools(server: MCPServerSpec, loaded_names: set[str]) -> None:
     configured = set(server.allow_tools) | set(server.hitl_tools) | set(server.retry_tools)
     unknown = configured - loaded_names
     if unknown:

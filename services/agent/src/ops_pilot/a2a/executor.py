@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from typing import Protocol
 
-from ops_pilot.config.settings import Settings
 from ops_pilot.errors import log_exception
 
 logger = logging.getLogger(__name__)
@@ -25,7 +24,7 @@ class A2ARuntime(Protocol):
     async def cancel_run(self, run_id: str, *, reason: str = "cancel requested") -> bool: ...
 
 
-def create_executor(runtime: A2ARuntime, settings: Settings):
+def create_executor(runtime: A2ARuntime):
     """Create an official A2A SDK executor for the DeepAgent runtime."""
 
     from a2a.server.agent_execution import AgentExecutor

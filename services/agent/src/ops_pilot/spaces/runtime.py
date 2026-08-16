@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from ops_pilot.config.settings import Settings
+from ops_pilot.runtime.spec import RuntimeSpec
 from ops_pilot.spaces.factory import create_space_repository
 from ops_pilot.spaces.repository import SpaceRepository
 from ops_pilot.spaces.tools import build_space_tools
@@ -47,6 +47,6 @@ class SpacesRuntimeExtension:
             await self._closer()
 
 
-async def create_spaces_runtime_extension(settings: Settings) -> SpacesRuntimeExtension:
-    repository, closer = await create_space_repository(settings)
+async def create_spaces_runtime_extension(spec: RuntimeSpec) -> SpacesRuntimeExtension:
+    repository, closer = await create_space_repository(spec.persistence, namespace=spec.assistant_id)
     return SpacesRuntimeExtension(repository=repository, _closer=closer)

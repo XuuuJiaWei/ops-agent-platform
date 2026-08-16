@@ -6,9 +6,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from ops_pilot.config.mcp_schema import MCPConfig
-from ops_pilot.config.settings import Settings
 from ops_pilot.mcp.loader import load_mcp_tools
+from ops_pilot.mcp.spec import MCPServerCatalog
 from ops_pilot.mcp.status import MCPLoadStatus
 
 
@@ -21,25 +20,11 @@ class MCPRegistry:
     retry_tools: tuple[str, ...] = field(default_factory=tuple)
 
     @classmethod
-    async def from_settings(cls, settings: Settings) -> MCPRegistry:
-        result = await load_mcp_tools(settings)
+    async def from_catalog(cls, catalog: MCPServerCatalog) -> MCPRegistry:
+        result = await load_mcp_tools(catalog)
         return cls(
             tools=tuple(result.tools),
             status=result.status,
-            hitl_tools=tuple(result.hitl_tools),
-            tool_servers=dict(result.tool_servers),
-            retry_tools=tuple(result.retry_tools),
-        )
-
-    @classmethod
-    async def from_config(cls, config: MCPConfig, *, config_path: str | None = None) -> MCPRegistry:
-        result = await load_mcp_tools(config)
-        status = result.status
-        if config_path is not None:
-            status = MCPLoadStatus(config_path=config_path, servers=status.servers)
-        return cls(
-            tools=tuple(result.tools),
-            status=status,
             hitl_tools=tuple(result.hitl_tools),
             tool_servers=dict(result.tool_servers),
             retry_tools=tuple(result.retry_tools),
@@ -50,5 +35,5 @@ class MCPRegistry:
         return tuple(getattr(tool, "name", repr(tool)) for tool in self.tools)
 
 
-async def create_mcp_registry(settings: Settings) -> MCPRegistry:
-    return await MCPRegistry.from_settings(settings)
+async def create_mcp_registry(catalog: MCPServerCatalog) -> MCPRegistry:
+    return await MCPRegistry.from_catalog(catalog)

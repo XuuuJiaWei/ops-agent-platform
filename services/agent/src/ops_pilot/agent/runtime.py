@@ -12,14 +12,14 @@ from deepagents import create_deep_agent
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import MemorySaver
 
-from ops_pilot.agent.extensions import RuntimeExtension, RuntimeExtensionFactory
+from ops_pilot.agent.extensions import RuntimeExtension
 from ops_pilot.agent.results import extract_result_text
-from ops_pilot.config.settings import Settings, load_settings
 from ops_pilot.mcp.registry import MCPRegistry, create_mcp_registry
 from ops_pilot.models import create_chat_model
 from ops_pilot.observability.langfuse import TracingSetup, create_callback_handler, flush_tracing
 from ops_pilot.observability.metadata import build_model_metadata, build_runnable_config
 from ops_pilot.reliability.run import RunController
+from ops_pilot.runtime.spec import PersistenceSpec, RuntimeSpec
 from ops_pilot.sandbox import SandboxManager, SandboxRuntime, create_sandbox_manager
 from ops_pilot.skills.resolver import resolve_skill_paths
 from ops_pilot.skills.sync import sync_skill_paths_to_backend
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 @dataclass(frozen=True)
 class AgentRuntime:
     graph: Any
-    settings: Settings
+    spec: RuntimeSpec
     tools: tuple[Any, ...] = field(default_factory=tuple)
     skills: tuple[str, ...] = field(default_factory=tuple)
     mcp: MCPRegistry = field(default_factory=MCPRegistry)
@@ -71,7 +71,7 @@ class AgentRuntime:
     ) -> RunnableConfig:
         metadata = {**self.model_metadata, **(extra_metadata or {})}
         return build_runnable_config(
-            self.settings,
+            self.spec,
             callbacks=self.tracing.callbacks,
             protocol=protocol,
             thread_id=thread_id,
@@ -158,7 +158,9 @@ class AgentRuntime:
                 deadline_seconds=deadline_seconds,
             )
         except TimeoutError as exc:
-            effective_deadline = self.settings.run_deadline_seconds if deadline_seconds is None else deadline_seconds
+            effective_deadline = (
+                self.spec.reliability.run_deadline_seconds if deadline_seconds is None else deadline_seconds
+            )
             if effective_deadline is None:
                 raise
             raise TimeoutError(f"Agent invocation timed out after {effective_deadline:g}s.") from exc
@@ -176,15 +178,8 @@ class AgentRuntime:
         raise RuntimeError(f"Runtime extension is not enabled: {extension_type.__name__}.")
 
 
-async def build_agent_runtime(
-    settings: Settings | None = None,
-    *,
-    attach_checkpointer: bool = True,
-    bypass_hitl: bool = False,
-    extra_tools: Sequence[Any] = (),
-    extensions: Sequence[RuntimeExtensionFactory] = (),
-) -> AgentRuntime:
-    """Build the shared DeepAgent runtime.
+async def build_agent_runtime(spec: RuntimeSpec) -> AgentRuntime:
+    """Build one DeepAgent runtime from an explicit host composition.
 
     DeepAgents long-term/semantic memory is intentionally not configured here.
     Runtime continuity is provided by LangGraph's checkpointer: an in-memory
@@ -194,38 +189,37 @@ async def build_agent_runtime(
     platform server) or need a stateless graph (eval runs).
     """
 
-    resolved_settings = settings or load_settings()
-    model = create_chat_model(resolved_settings)
-    model_metadata = build_model_metadata(resolved_settings, model)
-    mcp_registry = await create_mcp_registry(resolved_settings)
-    local_skills = tuple(resolve_skill_paths(resolved_settings))
-    tracing = create_callback_handler(resolved_settings)
-    run_controller = RunController(default_deadline_seconds=resolved_settings.run_deadline_seconds)
+    model = create_chat_model(spec.model)
+    model_metadata = build_model_metadata(spec, model)
+    mcp_registry = await create_mcp_registry(spec.mcp)
+    local_skills = tuple(str(path) for path in resolve_skill_paths(spec.skills))
+    tracing = create_callback_handler(spec.observability)
+    run_controller = RunController(default_deadline_seconds=spec.reliability.run_deadline_seconds)
 
     sandbox: SandboxManager | None = None
     checkpointer_closer: Callable[[], Awaitable[None]] | None = None
     runtime_extensions: list[RuntimeExtension] = []
     try:
-        middleware = _create_runtime_middleware(resolved_settings, mcp_registry.retry_tools)
-        for create_extension in extensions:
-            runtime_extensions.append(await create_extension(resolved_settings))
+        middleware = _create_runtime_middleware(spec, mcp_registry.retry_tools)
+        for create_extension in spec.extensions:
+            runtime_extensions.append(await create_extension(spec))
         tools = [
             *mcp_registry.tools,
             *(tool for extension in runtime_extensions for tool in extension.tools),
-            *extra_tools,
+            *spec.tools,
         ]
         checkpointer, checkpointer_closer = (
-            await _create_checkpointer(resolved_settings) if attach_checkpointer else (None, None)
+            await _create_checkpointer(spec.persistence) if spec.attach_checkpointer else (None, None)
         )
-        sandbox = create_sandbox_manager(resolved_settings)
+        sandbox = create_sandbox_manager(spec.sandbox)
         skills = _resolve_backend_skill_paths(local_skills, sandbox)
-        interrupt_on = {} if bypass_hitl else {name: True for name in mcp_registry.hitl_tools}
+        interrupt_on = {} if spec.bypass_hitl else {name: True for name in mcp_registry.hitl_tools}
         graph = _create_deep_agent(
             model=model,
             tools=tools,
             skills=list(skills),
             system_prompt=_system_prompt(
-                resolved_settings.system_prompt,
+                spec.system_prompt,
                 *(fragment for extension in runtime_extensions for fragment in extension.prompt_fragments),
             ),
             checkpointer=checkpointer,
@@ -244,7 +238,7 @@ async def build_agent_runtime(
         raise
     return AgentRuntime(
         graph=graph,
-        settings=resolved_settings,
+        spec=spec,
         tools=tuple(tools),
         skills=skills,
         mcp=mcp_registry,
@@ -274,10 +268,10 @@ def _resolve_backend_skill_paths(
     return sync_result.remote_paths
 
 
-def _create_runtime_middleware(settings: Settings, retry_tools: tuple[str, ...]) -> list[Any]:
+def _create_runtime_middleware(spec: RuntimeSpec, retry_tools: tuple[str, ...]) -> list[Any]:
     """Build the production guardrails from LangChain's official middleware."""
 
-    if not settings.reliability_enabled:
+    if not spec.reliability.enabled:
         return []
 
     from langchain.agents.middleware import (
@@ -287,19 +281,19 @@ def _create_runtime_middleware(settings: Settings, retry_tools: tuple[str, ...])
     )
 
     middleware: list[Any] = [
-        ModelCallLimitMiddleware(run_limit=settings.model_call_limit, exit_behavior="error"),
-        ToolCallLimitMiddleware(run_limit=settings.tool_call_limit, exit_behavior="error"),
+        ModelCallLimitMiddleware(run_limit=spec.reliability.model_call_limit, exit_behavior="error"),
+        ToolCallLimitMiddleware(run_limit=spec.reliability.tool_call_limit, exit_behavior="error"),
     ]
     if retry_tools:
         middleware.append(
             ToolRetryMiddleware(
                 tools=list(retry_tools),
-                max_retries=settings.tool_retry_max_retries,
+                max_retries=spec.reliability.tool_retry_max_retries,
                 retry_on=(TimeoutError, ConnectionError),
-                initial_delay=settings.tool_retry_initial_delay_seconds,
-                backoff_factor=settings.tool_retry_backoff_factor,
-                max_delay=settings.tool_retry_max_delay_seconds,
-                jitter=settings.tool_retry_jitter,
+                initial_delay=spec.reliability.tool_retry_initial_delay_seconds,
+                backoff_factor=spec.reliability.tool_retry_backoff_factor,
+                max_delay=spec.reliability.tool_retry_max_delay_seconds,
+                jitter=spec.reliability.tool_retry_jitter,
                 on_failure="continue",
             )
         )
@@ -339,7 +333,7 @@ def _create_deep_agent(
 
 
 async def _create_checkpointer(
-    settings: Settings,
+    persistence: PersistenceSpec,
 ) -> tuple[Any | None, Callable[[], Awaitable[None]] | None]:
     """Build a LangGraph checkpointer for durable execution.
 
@@ -348,8 +342,8 @@ async def _create_checkpointer(
     it is ``None`` when the checkpointer holds nothing to release.
     """
 
-    if settings.persistence_backend == "postgres":
-        return await _create_postgres_checkpointer(settings)
+    if persistence.backend == "postgres":
+        return await _create_postgres_checkpointer(persistence)
     return _create_memory_checkpointer(), None
 
 
@@ -358,7 +352,7 @@ def _create_memory_checkpointer() -> MemorySaver:
 
 
 async def _create_postgres_checkpointer(
-    settings: Settings,
+    persistence: PersistenceSpec,
 ) -> tuple[Any, Callable[[], Awaitable[None]]]:
     """Open a long-lived psycopg pool and wrap it in ``AsyncPostgresSaver``.
 
@@ -372,7 +366,7 @@ async def _create_postgres_checkpointer(
     from psycopg.rows import DictRow, dict_row
     from psycopg_pool import AsyncConnectionPool
 
-    conn_string = settings.psycopg_database_url()
+    conn_string = _psycopg_database_url(persistence.database_url)
     if not conn_string:
         raise RuntimeError("persistence.backend is 'postgres' but DATABASE_URL is not set.")
 
@@ -388,7 +382,7 @@ async def _create_postgres_checkpointer(
     await pool.open(wait=True)
     try:
         checkpointer = AsyncPostgresSaver(pool)
-        if settings.persistence_setup_on_start:
+        if persistence.setup_on_start:
             await checkpointer.setup()
     except Exception:
         await pool.close()
@@ -398,6 +392,13 @@ async def _create_postgres_checkpointer(
         await pool.close()
 
     return checkpointer, _close
+
+
+def _psycopg_database_url(database_url: str | None) -> str | None:
+    if not database_url or not database_url.startswith("postgresql+"):
+        return database_url
+    rest = database_url[len("postgresql") :]
+    return "postgresql" + rest[rest.index("://") :]
 
 
 def _unwrap_graph_result(result: Any) -> Any:

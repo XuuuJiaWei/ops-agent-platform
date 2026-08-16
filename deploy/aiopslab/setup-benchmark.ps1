@@ -9,8 +9,7 @@
 #      (the Kubernetes Python client cannot use the gardenlogin exec plugin).
 #   5. Creates the astronomy-shop namespace + read-only observer RBAC and
 #      generates the observer kubeconfig for the agent's Kubernetes MCP.
-#   6. Bootstraps config/config.yaml from deploy/aiopslab/ops-pilot-config.example.yaml
-#      when missing, and prints the two launch commands.
+#   6. Prints the benchmark entrypoint variables and launch commands.
 #
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File deploy/aiopslab/setup-benchmark.ps1
@@ -133,16 +132,11 @@ if (-not (Test-Path $observerScript)) {
 powershell -NoProfile -ExecutionPolicy Bypass -File $observerScript -OutFile $ObserverKubeconfig
 Write-Host "Observer kubeconfig: $ObserverKubeconfig"
 
-Write-Host "==> 7. ops_pilot config/config.yaml"
-$opsConfig = Join-Path $RepoRoot "config\config.yaml"
-if (-not (Test-Path $opsConfig)) {
-    Copy-Item (Join-Path $PSScriptRoot "ops-pilot-config.example.yaml") $opsConfig
-    Write-Host "Wrote $opsConfig from the example. Edit the model section and the"
-    Write-Host "observer kubeconfig path (C:/Users/<you>/.kube/ops-pilot-observer.kubeconfig)."
-} else {
-    Write-Host "$opsConfig already exists (kept). Verify its kubernetes MCP"
-    Write-Host "kubeconfig points at $ObserverKubeconfig."
-}
+Write-Host "==> 7. OpsPilot benchmark entrypoint"
+Write-Host "Add these non-secret values to the repository .env (or set them in Terminal B):"
+Write-Host "  OPS_PILOT_BENCHMARK_KUBECONFIG=$ObserverKubeconfig"
+Write-Host "  OPS_PILOT_BENCHMARK_MODEL_PROVIDER=<sap|openai|deepseek|...>"
+Write-Host "  OPS_PILOT_BENCHMARK_MODEL_NAME=<tool-calling-model>"
 if (-not (Test-Path (Join-Path $RepoRoot ".env"))) {
     Write-Warning ".env missing - copy .env.example and add MODEL_API_KEY (or AICORE_* credentials)."
 }
@@ -157,4 +151,5 @@ Write-Host "  .venv\Scripts\python.exe $RepoRoot\benchmarks\aiopslab_bridge\app.
 Write-Host ""
 Write-Host "Terminal B (OpsPilot agent):"
 Write-Host "  cd $RepoRoot\services\agent"
-Write-Host "  uv run ops_pilot benchmark --base-url http://127.0.0.1:1819 --problem astronomy_shop_payment_pod_kill-localization-1 --persistent"
+Write-Host "  `$env:OPS_PILOT_BENCHMARK_KUBECONFIG = '$ObserverKubeconfig'"
+Write-Host "  uv run ops_pilot benchmark --problem astronomy_shop_payment_pod_kill-localization-1"

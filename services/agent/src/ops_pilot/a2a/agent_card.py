@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from ops_pilot.config.settings import Settings
 
-
-def build_agent_card(settings: Settings):
+def build_agent_card(*, assistant_id: str, host: str, port: int, a2a_base_path: str):
     """Return an official A2A AgentCard for public discovery."""
 
     from a2a.types import (
@@ -16,7 +14,7 @@ def build_agent_card(settings: Settings):
         AgentSkill,
     )
 
-    base_url = f"http://{settings.chat_host}:{settings.chat_port}{settings.a2a_base_path}"
+    base_url = f"http://{host}:{port}{a2a_base_path}"
 
     return AgentCard(
         name="ops_pilot",
@@ -31,7 +29,7 @@ def build_agent_card(settings: Settings):
         default_output_modes=["text/plain", "task-status"],
         skills=[
             AgentSkill(
-                id=settings.assistant_id,
+                id=assistant_id,
                 name="Operations assistant",
                 description="Answer operations questions and use configured MCP tools.",
                 tags=["operations", "sap-ai-core", "deepagents"],
