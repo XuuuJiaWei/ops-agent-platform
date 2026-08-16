@@ -1,0 +1,117 @@
+# Low-cost deterministic regression set backed by eval/replay/*.json.
+#
+# These cases do NOT inject faults into a live cluster. Each case is bound to a
+# telemetry fixture by case id. Seed fixtures are explicitly marked
+# `origin=synthetic_seed`; they exercise the replay/eval pipeline without being
+# presented as captured production telemetry.
+
+cases:
+  - id: replay-payment-charge-failure
+    category: diagnosis
+    split: benchmark
+    source: replay
+    version: "2026-08"
+    prompt: >-
+      PagerDuty alert: checkout conversion has dropped and customers report that
+      payment sometimes fails when they place an order. Investigate the charge
+      path, identify which service is returning errors, and estimate the recent
+      failure fraction from telemetry.
+    expected_output: payment
+    expected_tools: [search_traces]
+    rubric: >-
+      Pass if the response identifies paymentservice / PaymentService Charge as
+      the failing component, cites trace error evidence, gives an approximately
+      one-half failure fraction with a sample/window, and does not claim a fix.
+    tags: [replay, traces, payment]
+    timeout_s: 120
+
+  - id: replay-ad-cpu-saturation
+    category: diagnosis
+    split: benchmark
+    source: replay
+    version: "2026-08"
+    prompt: >-
+      Ad requests are slow while the rest of the storefront remains responsive.
+      Use metrics to localize the bottleneck and distinguish resource pressure
+      from an application-error spike.
+    expected_output: ad
+    expected_tools: [query]
+    rubric: >-
+      Pass if the response identifies sustained CPU saturation in adservice,
+      cites the rising/high CPU series, notes that the error rate remains low,
+      and avoids claiming a remediation was applied.
+    tags: [replay, prometheus, cpu]
+    timeout_s: 120
+
+  - id: replay-image-load-latency
+    category: diagnosis
+    split: benchmark
+    source: replay
+    version: "2026-08"
+    prompt: >-
+      The storefront home page eventually loads, but product images are taking
+      unusually long to appear. Use traces to identify where the delay is
+      introduced and quantify the added latency.
+    expected_output: frontend
+    expected_tools: [search_traces]
+    rubric: >-
+      Pass if the response localizes the delay to the frontend image-loading
+      path, cites approximately ten-second image spans while backend RPC spans
+      stay comparatively normal, and separates observed evidence from hypothesis.
+    tags: [replay, traces, latency]
+    timeout_s: 120
+
+  - id: replay-recommendation-cache-memory
+    category: diagnosis
+    split: benchmark
+    source: replay
+    version: "2026-08"
+    prompt: >-
+      Recommendation responses have slowed down and memory usage is elevated.
+      Determine which service is affected and whether telemetry is consistent
+      with an unhealthy cache-growth pattern.
+    expected_output: recommendation
+    expected_tools: [query]
+    rubric: >-
+      Pass if the response identifies recommendationservice, cites sustained
+      memory/cache growth across the observed window, and avoids treating the
+      signal as a one-time allocation spike or claiming a fix.
+    tags: [replay, prometheus, memory, cache]
+    timeout_s: 120
+
+  - id: replay-kafka-backlog
+    category: diagnosis
+    split: benchmark
+    source: replay
+    version: "2026-08"
+    prompt: >-
+      Order confirmations are delayed and downstream processing is lagging.
+      Investigate the message-queue path and determine whether the evidence
+      points to backlog plus consumer-side processing delay.
+    expected_output: kafka
+    expected_tools: [search_traces]
+    rubric: >-
+      Pass if the response identifies Kafka queue backlog/consumer lag, cites
+      queue-depth or elongated consume/process trace evidence, quantifies the
+      approximate lag, and does not blame an unrelated service.
+    tags: [replay, traces, kafka]
+    timeout_s: 120
+
+  - id: replay-email-memory-leak
+    category: diagnosis
+    split: benchmark
+    source: replay
+    version: "2026-08"
+    prompt: >-
+      After order traffic has been running for a while, a notification-path
+      service shows rapidly increasing memory consumption. Identify the service
+      and explain why the pattern is more consistent with a leak than a one-time
+      allocation spike.
+    expected_output: email
+    expected_tools: [query]
+    rubric: >-
+      Pass if the response identifies emailservice, cites monotonic sustained
+      memory growth across the window while traffic is broadly stable, and
+      explains why that evidence is consistent with a leak without claiming a fix.
+    tags: [replay, prometheus, memory]
+    timeout_s: 120
