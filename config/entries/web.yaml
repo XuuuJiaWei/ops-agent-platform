@@ -1,9 +1,9 @@
 # Web entrypoint. Credentials belong only in the repository .env.
 deepagent:
   model:
-    provider: deepseek
-    name: deepseek-v4-pro
-    base-url: https://api.deepseek.com
+    provider: openai
+    name: dots-studio/dots-3-note-preview:free
+    base-url: https://openrouter.ai/api/v1
     temperature: 0.0
     max-tokens: 16384
     timeout-seconds: 120
@@ -41,17 +41,8 @@ deepagent:
       model-call-limit: 50
       tool-call-limit: 200
 
-  # The local OpenSandbox service listens at http://127.0.0.1:8090.
   backend:
-    type: opensandbox
-    opensandbox:
-      domain: 127.0.0.1:8090
-      protocol: http
-      use-server-proxy: false
-      image: python:3.11
-      timeout-seconds: 600
-      ready-timeout-seconds: 240
-      scope: thread
+    type: state
 
   interrupt-on: {}
   checkpointer:
@@ -60,11 +51,12 @@ deepagent:
   debug: false
   name: agent
 
-observability:
-  environment: local
-  langfuse:
-    base-url: https://cloud.langfuse.com
-    timeout-seconds: 30
+# observability:
+#   enabled: true
+#   environment: local
+#   langfuse:
+#     base-url: https://cloud.langfuse.com
+#     timeout-seconds: 30
 
 # Host transport, not DeepAgents harness capability. It remains entrypoint-local.
 server:

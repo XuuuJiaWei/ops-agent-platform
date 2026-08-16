@@ -13,7 +13,7 @@ const [{ CopilotRuntime }, { createCopilotNodeListener }, { LangGraphHttpAgent }
 
 const basePath = process.env.COPILOTKIT_BASE_PATH?.trim() || "/api/copilotkit";
 const graphId = process.env.COPILOTKIT_AGENT_ID?.trim() || "agent";
-const agentUrl = ensureTrailingSlash(process.env.COPILOTKIT_AGUI_AGENT_URL?.trim() || "http://127.0.0.1:8123/chat");
+const agentUrl = process.env.COPILOTKIT_AGUI_AGENT_URL?.trim() || "http://127.0.0.1:8123/chat";
 const port = Number(process.env.COPILOT_RUNTIME_PORT ?? "4001");
 const host = process.env.COPILOT_RUNTIME_HOST ?? "127.0.0.1";
 const persistenceBackend = process.env.COPILOTKIT_EVENT_STORE_BACKEND?.trim() || "memory";
@@ -49,10 +49,6 @@ server.listen(port, host, () => {
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.once(signal, () => void shutdown(signal));
-}
-
-function ensureTrailingSlash(value) {
-  return `${value.trim().replace(/\/$/, "")}/`;
 }
 
 function loadRootEnvironment() {

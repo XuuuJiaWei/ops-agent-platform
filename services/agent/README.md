@@ -15,7 +15,8 @@ Runtime combinations live in `ops_pilot.entrypoints`:
 
 Each entry reads exactly one non-sensitive configuration file from
 `config/entries/<entry>.yaml`. `.env` supplies only explicit credential aliases
-such as `MODEL_API_KEY`, `DATABASE_URL`, and `MCP_BASIC_AUTH_HEADER`.
+such as `OPENROUTER_API_KEY`, `MODEL_API_KEY`, `DATABASE_URL`, and
+`MCP_BASIC_AUTH_HEADER`.
 
 ```bash
 uv run ops_pilot profiles

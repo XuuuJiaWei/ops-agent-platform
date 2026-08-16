@@ -62,16 +62,31 @@ def test_entrypoint_yaml_does_not_allow_environment_capability_selection(monkeyp
     monkeypatch.setenv("OPS_PILOT_SECRET_DEBUG", "true")
     monkeypatch.setenv("OPEN_SANDBOX_API_KEY", "test-key")
 
-    assert build_web_application_spec().runtime.model.name == "deepseek-v4-pro"
-    assert build_benchmark_runtime_spec().model.name == "deepseek-v4-pro"
-    assert build_eval_runtime_spec().model.name == "deepseek-v4-pro"
+    expected_model = "dots-studio/dots-3-note-preview:free"
+    assert build_web_application_spec().runtime.model.name == expected_model
+    assert build_benchmark_runtime_spec().model.name == expected_model
+    assert build_eval_runtime_spec().model.name == expected_model
+    assert build_web_application_spec().runtime.sandbox.enabled is False
     assert build_web_application_spec().runtime.debug is False
 
 
 def test_entrypoint_yaml_reads_secrets_from_environment_only(monkeypatch) -> None:
-    monkeypatch.setenv("MODEL_API_KEY", "test-key")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "openrouter-key")
+    monkeypatch.setenv("MODEL_API_KEY", "fallback-key")
 
-    assert RuntimeEnvironment.for_entrypoint("web").model_api_key == "test-key"
+    assert RuntimeEnvironment.for_entrypoint("web").model_api_key == "openrouter-key"
+
+
+def test_observability_requires_explicit_entrypoint_opt_in() -> None:
+    runtime = build_web_application_spec(
+        RuntimeEnvironment.model_validate(
+            {
+                "observability": {"enabled": False},
+            }
+        )
+    ).runtime
+
+    assert runtime.observability.enabled is False
 
 
 def test_deepagent_injection_points_are_mapped_from_one_normalized_composition() -> None:

@@ -59,6 +59,7 @@ def deepagent_fields_from_environment(environment: RuntimeEnvironment) -> dict[s
 def observability_from_environment(environment: RuntimeEnvironment) -> ObservabilitySpec:
     observability = environment.observability
     return ObservabilitySpec(
+        enabled=observability.enabled,
         environment=observability.environment,
         public_key=environment.langfuse_public_key,
         secret_key=environment.langfuse_secret_key,

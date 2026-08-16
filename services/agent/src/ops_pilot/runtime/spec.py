@@ -111,6 +111,7 @@ class SandboxSpec:
 
 @dataclass(frozen=True)
 class ObservabilitySpec:
+    enabled: bool = False
     environment: str = "local"
     public_key: str | None = None
     secret_key: str | None = None

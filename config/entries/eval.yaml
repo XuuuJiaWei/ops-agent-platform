@@ -1,9 +1,9 @@
 # Stateless evaluation runtime. Credentials belong only in the repository .env.
 deepagent:
   model:
-    provider: deepseek
-    name: deepseek-v4-pro
-    base-url: https://api.deepseek.com
+    provider: openai
+    name: dots-studio/dots-3-note-preview:free
+    base-url: https://openrouter.ai/api/v1
     temperature: 0.0
     max-tokens: 16384
     timeout-seconds: 120

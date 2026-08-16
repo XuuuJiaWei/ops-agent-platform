@@ -30,8 +30,9 @@ injection points. For example, the default Web entry is in
 ```yaml
 deepagent:
   model:
-    provider: deepseek
-    name: deepseek-v4-pro
+    provider: openai
+    name: dots-studio/dots-3-note-preview:free
+    base-url: https://openrouter.ai/api/v1
   tools:
     mcp:
       prometheus:
@@ -47,7 +48,7 @@ deepagent:
 Put only secrets in `.env`:
 
 ```dotenv
-MODEL_API_KEY=...
+OPENROUTER_API_KEY=...
 DATABASE_URL=...                 # only for a YAML entry using postgres
 MCP_BASIC_AUTH_HEADER=...         # only for authenticated MCP endpoints
 OPEN_SANDBOX_API_KEY=...          # only for an enabled sandbox
@@ -88,8 +89,9 @@ Then edit [config/entries/benchmark.yaml](config/entries/benchmark.yaml):
 ```yaml
 deepagent:
   model:
-    provider: deepseek
-    name: deepseek-v4-pro
+    provider: openai
+    name: dots-studio/dots-3-note-preview:free
+    base-url: https://openrouter.ai/api/v1
   tools:
     mcp:
       kubernetes:
@@ -101,7 +103,7 @@ benchmark:
     directory: D:/dev/projects/AIOpsLab
 ```
 
-`MODEL_API_KEY` remains in `.env`. Run a problem with its fully isolated
+`OPENROUTER_API_KEY` remains in `.env`. Run a problem with its fully isolated
 runtime:
 
 ```powershell
@@ -112,6 +114,14 @@ pnpm benchmark -- --problem <aiopslab-problem-id> --results-dir ./artifacts/aiop
 
 The launcher layers the editable AIOpsLab checkout only into this one `uv run`
 command, leaving normal Web, eval, and development environments untouched.
+
+## RCA100 benchmark
+
+RCA100 lives as an independent package under [benchmarks/rca100](benchmarks/rca100/README.md). It is deliberately not part of the application runtime; any agent is invoked through its JSON-over-stdio contract.
+
+```powershell
+pnpm benchmark:rca100 -- run --dataset-dir D:/datasets/RCA100 --task t001 --agent-command python D:/agents/my_rca_agent.py
+```
 
 ## Validate
 

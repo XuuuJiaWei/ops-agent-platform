@@ -5,7 +5,7 @@
 * ``sap`` (default) uses the SAP Generative AI Hub proxy (``sap_genai``).
 * Any other provider (``deepseek``, ``openai``, ``anthropic``, ...) is built
   through LangChain's ``init_chat_model``. DeepSeek and other OpenAI-compatible
-  endpoints work via ``model.base_url`` plus a ``MODEL_API_KEY`` secret.
+  endpoints work via ``model.base_url`` plus an explicit provider API key.
 """
 
 from __future__ import annotations
@@ -51,6 +51,8 @@ def _create_langchain_chat_model(spec: ModelSpec) -> Any:
         kwargs["base_url"] = spec.base_url
     if spec.api_key:
         kwargs["api_key"] = spec.api_key
+    if _is_openrouter(spec):
+        kwargs["extra_body"] = {"reasoning": {"enabled": spec.reasoning_mode != "disabled"}}
 
     try:
         model = init_chat_model(**kwargs)
@@ -72,3 +74,7 @@ def _init_chat_model_provider(provider: str) -> str:
     if provider == "deepseek":
         return "openai"
     return provider
+
+
+def _is_openrouter(spec: ModelSpec) -> bool:
+    return bool(spec.base_url and spec.base_url.rstrip("/").startswith("https://openrouter.ai/api/"))

@@ -41,6 +41,9 @@ def get_langfuse_client(spec: ObservabilitySpec) -> Any:
 def create_callback_handler(spec: ObservabilitySpec) -> TracingSetup:
     """Create the official LangChain handler or a local no-op status."""
 
+    if not spec.enabled:
+        return TracingSetup(enabled=False, warning="Langfuse tracing disabled by entrypoint configuration")
+
     missing = _missing_langfuse_keys(spec)
     if missing:
         return TracingSetup(
