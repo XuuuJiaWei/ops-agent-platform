@@ -21,12 +21,18 @@ async def run_aiopslab_problem(
     base_url: str,
     settings: Settings | None = None,
     deadline_seconds: float = 300.0,
+    persistent: bool | None = None,
 ) -> dict[str, Any]:
     """Run one localization problem through the external AIOpsLab bridge."""
 
     base_url = base_url.rstrip("/")
-    async with httpx.AsyncClient(timeout=900.0) as http:
-        start = await http.post(f"{base_url}/runs", json={"problem_id": problem_id})
+    # Deploying the benchmark app (OpenEBS + Prometheus + app chart) can take
+    # well over 15 minutes on a cold cluster; keep the client budget above that.
+    async with httpx.AsyncClient(timeout=1800.0) as http:
+        payload: dict[str, Any] = {"problem_id": problem_id}
+        if persistent is not None:
+            payload["persistent"] = persistent
+        start = await http.post(f"{base_url}/runs", json=payload)
         start.raise_for_status()
         case: dict[str, Any] = start.json()
         run_id = str(case["run_id"])

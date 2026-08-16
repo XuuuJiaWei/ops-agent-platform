@@ -65,6 +65,70 @@ Example result shape:
 
 The numbers above illustrate the output schema only; benchmark claims should use results from real runs.
 
+### Non-flag faults and observation isolation
+
+AIOpsLab's built-in Astronomy Shop problems toggle OpenTelemetry demo feature
+flags, so an agent with kubectl access can read the `flagd-config` ConfigMap
+and read the fault off the flag. That couples the fault injection surface with
+the agent's observation surface and does not resemble a real incident.
+
+This bridge registers an additional set of problems that keep the same
+Astronomy Shop workload but inject faults through Chaos Mesh (pod failure,
+network loss) selected by the demo's own labels:
+
+```bash
+uv run ops_pilot benchmark \
+  --base-url http://127.0.0.1:1819 \
+  --problem astronomy_shop_payment_pod_kill-localization-1
+```
+
+Available custom problems are `astronomy_shop_payment_pod_kill-localization-1`
+and `astronomy_shop_payment_network_loss-localization-1`. The agent can only
+observe the effects (restarts, latency, error rates), never the injection.
+
+Because these Chaos faults never modify the application itself, the bridge
+keeps a warm deployment across runs by default (`AIOPSLAB_PERSISTENT=0` forces
+the official delete/redeploy lifecycle). The first run deploys OpenEBS,
+Prometheus, and the app chart (~5 minutes); every later run only checks health,
+injects the fault, and recovers it (~1 minute). The app stays deployed between
+runs, so a full benchmark cycle is dominated by the agent's investigation
+instead of environment setup.
+
+The mode is switchable per run without restarting the bridge: pass
+`"persistent": false` in the `POST /runs` body for a one-shot lifecycle, or use
+the CLI flags:
+
+```bash
+uv run ops_pilot benchmark --problem astronomy_shop_payment_pod_kill-localization-1 --persistent
+uv run ops_pilot benchmark --problem astronomy_shop_payment_pod_kill-localization-1 --no-persistent
+```
+
+The observer identity for the agent's Kubernetes MCP tools is a read-only,
+namespace-scoped Role that deliberately excludes configmaps, secrets, exec,
+and write verbs:
+
+```bash
+kubectl apply -f benchmarks/aiopslab_bridge/rbac/observer.yaml
+powershell -File benchmarks/aiopslab_bridge/rbac/create-observer-kubeconfig.ps1
+```
+
+The bridge re-applies the Role/RoleBinding after every run because the app
+namespace is torn down and recreated; the ServiceAccount lives in the stable
+`ops-pilot` namespace so its token survives runs. Point the Kubernetes MCP
+server at the generated `ops-pilot-observer.kubeconfig` (token valid 24h by
+default).
+
+On managed clusters whose kubeconfig uses an exec credential plugin (for
+example Gardener's `gardenlogin`), the Kubernetes Python client used by
+AIOpsLab cannot resolve the plugin. Start the bridge with `KUBECONFIG` pointing
+at a static admin kubeconfig (ServiceAccount token) instead; that is also the
+injection-plane credential, kept separate from the agent's observer identity:
+
+```powershell
+$env:KUBECONFIG = "D:\dev\projects\AIOpsLab\aiopslab-admin.kubeconfig"
+uv run python benchmarks/aiopslab_bridge/app.py
+```
+
 ## Runtime
 
 OpsPilot builds one DeepAgents runtime over the configured model and MCP tools. Production guardrails prefer official framework primitives over custom control logic:
