@@ -54,6 +54,18 @@ provider, keep the API key in `.env` as `MODEL_API_KEY`; do not commit it.
 Replay is a model evaluation, not a secret-free unit test. The regular GitHub
 Actions CI continues to run lint/format/pytest without model credentials.
 
+### GitHub Actions model run
+
+For a reproducible remote run, add the model credential once as the repository
+Actions secret `MODEL_API_KEY`, then open **Actions -> Replay Model Eval -> Run
+workflow**. The workflow accepts `provider`, `model_name`, and optional
+`base_url`, generates an isolated temporary config, and writes the benchmark
+output to the GitHub job summary.
+
+The secret is never written to repository files. Model identity and endpoint are
+regular, non-secret experiment inputs; changing them does not require a code
+change.
+
 ## Metrics
 
 Replay uses the same quality and safety evaluators as the live eval stack:
