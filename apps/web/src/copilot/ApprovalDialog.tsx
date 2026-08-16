@@ -4,8 +4,8 @@ import type { InterruptRenderProps } from "@copilotkit/react-core/v2";
 /**
  * Approval UI for DeepAgents human-in-the-loop tool interrupts.
  *
- * The backend maps MCP `hitl_tools` to DeepAgents `interrupt_on`, which pauses
- * the graph before a dangerous/write tool runs and emits an interrupt whose
+ * The entrypoint's DeepAgents `interrupt-on` mapping pauses the graph before a
+ * dangerous/write tool runs and emits an interrupt whose
  * `event.value` carries `action_requests` (the pending tool calls) and
  * `review_configs` (allowed decisions). We surface each pending call and resume
  * with `{ decisions: [{ type: "approve" | "reject" }] }`.

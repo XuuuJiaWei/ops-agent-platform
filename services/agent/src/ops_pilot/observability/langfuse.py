@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from ops_pilot.config.settings import Settings
+from ops_pilot.runtime.spec import ObservabilitySpec
 
 
 @dataclass(frozen=True)
@@ -23,25 +23,28 @@ class TracingSetup:
         }
 
 
-def get_langfuse_client(settings: Settings) -> Any:
+def get_langfuse_client(spec: ObservabilitySpec) -> Any:
     """Configure once and return the SDK client registered for this project."""
 
     from langfuse import Langfuse, get_client
 
     Langfuse(
-        public_key=settings.langfuse_public_key,
-        secret_key=settings.langfuse_secret_key,
-        base_url=settings.langfuse_base_url,
-        timeout=settings.langfuse_timeout_seconds,
-        environment=settings.app_env,
+        public_key=spec.public_key,
+        secret_key=spec.secret_key,
+        base_url=spec.base_url,
+        timeout=spec.timeout_seconds,
+        environment=spec.environment,
     )
-    return get_client(public_key=settings.langfuse_public_key)
+    return get_client(public_key=spec.public_key)
 
 
-def create_callback_handler(settings: Settings) -> TracingSetup:
+def create_callback_handler(spec: ObservabilitySpec) -> TracingSetup:
     """Create the official LangChain handler or a local no-op status."""
 
-    missing = _missing_langfuse_keys(settings)
+    if not spec.enabled:
+        return TracingSetup(enabled=False, warning="Langfuse tracing disabled by entrypoint configuration")
+
+    missing = _missing_langfuse_keys(spec)
     if missing:
         return TracingSetup(
             enabled=False,
@@ -51,7 +54,7 @@ def create_callback_handler(settings: Settings) -> TracingSetup:
     try:
         from langfuse.langchain import CallbackHandler
 
-        client = get_langfuse_client(settings)
+        client = get_langfuse_client(spec)
     except ImportError as exc:
         return TracingSetup(
             enabled=False,
@@ -65,6 +68,20 @@ def create_callback_handler(settings: Settings) -> TracingSetup:
     )
 
 
+def describe_tracing(spec: ObservabilitySpec) -> TracingSetup:
+    """Describe tracing configuration without creating an SDK client."""
+
+    if not spec.enabled:
+        return TracingSetup(enabled=False, warning="Langfuse tracing disabled by entrypoint configuration")
+    missing = _missing_langfuse_keys(spec)
+    if missing:
+        return TracingSetup(
+            enabled=False,
+            warning=("Langfuse tracing disabled; missing required environment values: " + ", ".join(missing)),
+        )
+    return TracingSetup(enabled=True)
+
+
 def flush_tracing(tracing: TracingSetup) -> None:
     """Flush buffered events without owning or replacing the SDK's OTel provider."""
 
@@ -72,12 +89,12 @@ def flush_tracing(tracing: TracingSetup) -> None:
         tracing.client.flush()
 
 
-def _missing_langfuse_keys(settings: Settings) -> tuple[str, ...]:
+def _missing_langfuse_keys(spec: ObservabilitySpec) -> tuple[str, ...]:
     missing: list[str] = []
-    if not settings.langfuse_public_key:
+    if not spec.public_key:
         missing.append("LANGFUSE_PUBLIC_KEY")
-    if not settings.langfuse_secret_key:
+    if not spec.secret_key:
         missing.append("LANGFUSE_SECRET_KEY")
-    if not settings.langfuse_base_url:
+    if not spec.base_url:
         missing.append("LANGFUSE_BASE_URL")
     return tuple(missing)

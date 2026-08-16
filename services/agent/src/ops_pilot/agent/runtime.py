@@ -2,64 +2,55 @@
 
 from __future__ import annotations
 
-import time
+import asyncio
 import uuid
-from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from contextlib import AsyncExitStack, asynccontextmanager
+from dataclasses import dataclass, field, replace
+from pathlib import Path
+from typing import Any, cast
 
 from deepagents import create_deep_agent
+from deepagents.middleware import FilesystemPermission
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import MemorySaver
 
 from ops_pilot.agent.results import extract_result_text
-from ops_pilot.config.settings import Settings, load_settings
 from ops_pilot.mcp.registry import MCPRegistry, create_mcp_registry
 from ops_pilot.models import create_chat_model
 from ops_pilot.observability.langfuse import TracingSetup, create_callback_handler, flush_tracing
+from ops_pilot.observability.logging import AgentLoggingMiddleware
 from ops_pilot.observability.metadata import build_model_metadata, build_runnable_config
 from ops_pilot.reliability.run import RunController
+from ops_pilot.runtime.spec import PersistenceSpec, RuntimeSpec
 from ops_pilot.sandbox import SandboxManager, SandboxRuntime, create_sandbox_manager
 from ops_pilot.skills.resolver import resolve_skill_paths
 from ops_pilot.skills.sync import sync_skill_paths_to_backend
-from ops_pilot.spaces import MemorySpaceRepository, SpaceRepository, build_space_tools, create_space_repository
-
-if TYPE_CHECKING:
-    from ops_pilot.eval.trace import AgentTrace
 
 
 @dataclass(frozen=True)
 class AgentRuntime:
     graph: Any
-    settings: Settings
+    spec: RuntimeSpec
     tools: tuple[Any, ...] = field(default_factory=tuple)
     skills: tuple[str, ...] = field(default_factory=tuple)
     mcp: MCPRegistry = field(default_factory=MCPRegistry)
     tracing: TracingSetup = field(default_factory=lambda: TracingSetup(enabled=False))
     sandbox: SandboxManager | SandboxRuntime | None = None
     model_metadata: dict[str, Any] = field(default_factory=dict)
-    checkpointer_closer: Callable[[], Awaitable[None]] | None = None
-    spaces: SpaceRepository = field(default_factory=MemorySpaceRepository)
-    space_repository_closer: Callable[[], Awaitable[None]] | None = None
     run_controller: RunController = field(default_factory=RunController)
+    _lifecycle: AsyncExitStack = field(default_factory=AsyncExitStack, repr=False, compare=False)
 
-    def close(self) -> None:
-        if self.sandbox is not None:
-            self.sandbox.close()
+    async def __aenter__(self) -> AgentRuntime:
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        await self.aclose()
 
     async def aclose(self) -> None:
-        try:
-            try:
-                if self.checkpointer_closer is not None:
-                    await self.checkpointer_closer()
-            finally:
-                try:
-                    if self.space_repository_closer is not None:
-                        await self.space_repository_closer()
-                finally:
-                    self.close()
-        finally:
-            flush_tracing(self.tracing)
+        """Release every resource acquired while assembling this runtime."""
+
+        await self._lifecycle.aclose()
 
     def runnable_config(
         self,
@@ -67,20 +58,16 @@ class AgentRuntime:
         protocol: str,
         thread_id: str | None = None,
         run_id: str | None = None,
-        a2a_task_id: str | None = None,
-        a2a_context_id: str | None = None,
         configurable: dict[str, Any] | None = None,
         extra_metadata: dict[str, Any] | None = None,
     ) -> RunnableConfig:
         metadata = {**self.model_metadata, **(extra_metadata or {})}
         return build_runnable_config(
-            self.settings,
+            self.spec,
             callbacks=self.tracing.callbacks,
             protocol=protocol,
             thread_id=thread_id,
             run_id=run_id,
-            a2a_task_id=a2a_task_id,
-            a2a_context_id=a2a_context_id,
             configurable=configurable,
             extra_metadata=metadata,
         )
@@ -92,185 +79,151 @@ class AgentRuntime:
         protocol: str,
         thread_id: str | None = None,
         run_id: str | None = None,
-        a2a_task_id: str | None = None,
-        a2a_context_id: str | None = None,
         configurable: dict[str, Any] | None = None,
         extra_metadata: dict[str, Any] | None = None,
+        context: Any | None = None,
     ) -> str:
         """Invoke the shared DeepAgent with one user text message."""
 
-        effective_run_id = run_id or a2a_task_id or f"{protocol}:{thread_id or uuid.uuid4()}"
+        effective_run_id = run_id or f"{protocol}:{thread_id or uuid.uuid4()}"
 
         async def invoke() -> Any:
-            return await self.graph.ainvoke(
-                {"messages": [{"role": "user", "content": text}]},
-                config=self.runnable_config(
+            invoke_kwargs: dict[str, Any] = {
+                "config": self.runnable_config(
                     protocol=protocol,
                     thread_id=thread_id,
                     run_id=effective_run_id,
-                    a2a_task_id=a2a_task_id,
-                    a2a_context_id=a2a_context_id,
                     configurable=configurable,
                     extra_metadata=extra_metadata,
                 ),
-                version="v2",
+                "version": "v2",
+            }
+            if context is not None:
+                invoke_kwargs["context"] = context
+            return await self.graph.ainvoke(
+                {"messages": [{"role": "user", "content": text}]},
+                **invoke_kwargs,
             )
 
         result = await self.run_controller.run(effective_run_id, invoke)
         return extract_result_text(_unwrap_graph_result(result))
 
-    async def ainvoke_trace(
-        self,
-        text: str,
-        *,
-        protocol: str,
-        thread_id: str | None = None,
-        run_id: str | None = None,
-        a2a_task_id: str | None = None,
-        a2a_context_id: str | None = None,
-        configurable: dict[str, Any] | None = None,
-        extra_metadata: dict[str, Any] | None = None,
-        deadline_seconds: float | None = None,
-    ) -> AgentTrace:
-        """Invoke the shared DeepAgent and return structured eval trace signals."""
-
-        from ops_pilot.eval.trace import build_agent_trace
-
-        started = time.perf_counter()
-        effective_run_id = run_id or a2a_task_id or f"{protocol}:{thread_id or uuid.uuid4()}"
-
-        async def invoke() -> Any:
-            return await self.graph.ainvoke(
-                {"messages": [{"role": "user", "content": text}]},
-                config=self.runnable_config(
-                    protocol=protocol,
-                    thread_id=thread_id,
-                    run_id=effective_run_id,
-                    a2a_task_id=a2a_task_id,
-                    a2a_context_id=a2a_context_id,
-                    configurable=configurable,
-                    extra_metadata=extra_metadata,
-                ),
-                version="v2",
-            )
-
-        try:
-            result = await self.run_controller.run(
-                effective_run_id,
-                invoke,
-                deadline_seconds=deadline_seconds,
-            )
-        except TimeoutError as exc:
-            effective_deadline = self.settings.run_deadline_seconds if deadline_seconds is None else deadline_seconds
-            if effective_deadline is None:
-                raise
-            raise TimeoutError(f"Agent invocation timed out after {effective_deadline:g}s.") from exc
-        return build_agent_trace(_unwrap_graph_result(result), latency_s=time.perf_counter() - started)
-
     async def cancel_run(self, run_id: str, *, reason: str = "cancel requested") -> bool:
         return await self.run_controller.cancel(run_id, reason=reason)
 
 
-async def build_agent_runtime(
-    settings: Settings | None = None,
-    *,
-    attach_checkpointer: bool = True,
-    bypass_hitl: bool = False,
-    extra_tools: Sequence[Any] = (),
-) -> AgentRuntime:
-    """Build the shared DeepAgent runtime.
+async def build_agent_runtime(spec: RuntimeSpec) -> AgentRuntime:
+    """Build one DeepAgent runtime from an explicit host composition.
 
-    DeepAgents long-term/semantic memory is intentionally not configured here.
-    Runtime continuity is provided by LangGraph's checkpointer: an in-memory
-    saver by default, or a durable ``AsyncPostgresSaver`` when
-    ``persistence.backend`` is ``postgres``. ``attach_checkpointer=False`` skips
-    it for callers that supply their own persistence (e.g. the LangGraph
-    platform server) or need a stateless graph (eval runs).
+    Runtime continuity is provided by the entrypoint's ``checkpointer``
+    composition: in-memory, durable Postgres, or disabled. DeepAgents memory,
+    skills, permissions, middleware, backend, interrupts, debug flag, and name
+    are also passed through from the explicit runtime specification.
     """
 
-    resolved_settings = settings or load_settings()
-    model = create_chat_model(resolved_settings)
-    model_metadata = build_model_metadata(resolved_settings, model)
-    mcp_registry = await create_mcp_registry(resolved_settings)
-    local_skills = tuple(resolve_skill_paths(resolved_settings))
-    tracing = create_callback_handler(resolved_settings)
-    run_controller = RunController(default_deadline_seconds=resolved_settings.run_deadline_seconds)
-
-    sandbox: SandboxManager | None = None
-    checkpointer_closer: Callable[[], Awaitable[None]] | None = None
-    space_repository: SpaceRepository | None = None
-    space_repository_closer: Callable[[], Awaitable[None]] | None = None
+    lifecycle = AsyncExitStack()
     try:
-        middleware = _create_runtime_middleware(resolved_settings, mcp_registry.retry_tools)
-        space_repository, space_repository_closer = await create_space_repository(resolved_settings)
-        tools = [*mcp_registry.tools, *build_space_tools(space_repository), *extra_tools]
-        checkpointer, checkpointer_closer = (
-            await _create_checkpointer(resolved_settings) if attach_checkpointer else (None, None)
+        model = create_chat_model(spec.model)
+        model_metadata = build_model_metadata(spec, model)
+        mcp_registry = await create_mcp_registry(spec.mcp)
+        # Human approval is a create_deep_agent(interrupt_on=...) declaration,
+        # not an incidental property of an MCP transport definition.
+        mcp_registry = replace(mcp_registry, hitl_tools=tuple(spec.interrupt_on))
+        tracing = create_callback_handler(spec.observability)
+        lifecycle.push_async_callback(_flush_tracing, tracing)
+        run_controller = RunController(
+            default_deadline_seconds=spec.reliability.run_deadline_seconds if spec.reliability.enabled else None
         )
-        sandbox = create_sandbox_manager(resolved_settings)
-        skills = _resolve_backend_skill_paths(local_skills, sandbox)
-        interrupt_on = {} if bypass_hitl else {name: True for name in mcp_registry.hitl_tools}
+
+        tools = [*mcp_registry.tools, *spec.tools]
+        sandbox = create_sandbox_manager(spec.sandbox)
+        if sandbox is not None:
+            lifecycle.push_async_callback(_close_sandbox, sandbox)
+        filesystem_permissions = _materialize_filesystem_permissions(spec)
+        middleware = _create_runtime_middleware(
+            spec,
+            mcp_registry.retry_tools,
+            sandbox,
+            filesystem_permissions,
+        )
+        composed_middleware = [*middleware, *spec.middleware]
+        if spec.observability.logging.enabled:
+            # Keep observability innermost so it records the effective request
+            # after entrypoint-specific middleware has changed tools or settings.
+            composed_middleware.append(AgentLoggingMiddleware(spec.observability.logging))
+        checkpointer, checkpointer_closer = await _create_checkpointer(spec.persistence)
+        if checkpointer_closer is not None:
+            lifecycle.push_async_callback(checkpointer_closer)
+        skills = _resolve_backend_skill_paths(spec.skills, sandbox)
         graph = _create_deep_agent(
             model=model,
             tools=tools,
             skills=list(skills),
-            system_prompt=_system_prompt(resolved_settings.system_prompt),
+            system_prompt=spec.system_prompt,
             checkpointer=checkpointer,
-            backend=sandbox.backend if sandbox is not None else None,
-            interrupt_on=interrupt_on,
-            middleware=middleware,
+            backend=sandbox.backend if sandbox is not None else spec.backend,
+            subagents=list(spec.subagents),
+            memory=list(spec.memory),
+            permissions=filesystem_permissions,
+            interrupt_on=spec.interrupt_on,
+            middleware=composed_middleware,
+            context_schema=spec.context_schema,
+            state_schema=spec.state_schema,
+            response_format=spec.response_format,
+            store=spec.store,
+            cache=spec.cache,
+            debug=spec.debug,
+            name=spec.name,
         )
-    except Exception:
-        if checkpointer_closer is not None:
-            await checkpointer_closer()
-        if space_repository_closer is not None:
-            await space_repository_closer()
-        if sandbox is not None:
-            sandbox.close()
-        flush_tracing(tracing)
+    except BaseException:
+        await lifecycle.aclose()
         raise
-    assert space_repository is not None
     return AgentRuntime(
         graph=graph,
-        settings=resolved_settings,
+        spec=spec,
         tools=tuple(tools),
         skills=skills,
         mcp=mcp_registry,
         tracing=tracing,
         sandbox=sandbox,
         model_metadata=model_metadata,
-        checkpointer_closer=checkpointer_closer,
-        spaces=space_repository,
-        space_repository_closer=space_repository_closer,
         run_controller=run_controller,
+        _lifecycle=lifecycle,
     )
 
 
-def _system_prompt(configured_prompt: str | None) -> str:
-    spaces_prompt = """You can create agent-native visual experiences with Space tools.
-Use render_ui for a transient card that belongs in the current conversation.
-Use create_space and the card-in-space tools when the user wants a persistent dashboard.
-Before changing an existing Space, use list_spaces or get_space when you do not already have its current ids.
-Cards are declarative data: choose the card type that best communicates the result and keep labels concise.
-For a live (auto-refreshing) card, set a binding to a read-only source_tool; the backend stores only the tool's
-raw response, and a binding.transform (a small JS function transform(raw) replayed deterministically in the
-frontend sandbox) normalizes that raw output into content. Call the source tool once first to see its real
-shape, then write the transform — one JS transform is the single normalization layer for every source, so do
-not maintain per-source query languages or decoders. After writing a transform, ALWAYS call
-validate_card_transform (pass the transform code, the raw you just observed from the source tool, and the
-card_type) and only add or update the card once it returns ok; if it fails, fix the JS per the message and
-re-validate — never persist a transform that has not passed."""
-    if configured_prompt:
-        return f"{configured_prompt}\n\n{spaces_prompt}"
-    return spaces_prompt
+@asynccontextmanager
+async def agent_runtime(spec: RuntimeSpec) -> AsyncIterator[AgentRuntime]:
+    """Open one runtime and guarantee matching shutdown for its owner."""
+
+    runtime = await build_agent_runtime(spec)
+    try:
+        yield runtime
+    finally:
+        await runtime.aclose()
+
+
+async def _close_sandbox(sandbox: SandboxManager | SandboxRuntime) -> None:
+    await asyncio.to_thread(sandbox.close)
+
+
+async def _flush_tracing(tracing: TracingSetup) -> None:
+    await asyncio.to_thread(flush_tracing, tracing)
 
 
 def _resolve_backend_skill_paths(
-    local_skills: tuple[str, ...],
+    configured_skills: tuple[str | Path, ...],
     sandbox: SandboxManager | SandboxRuntime | None,
 ) -> tuple[str, ...]:
-    if sandbox is None or not local_skills:
-        return local_skills
+    if not configured_skills:
+        return ()
+    if sandbox is None:
+        # Paths are interpreted by the explicitly composed DeepAgents backend.
+        # In particular, FilesystemBackend virtual paths such as ``/skills``
+        # must not be resolved against the host filesystem here.
+        return tuple(str(path) for path in configured_skills)
+
+    local_skills = tuple(path.as_posix() for path in resolve_skill_paths(configured_skills))
     configure_skills = getattr(sandbox, "configure_skills", None)
     if configure_skills is not None:
         return configure_skills(local_skills)
@@ -278,36 +231,67 @@ def _resolve_backend_skill_paths(
     return sync_result.remote_paths
 
 
-def _create_runtime_middleware(settings: Settings, retry_tools: tuple[str, ...]) -> list[Any]:
+def _create_runtime_middleware(
+    spec: RuntimeSpec,
+    retry_tools: tuple[str, ...],
+    sandbox: SandboxManager | SandboxRuntime | None,
+    filesystem_permissions: list[FilesystemPermission],
+) -> list[Any]:
     """Build the production guardrails from LangChain's official middleware."""
 
-    if not settings.reliability_enabled:
-        return []
+    middleware: list[Any] = []
+    if spec.reliability.enabled:
+        from langchain.agents.middleware import (
+            ModelCallLimitMiddleware,
+            ToolCallLimitMiddleware,
+            ToolRetryMiddleware,
+        )
 
-    from langchain.agents.middleware import (
-        ModelCallLimitMiddleware,
-        ToolCallLimitMiddleware,
-        ToolRetryMiddleware,
-    )
+        middleware.extend(
+            (
+                ModelCallLimitMiddleware(run_limit=spec.reliability.model_call_limit, exit_behavior="end"),
+                ToolCallLimitMiddleware(run_limit=spec.reliability.tool_call_limit, exit_behavior="continue"),
+            )
+        )
+        if retry_tools:
+            middleware.append(
+                ToolRetryMiddleware(
+                    tools=list(retry_tools),
+                    max_retries=spec.reliability.tool_retry_max_retries,
+                    retry_on=(TimeoutError, ConnectionError),
+                    initial_delay=spec.reliability.tool_retry_initial_delay_seconds,
+                    backoff_factor=spec.reliability.tool_retry_backoff_factor,
+                    max_delay=spec.reliability.tool_retry_max_delay_seconds,
+                    jitter=spec.reliability.tool_retry_jitter,
+                    on_failure="continue",
+                )
+            )
+    if spec.todo_list_enabled:
+        from langchain.agents.middleware import TodoListMiddleware
 
-    middleware: list[Any] = [
-        ModelCallLimitMiddleware(run_limit=settings.model_call_limit, exit_behavior="error"),
-        ToolCallLimitMiddleware(run_limit=settings.tool_call_limit, exit_behavior="error"),
-    ]
-    if retry_tools:
+        middleware.append(TodoListMiddleware())
+    if spec.filesystem_tools is not None:
+        from deepagents.middleware import FilesystemMiddleware
+
         middleware.append(
-            ToolRetryMiddleware(
-                tools=list(retry_tools),
-                max_retries=settings.tool_retry_max_retries,
-                retry_on=(TimeoutError, ConnectionError),
-                initial_delay=settings.tool_retry_initial_delay_seconds,
-                backoff_factor=settings.tool_retry_backoff_factor,
-                max_delay=settings.tool_retry_max_delay_seconds,
-                jitter=settings.tool_retry_jitter,
-                on_failure="continue",
+            FilesystemMiddleware(
+                backend=sandbox.backend if sandbox is not None else spec.backend,
+                tools=cast(Any, list(spec.filesystem_tools)),
+                _permissions=filesystem_permissions,
             )
         )
     return middleware
+
+
+def _materialize_filesystem_permissions(spec: RuntimeSpec) -> list[FilesystemPermission]:
+    return [
+        FilesystemPermission(
+            operations=list(permission.operations),
+            paths=list(permission.paths),
+            mode=permission.mode,
+        )
+        for permission in spec.permissions
+    ]
 
 
 def _create_deep_agent(
@@ -318,8 +302,18 @@ def _create_deep_agent(
     system_prompt: str | None,
     checkpointer: Any | None,
     backend: Any | None,
+    subagents: list[Any],
+    memory: list[str],
+    permissions: list[FilesystemPermission],
     interrupt_on: dict[str, Any] | None = None,
     middleware: Sequence[Any] = (),
+    context_schema: type[Any] | None = None,
+    state_schema: type[Any] | None = None,
+    response_format: Any | None = None,
+    store: Any | None = None,
+    cache: Any | None = None,
+    debug: bool = False,
+    name: str | None = None,
 ) -> Any:
     kwargs: dict[str, Any] = {
         "model": model,
@@ -331,31 +325,39 @@ def _create_deep_agent(
         kwargs["skills"] = skills
     if backend is not None:
         kwargs["backend"] = backend
+    if subagents:
+        kwargs["subagents"] = subagents
+    if memory:
+        kwargs["memory"] = memory
+    if permissions:
+        kwargs["permissions"] = permissions
     if interrupt_on:
         kwargs["interrupt_on"] = interrupt_on
 
-    copilotkit_middleware = _create_copilotkit_middleware()
-    configured_middleware = list(middleware)
-    if copilotkit_middleware is not None:
-        configured_middleware.insert(0, copilotkit_middleware)
-    kwargs["middleware"] = configured_middleware
+    kwargs["middleware"] = list(middleware)
+    if context_schema is not None:
+        kwargs["context_schema"] = context_schema
+    if state_schema is not None:
+        kwargs["state_schema"] = state_schema
+    if response_format is not None:
+        kwargs["response_format"] = response_format
+    if store is not None:
+        kwargs["store"] = store
+    if cache is not None:
+        kwargs["cache"] = cache
 
     if checkpointer is not None:
         kwargs["checkpointer"] = checkpointer
+    if debug:
+        kwargs["debug"] = True
+    if name:
+        kwargs["name"] = name
 
     return create_deep_agent(**kwargs)
 
 
-def _create_copilotkit_middleware() -> Any | None:
-    try:
-        from copilotkit import CopilotKitMiddleware
-    except ImportError:
-        return None
-    return CopilotKitMiddleware()
-
-
 async def _create_checkpointer(
-    settings: Settings,
+    persistence: PersistenceSpec,
 ) -> tuple[Any | None, Callable[[], Awaitable[None]] | None]:
     """Build a LangGraph checkpointer for durable execution.
 
@@ -364,8 +366,10 @@ async def _create_checkpointer(
     it is ``None`` when the checkpointer holds nothing to release.
     """
 
-    if settings.persistence_backend == "postgres":
-        return await _create_postgres_checkpointer(settings)
+    if persistence.backend == "none":
+        return None, None
+    if persistence.backend == "postgres":
+        return await _create_postgres_checkpointer(persistence)
     return _create_memory_checkpointer(), None
 
 
@@ -374,7 +378,7 @@ def _create_memory_checkpointer() -> MemorySaver:
 
 
 async def _create_postgres_checkpointer(
-    settings: Settings,
+    persistence: PersistenceSpec,
 ) -> tuple[Any, Callable[[], Awaitable[None]]]:
     """Open a long-lived psycopg pool and wrap it in ``AsyncPostgresSaver``.
 
@@ -388,7 +392,7 @@ async def _create_postgres_checkpointer(
     from psycopg.rows import DictRow, dict_row
     from psycopg_pool import AsyncConnectionPool
 
-    conn_string = settings.psycopg_database_url()
+    conn_string = _psycopg_database_url(persistence.database_url)
     if not conn_string:
         raise RuntimeError("persistence.backend is 'postgres' but DATABASE_URL is not set.")
 
@@ -404,7 +408,7 @@ async def _create_postgres_checkpointer(
     await pool.open(wait=True)
     try:
         checkpointer = AsyncPostgresSaver(pool)
-        if settings.persistence_setup_on_start:
+        if persistence.setup_on_start:
             await checkpointer.setup()
     except Exception:
         await pool.close()
@@ -414,6 +418,13 @@ async def _create_postgres_checkpointer(
         await pool.close()
 
     return checkpointer, _close
+
+
+def _psycopg_database_url(database_url: str | None) -> str | None:
+    if not database_url or not database_url.startswith("postgresql+"):
+        return database_url
+    rest = database_url[len("postgresql") :]
+    return "postgresql" + rest[rest.index("://") :]
 
 
 def _unwrap_graph_result(result: Any) -> Any:

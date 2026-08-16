@@ -11,13 +11,13 @@ const [{ CopilotRuntime }, { createCopilotNodeListener }, { LangGraphHttpAgent }
   import("@copilotkit/runtime/langgraph"),
 ]);
 
-const basePath = "/api/copilotkit";
-const graphId = process.env.ASSISTANT_ID?.trim() || "agent";
-const agentUrl = ensureTrailingSlash(process.env.AGUI_AGENT_URL?.trim() || "http://127.0.0.1:8123/chat");
+const basePath = process.env.COPILOTKIT_BASE_PATH?.trim() || "/api/copilotkit";
+const graphId = process.env.COPILOTKIT_AGENT_ID?.trim() || "agent";
+const agentUrl = process.env.COPILOTKIT_AGUI_AGENT_URL?.trim() || "http://127.0.0.1:8123/chat";
 const port = Number(process.env.COPILOT_RUNTIME_PORT ?? "4001");
 const host = process.env.COPILOT_RUNTIME_HOST ?? "127.0.0.1";
-const persistenceBackend = process.env.OPS_PILOT_PERSISTENCE_BACKEND?.trim() || "memory";
-const persistenceSetupOnStart = parseBoolean(process.env.OPS_PILOT_PERSISTENCE_SETUP_ON_START, true);
+const persistenceBackend = process.env.COPILOTKIT_EVENT_STORE_BACKEND?.trim() || "memory";
+const persistenceSetupOnStart = parseBoolean(process.env.COPILOTKIT_EVENT_STORE_SETUP_ON_START, true);
 const { runner, close: closeRunner } = await createAgentRunner({
   backend: persistenceBackend,
   connectionString: process.env.DATABASE_URL?.trim(),
@@ -49,10 +49,6 @@ server.listen(port, host, () => {
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.once(signal, () => void shutdown(signal));
-}
-
-function ensureTrailingSlash(value) {
-  return `${value.trim().replace(/\/$/, "")}/`;
 }
 
 function loadRootEnvironment() {

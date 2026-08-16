@@ -19,9 +19,7 @@ jobs:
     timeout-minutes: 20
     defaults:
       run:
-        working-directory: services/agent
-    env:
-      OPS_PILOT_CONFIG: ../../config/config.example.yaml
+        working-directory: services
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -31,15 +29,17 @@ jobs:
           version: "0.11.32"
           python-version: "3.12"
           enable-cache: true
-          cache-dependency-glob: services/agent/uv.lock
+          cache-dependency-glob: services/uv.lock
       - name: Install dependencies
-        run: uv sync --locked
+        run: uv sync --locked --all-packages
       - name: Lint
-        run: uv run ruff check src tests
+        run: uv run ruff check agent/src agent/tests platform/src platform/tests
       - name: Check formatting
-        run: uv run ruff format --check src tests
+        run: uv run ruff format --check agent/src agent/tests platform/src platform/tests
+      - name: Type check
+        run: uv run pyright --project agent/pyproject.toml && uv run pyright --project platform/pyproject.toml
       - name: Test
-        run: uv run pytest
+        run: uv run pytest agent/tests platform/tests
 
   web:
     name: Web / Node 24

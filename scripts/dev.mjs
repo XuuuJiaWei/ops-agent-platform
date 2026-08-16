@@ -10,11 +10,14 @@ import { buildLangGraphCommand, resolveCommandInvocation, resolvePackageBinary }
 import { DevProcessSupervisor, processResultExitCode } from "./dev-process.mjs";
 
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
-const agentDir = join(rootDir, "services", "agent");
+const servicesDir = join(rootDir, "services");
+const platformDir = join(servicesDir, "platform");
 const copilotDir = join(rootDir, "apps", "copilot-runtime");
 const webDir = join(rootDir, "apps", "web");
 const mode = process.argv[2] ?? "all";
 const supportedModes = new Set(["all", "backend", "check", "copilot", "langgraph", "web"]);
+
+loadRootEnvironment();
 
 if (!supportedModes.has(mode)) {
   console.error(`Unknown dev mode '${mode}'. Expected one of: ${[...supportedModes].join(", ")}.`);
@@ -24,7 +27,7 @@ if (!supportedModes.has(mode)) {
 if (process.env.OPS_PILOT_DEV_ENV_READY !== "1") {
   assertWorkspace();
 }
-const devEnv = mode === "langgraph" ? { ...process.env } : resolveDevEnvironment();
+const devEnv = mode === "langgraph" ? { ...process.env } : resolveDevEnvironment(loadWebDevelopmentConfig());
 
 if (mode === "check") {
   console.log("Local development preflight passed.");
@@ -76,7 +79,7 @@ async function runMode(processes, env, signal) {
     return processResultExitCode(await processes.start("copilot", ...copilotCommand(env)).closed);
   }
   if (mode === "langgraph") {
-    return processResultExitCode(await processes.start("langgraph", ...buildLangGraphCommand(agentDir, env)).closed);
+    return processResultExitCode(await processes.start("langgraph", ...buildLangGraphCommand(platformDir, env)).closed);
   }
 
   await waitForBackends(env, signal);
@@ -111,9 +114,9 @@ function startBackend(processes, env) {
 function backendCommand(env) {
   return [
     "uv",
-    ["run", "ops_pilot", "serve", "--host", env.BACKEND_HOST, "--port", env.BACKEND_PORT],
+    ["run", "--package", "ops-pilot-platform", "ops_pilot", "serve", "--host", env.BACKEND_HOST, "--port", env.BACKEND_PORT],
     {
-      cwd: agentDir,
+      cwd: servicesDir,
       env,
       stdio: ["inherit", "inherit", "pipe"],
     },
@@ -133,11 +136,11 @@ function assertWorkspace() {
   const requiredFiles = [
     "package.json",
     "pnpm-workspace.yaml",
-    "config/config.example.yaml",
     "apps/web/package.json",
     "apps/copilot-runtime/package.json",
     "services/agent/pyproject.toml",
-    "services/agent/langgraph.json",
+    "services/platform/pyproject.toml",
+    "services/platform/langgraph.json",
   ];
   const missingFiles = requiredFiles.filter((path) => !existsSync(join(rootDir, path)));
   if (missingFiles.length > 0) {
@@ -152,47 +155,56 @@ function assertWorkspace() {
   }
 }
 
-function resolveDevEnvironment() {
+function resolveDevEnvironment(webConfig) {
   if (process.env.OPS_PILOT_DEV_ENV_READY === "1") {
     return { ...process.env };
   }
 
-  const result = spawnSync("uv", ["run", "ops_pilot", "settings"], {
-    cwd: agentDir,
-    encoding: "utf8",
-    env: process.env,
-  });
-  if (result.error || result.status !== 0) {
-    const detail = result.stderr?.trim() || result.error?.message || `exit code ${result.status}`;
-    throw new Error(`Could not resolve backend settings: ${detail}`);
-  }
-
-  let settings;
-  try {
-    settings = JSON.parse(result.stdout);
-  } catch (error) {
-    throw new Error(`Backend settings returned invalid JSON: ${error.message}`, { cause: error });
-  }
-
-  const backendHost = process.env.CHAT_HOST || String(settings.chat_host);
-  const backendPort = process.env.CHAT_PORT || String(settings.chat_port);
-  const chatPath = normalizePath(String(settings.chat_base_path));
+  const backendHost = webConfig.backend_host;
+  const backendPort = String(webConfig.backend_port);
+  const chatPath = normalizePath(webConfig.chat_base_path);
   const backendUrl = `http://${backendHost}:${backendPort}`;
+  const assistantId = webConfig.assistant_id;
 
   return {
     ...process.env,
-    AGUI_AGENT_URL: process.env.AGUI_AGENT_URL || `${backendUrl}${chatPath}`,
-    ASSISTANT: String(settings.assistant_id),
-    ASSISTANT_ID: process.env.ASSISTANT_ID || String(settings.assistant_id),
+    COPILOTKIT_AGUI_AGENT_URL: `${backendUrl}${chatPath}`,
+    COPILOTKIT_AGENT_ID: assistantId,
+    COPILOTKIT_BASE_PATH: normalizePath(webConfig.copilot_runtime_base_path),
+    COPILOTKIT_EVENT_STORE_BACKEND: webConfig.copilot_event_store_backend,
+    COPILOTKIT_EVENT_STORE_SETUP_ON_START: String(webConfig.copilot_event_store_setup_on_start),
+    COPILOT_RUNTIME_HOST: webConfig.copilot_runtime_host,
+    COPILOT_RUNTIME_PORT: String(webConfig.copilot_runtime_port),
     BACKEND_HOST: backendHost,
     BACKEND_PORT: backendPort,
     BACKEND_URL: backendUrl,
     CHAT_PATH: chatPath,
+    COPILOT_RUNTIME_URL: `http://${webConfig.copilot_runtime_host}:${webConfig.copilot_runtime_port}`,
+    WEB_PORT: String(webConfig.frontend_port),
     OPS_PILOT_DEV_ENV_READY: "1",
-    OPS_PILOT_PERSISTENCE_BACKEND: String(settings.persistence_backend),
-    OPS_PILOT_PERSISTENCE_SETUP_ON_START: String(settings.persistence_setup_on_start),
-    VITE_BACKEND_URL: process.env.VITE_BACKEND_URL || backendUrl,
+    VITE_BACKEND_URL: backendUrl,
+    VITE_ASSISTANT_ID: assistantId,
+    VITE_COPILOT_RUNTIME_URL: normalizePath(webConfig.copilot_runtime_base_path),
   };
+}
+
+function loadWebDevelopmentConfig() {
+  const result = spawnSync("uv", ["run", "--package", "ops-pilot-platform", "ops_pilot", "web-development-config"], {
+    cwd: servicesDir,
+    env: process.env,
+    encoding: "utf8",
+  });
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    throw new Error(`Unable to load the web entrypoint from config/runtime.yaml:\n${result.stderr || result.stdout}`);
+  }
+  try {
+    return JSON.parse(result.stdout);
+  } catch (error) {
+    throw new Error(`web-development-config returned invalid JSON: ${error}`);
+  }
 }
 
 function normalizePath(value) {
@@ -222,6 +234,16 @@ async function waitForBackends(env, signal) {
     },
   );
   await waitForUrl("Backend", healthUrl, timeoutSeconds, signal);
+}
+
+function loadRootEnvironment() {
+  try {
+    process.loadEnvFile(join(rootDir, ".env"));
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      throw error;
+    }
+  }
 }
 
 async function waitForUrl(label, url, timeoutSeconds, shutdownSignal, options = {}) {

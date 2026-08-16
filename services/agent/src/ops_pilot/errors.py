@@ -1,4 +1,4 @@
-"""Shared exception policy for protocol adapters and background workers.
+"""Shared exception policy for runtime dependencies and host adapters.
 
 The module keeps three decisions together: the client-safe error contract, the
 HTTP status, and whether an exception deserves a traceback.  Callers only need

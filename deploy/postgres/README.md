@@ -25,12 +25,13 @@ Point the backend at this instance. In the repository root `.env`:
 DATABASE_URL=postgresql://ops_pilot:ops_pilot@127.0.0.1:5433/ops_pilot
 ```
 
-Enable the durable backend in `config/config.yaml`:
+Enable durability for the web entry and the separate CopilotKit event journal:
 
-```yaml
-persistence:
-  backend: postgres
-  setup_on_start: true   # creates checkpoint/task/Copilot event tables on startup
+```dotenv
+OPS_PILOT_WEB_PERSISTENCE_BACKEND=postgres
+OPS_PILOT_WEB_PERSISTENCE_SETUP_ON_START=true
+COPILOTKIT_EVENT_STORE_BACKEND=postgres
+COPILOTKIT_EVENT_STORE_SETUP_ON_START=true
 ```
 
 On the next `pnpm dev`, LangGraph creates the `checkpoints`/`writes` tables,

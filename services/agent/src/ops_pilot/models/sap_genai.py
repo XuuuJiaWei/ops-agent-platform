@@ -5,83 +5,83 @@ from __future__ import annotations
 import warnings
 from typing import Any
 
-from ops_pilot.config.settings import Settings
+from ops_pilot.runtime.spec import ModelSpec
 
 
 class SAPModelInitializationError(RuntimeError):
     """Raised when the configured SAP AI Core chat model cannot be created."""
 
 
-def create_chat_model(settings: Settings) -> Any:
+def create_chat_model(spec: ModelSpec) -> Any:
     """Create a LangChain-compatible SAP chat model for DeepAgents."""
 
     primary_error: Exception | None = None
     try:
-        model = _create_with_init_llm(settings)
+        model = _create_with_init_llm(spec)
         _assert_tool_calling_model(model)
         return model
     except Exception as exc:  # noqa: BLE001 - wrap with fallback context below.
         primary_error = exc
 
     try:
-        model = _create_with_proxy_chat_openai(settings)
+        model = _create_with_proxy_chat_openai(spec)
         _assert_tool_calling_model(model)
         return model
     except Exception as fallback_error:  # noqa: BLE001
         raise SAPModelInitializationError(
             "Unable to initialize SAP AI Core / Generative AI Hub chat model "
-            f"'{settings.model_name}'. Primary init_llm error: {primary_error!r}. "
+            f"'{spec.name}'. Primary init_llm error: {primary_error!r}. "
             f"Fallback ChatOpenAI error: {fallback_error!r}."
         ) from fallback_error
 
 
-def _create_with_init_llm(settings: Settings) -> Any:
+def _create_with_init_llm(spec: ModelSpec) -> Any:
     try:
         from gen_ai_hub.proxy import get_proxy_client
         from gen_ai_hub.proxy.langchain import init_llm
     except ImportError as exc:
         raise SAPModelInitializationError(
-            "SAP SDK dependency is not installed. Run 'uv sync' in services/agent."
+            "SAP SDK dependency is not installed. Run 'uv sync --all-packages' in services/."
         ) from exc
 
     proxy_client = get_proxy_client("gen-ai-hub")
-    if _is_bedrock_model(settings.model_name):
-        return _create_bedrock_chat_model(settings, proxy_client)
+    if _is_bedrock_model(spec.name):
+        return _create_bedrock_chat_model(spec, proxy_client)
 
     return init_llm(
-        settings.model_name,
+        spec.name,
         proxy_client=proxy_client,
-        **_generation_kwargs(settings),
+        **_generation_kwargs(spec),
     )
 
 
-def _create_with_proxy_chat_openai(settings: Settings) -> Any:
+def _create_with_proxy_chat_openai(spec: ModelSpec) -> Any:
     try:
         from gen_ai_hub.proxy import get_proxy_client
         from gen_ai_hub.proxy.langchain import ChatOpenAI
     except ImportError as exc:
         raise SAPModelInitializationError(
-            "SAP SDK fallback classes are not installed. Run 'uv sync' in services/agent."
+            "SAP SDK fallback classes are not installed. Run 'uv sync --all-packages' in services/."
         ) from exc
 
     proxy_client = get_proxy_client("gen-ai-hub")
     return ChatOpenAI(
-        proxy_model_name=settings.model_name,
+        proxy_model_name=spec.name,
         proxy_client=proxy_client,
-        **_generation_kwargs(settings),
+        **_generation_kwargs(spec),
     )
 
 
-def _create_bedrock_chat_model(settings: Settings, proxy_client: Any) -> Any:
+def _create_bedrock_chat_model(spec: ModelSpec, proxy_client: Any) -> Any:
     try:
         from botocore.config import Config as BotoConfig
         from gen_ai_hub.proxy.langchain.amazon import ChatBedrock
     except ImportError as exc:
         raise SAPModelInitializationError(
-            "SAP SDK Bedrock LangChain integration is not installed. Run 'uv sync' in services/agent."
+            "SAP SDK Bedrock LangChain integration is not installed. Run 'uv sync --all-packages' in services/."
         ) from exc
 
-    deployment = proxy_client.select_deployment(model_name=settings.model_name)
+    deployment = proxy_client.select_deployment(model_name=spec.name)
     # The SAP SDK's ChatBedrock intentionally moves `client_params` into
     # `model_kwargs` and emits a UserWarning about it on every construction.
     # It is expected here, so suppress that one warning to keep startup clean.
@@ -96,31 +96,31 @@ def _create_bedrock_chat_model(settings: Settings, proxy_client: Any) -> Any:
             deployment_id=deployment.deployment_id,
             proxy_client=proxy_client,
             config=BotoConfig(
-                read_timeout=settings.model_request_timeout_seconds,
+                read_timeout=spec.request_timeout_seconds,
                 retries={"mode": "standard", "total_max_attempts": 1},
             ),
             # Langfuse records completion_start_time from LangChain's first
             # on_llm_new_token callback; non-streaming Bedrock calls cannot
             # provide a real TTFT measurement.
             streaming=True,
-            model_kwargs=_generation_kwargs(settings),
+            model_kwargs=_generation_kwargs(spec),
         )
 
 
-def _generation_kwargs(settings: Settings) -> dict[str, Any]:
-    kwargs: dict[str, Any] = {} if settings.model_reasoning_mode == "adaptive" else dict(_sampling_kwargs(settings))
-    if settings.model_max_tokens is not None:
-        kwargs["max_tokens"] = settings.model_max_tokens
-    kwargs["thinking"] = {"type": settings.model_reasoning_mode}
-    if settings.model_reasoning_mode == "adaptive":
-        kwargs["output_config"] = {"effort": settings.model_reasoning_effort}
+def _generation_kwargs(spec: ModelSpec) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {} if spec.reasoning_mode == "adaptive" else dict(_sampling_kwargs(spec))
+    if spec.max_tokens is not None:
+        kwargs["max_tokens"] = spec.max_tokens
+    kwargs["thinking"] = {"type": spec.reasoning_mode}
+    if spec.reasoning_mode == "adaptive":
+        kwargs["output_config"] = {"effort": spec.reasoning_effort}
     return kwargs
 
 
-def _sampling_kwargs(settings: Settings) -> dict[str, float]:
-    if settings.model_top_p is not None:
-        return {"top_p": settings.model_top_p}
-    return {"temperature": settings.model_temperature}
+def _sampling_kwargs(spec: ModelSpec) -> dict[str, float]:
+    if spec.top_p is not None:
+        return {"top_p": spec.top_p}
+    return {"temperature": spec.temperature}
 
 
 def _is_bedrock_model(model_name: str) -> bool:

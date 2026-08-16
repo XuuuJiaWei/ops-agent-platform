@@ -1,94 +1,57 @@
 # Repository Guidelines
 
-## Project Structure & Module Organization
+## Architecture
 
-This repo contains a thin CopilotKit/Vite frontend and an `ops_pilot` DeepAgents backend. Frontend code lives in `apps/web/src`; the local CopilotKit Runtime bridge lives in `apps/copilot-runtime/src`. Backend Python code lives in `services/agent/src/ops_pilot`, with tests under `services/agent/tests`. Shared configuration examples live in `config/`, documentation in `docs/`, and optional DeepAgents skills in `skills/`.
+`apps/web` is the Vite/CopilotKit UI and `apps/copilot-runtime` is its Node protocol bridge. Python is an official uv workspace under `services/` with one shared lockfile:
 
-Keep agent policy, prompts, tools, data access, sandbox lifecycle, MCP lifecycle, tracing, and protocol adapters in the backend. The frontend should stay a standard CopilotKit UI surface that forwards to the local runtime/backend.
+- `services/agent` is the host-neutral DeepAgents harness. It owns models, MCP, sandbox, skills, reliability, persistence, and tracing.
+- `services/platform` owns executable composition, FastAPI, CopilotKit/AG-UI, A2A, health, Spaces, LangGraph export, eval, and benchmark adapters.
 
-## Build Tools & Runtime Stack
+Dependency direction is `platform -> agent`. The agent harness consumes `RuntimeSpec` only and exposes official DeepAgents/LangChain injection points (`tools`, `middleware`, and `context_schema`). Domain and protocol identifiers are mapped to generic `thread_id`, `run_id`, metadata, and configurable values at the platform boundary.
 
-- JavaScript workspace: `pnpm` (`packageManager` is `pnpm@10.33.2`).
-- Frontend: Vite 8, React 19, TypeScript, Tailwind CSS 4, ESLint 9, lucide-react.
-- Copilot runtime: Node ESM service in `apps/copilot-runtime`, using `@copilotkit/runtime`.
-- Backend: Python 3.12, `uv`, hatchling build backend, FastAPI/Uvicorn, DeepAgents, LangGraph, MCP adapters, SAP AI SDK, OpenSandbox.
-- Backend quality tools: `ruff` (lint + format), `pyright` (type check), `pytest` plus `pytest-asyncio` (tests).
-- Frontend quality tools: `eslint` (lint), `prettier` (format, owned at the repo root over `apps/**`), `tsc` (type check), `vitest` (the single test runner for `apps/web`). The `copilot-runtime` bridge uses `node --test`.
+## Configuration and lifecycle
 
-## Build, Test, And Development Commands
+Use `ops_pilot_platform.entrypoints.RuntimeEnvironment` to merge top-level defaults with `entrypoints.<name>` from local `config/runtime.yaml`. Track `config/runtime.example.yaml`; keep `runtime.yaml` local and `.env` limited to explicit credential aliases. `deepagent` is a top-level key and mirrors `create_deep_agent` inputs. Entrypoints contain only real overrides.
 
-Root `package.json` exposes cross-stack aggregate commands. Each has per-stack variants (`:backend`, `:web`, `:copilot`) so you can scope to one side.
+Spaces belongs to `ops_pilot_platform.web.spaces`. Agent-facing operations are CopilotKit `useFrontendTool` declarations in React.
 
-Setup:
+Use official SDK abstractions before hand-written adapters:
 
-- `pnpm install`: install workspace JavaScript dependencies.
-- `cd services/agent && uv sync`: install Python backend dependencies.
+- Pydantic Settings at process/configuration boundaries and Pydantic models for API schemas.
+- FastAPI `lifespan` for application-owned resources; startup acquires them and shutdown closes them.
+- LangChain/DeepAgents model factories, middleware, MCP adapters, backends, and checkpointers for agent execution.
 
-Development (unchanged):
+Every created client, pool, task store, or background task needs one clear owner and a matching shutdown path.
 
-- `pnpm dev`: preflight checks, then start web, backend, and Copilot runtime together.
-- `pnpm run dev:web` / `dev:backend` / `dev:copilot` / `dev:langgraph`: start one process.
+## Tooling
 
-Quality gates (aggregate across backend + frontend):
+- JavaScript: pnpm (`pnpm@10.33.2`), Vite/React/TypeScript, ESLint, Prettier, Vitest.
+- Python: Python 3.12, uv, FastAPI/Uvicorn, DeepAgents/LangGraph, Ruff, Pyright, pytest.
 
-- `pnpm lint`: `ruff check` (backend) + `eslint` (web).
-- `pnpm format`: `ruff format` (backend) + `prettier --write` (frontend).
-- `pnpm run format:check`: verify formatting without writing.
-- `pnpm typecheck`: `pyright` (backend) + `tsc --noEmit` (web).
-- `pnpm test`: `pytest` (backend) + `vitest run` (web) + `node --test` (copilot runtime).
-- `pnpm check`: run all of the above in sequence (`lint` → `format:check` → `typecheck` → `test`).
-
-Other:
-
-- `pnpm --filter "./apps/web" build`: type-check and build the web app.
-- `pnpm run smoke:model`, `smoke:agent`, `smoke:a2a`, `smoke:local`: targeted backend smoke checks.
-- `pnpm run eval`, `eval:quick`, `eval:calibration`, `eval:chaos`: agent evaluation (see `docs/design/agent-eval.md`).
-
-## Formatting, Linting, And Type Checks
-
-Prefer the aggregate commands from the repo root — they cover both stacks:
+From the repository root:
 
 ```bash
-pnpm lint          # ruff check (backend) + eslint (web)
-pnpm format        # ruff format (backend) + prettier --write (frontend)
+pnpm install
+cd services && uv sync --all-packages
+
+pnpm dev
+pnpm lint
 pnpm run format:check
-pnpm typecheck     # pyright (backend) + tsc (web)
-pnpm test          # pytest + vitest + node --test
-pnpm check         # all of the above, in order
+pnpm typecheck
+pnpm test
+pnpm check
 ```
 
-Scope to one stack with the `:backend` / `:web` / `:copilot` variants (e.g. `pnpm run lint:web`, `pnpm run test:backend`).
+Use `pnpm run lint:web`, `pnpm run test:backend`, and the other scoped scripts while iterating. `pnpm check` is the handoff gate and includes Pyright.
 
-Backend-only, run from `services/agent`:
+## Code and tests
 
-```bash
-uv run ruff check src tests          # lint
-uv run ruff format src tests         # format (add --check to verify only)
-uv run ruff check --fix src tests    # auto-fix; review the diff afterward
-uv run pyright                       # type check
-uv run pytest                        # tests
-```
+Use TypeScript/React in `apps/web` and Python 3.12 in the `services` workspace. Keep the agent harness host-neutral; platform and benchmark domains inject capabilities through its public spec.
 
-Frontend formatting is Prettier, owned at the repo root over `apps/**` (config in `.prettierrc.json`, scope in `.prettierignore`). `eslint-config-prettier` is applied last in `apps/web/eslint.config.mjs` so ESLint does not fight Prettier on style.
+Co-locate Python tests with their workspace member under `services/<member>/tests`. Frontend tests use Vitest; the Copilot Runtime bridge uses `node --test`.
 
-> **Pyright is not yet a CI gate.** `uv run pyright` currently reports pre-existing type errors in backend code; `pnpm check` includes it so the errors stay visible as tech debt, but CI does not run pyright (so CI stays green). Do not treat a red `typecheck:backend` as a blocker until those errors are cleaned up and pyright is promoted to a gate.
+## Security and delivery
 
-## Coding Style & Naming Conventions
+Never commit secrets or `config/runtime.yaml`. Copy the tracked examples and keep company data features disabled unless explicitly approved.
 
-Use TypeScript/React for `apps/web` and Python 3.12 for `services/agent`. Python package imports should use `ops_pilot.*`. The backend CLI command is `ops_pilot`. Prefer existing local modules and patterns over new abstractions, and keep frontend state/UI concerns separate from backend agent behavior.
-
-Backend tests use `pytest`; place unit tests in `services/agent/tests/unit` and integration tests in `services/agent/tests/integration`. Name test files `test_*.py`, but avoid duplicate basenames in different test folders because pytest may import them as top-level modules.
-
-## Sandbox, MCP, And Lifecycle Notes
-
-OpenSandbox is managed through the backend sandbox manager, not directly by callers. Agent code should ask for an execution environment through the runtime/backend abstraction; allocation policy (`process`, `thread`, or `run`), TTL renewal, cleanup, skill sync, concurrency limits, and visible `/workspace` path mapping belong in the sandbox module.
-
-MCP servers should use explicit persistent sessions when the server supports it. Treat MCP tool `isError` responses and structured tool outputs as model-visible tool results unless the local program itself failed unexpectedly.
-
-## Commit & Pull Request Guidelines
-
-Use short, imperative commit messages, preferably Conventional Commit style, for example `fix: stabilize copilot runtime routing` or `docs: update sandbox lifecycle notes`. Pull requests should include a concise summary, validation commands run, screenshots for UI changes, and notes about configuration or data-boundary impacts.
-
-## Security & Configuration Tips
-
-Do not commit secrets. Secrets live in `.env` (copy from `.env.example`); regular configuration, including MCP servers and OpenSandbox options, lives in `config/config.yaml` (copy from `config/config.example.yaml`). Keep Copilot Cloud or Enterprise Intelligence Platform features disabled for company data unless explicitly approved. Langfuse is optional; missing credentials should leave tracing disabled.
+Use short imperative Conventional Commit messages. Before committing, run the relevant checks; run `pnpm check` for cross-stack or architectural changes. PRs describe runtime/data-boundary changes and include screenshots for UI changes.

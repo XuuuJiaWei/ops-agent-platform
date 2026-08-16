@@ -1,0 +1,66 @@
+# Read-only observer identity for OpsPilot's Kubernetes MCP tools.
+#
+# Layout is deliberate:
+# * the ServiceAccount lives in the stable `ops-pilot` namespace so its token
+#   survives benchmark runs (the app namespace is deleted/recreated every run);
+# * the Role/RoleBinding live in `astronomy-shop` and are re-applied by the
+#   bridge after each run recreates that namespace;
+# * no configmaps (the flagd-config shortcut stays invisible), no secrets,
+#   no exec, and no write verbs - the agent can only observe symptoms.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ops-pilot
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ops-pilot-observer
+  namespace: ops-pilot
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ops-pilot-observer
+  namespace: astronomy-shop
+rules:
+  - apiGroups: [""]
+    resources:
+      - pods
+      - pods/log
+      - events
+      - endpoints
+      - services
+      - persistentvolumeclaims
+      - replicationcontrollers
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - statefulsets
+      - replicasets
+      - daemonsets
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources:
+      - ingresses
+      - networkpolicies
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["autoscaling"]
+    resources:
+      - horizontalpodautoscalers
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ops-pilot-observer
+  namespace: astronomy-shop
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ops-pilot-observer
+subjects:
+  - kind: ServiceAccount
+    name: ops-pilot-observer
+    namespace: ops-pilot

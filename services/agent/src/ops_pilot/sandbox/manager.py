@@ -27,7 +27,7 @@ from deepagents.backends.protocol import (
 )
 from langgraph.config import get_config
 
-from ops_pilot.config.settings import Settings
+from ops_pilot.runtime.spec import SandboxSpec
 from ops_pilot.sandbox.opensandbox_backend import SandboxRuntime, create_sandbox_runtime
 from ops_pilot.skills.sync import SkillSyncPlan, plan_skill_paths, sync_skill_plan_to_backend
 
@@ -53,27 +53,25 @@ class SandboxLease:
 class _InvocationScope:
     thread_id: str | None
     run_id: str | None
-    a2a_context_id: str | None
-    a2a_task_id: str | None
 
     @property
     def thread_key(self) -> str:
-        return self.thread_id or self.a2a_context_id or "process"
+        return self.thread_id or "process"
 
     @property
     def run_key(self) -> str:
-        return self.run_id or self.a2a_task_id or self.thread_key
+        return self.run_id or self.thread_key
 
 
 class SandboxManager:
     """Owns sandbox leases and hides allocation policy from DeepAgents."""
 
-    def __init__(self, settings: Settings) -> None:
-        self.settings = settings
-        self.scope: SandboxScope = settings.open_sandbox_scope  # type: ignore[assignment]
-        self.visible_workspace = settings.open_sandbox_workspace_path
+    def __init__(self, spec: SandboxSpec) -> None:
+        self.spec = spec
+        self.scope: SandboxScope = spec.scope
+        self.visible_workspace = spec.workspace_path
         self.visible_skills = _join_posix(self.visible_workspace, "skills")
-        self.internal_root = settings.open_sandbox_internal_root
+        self.internal_root = spec.internal_root
         self.backend = ScopedSandboxBackend(self)
         self._lock = threading.RLock()
         self._leases: OrderedDict[str, SandboxRuntime] = OrderedDict()
@@ -119,13 +117,13 @@ class SandboxManager:
             "mode": "opensandbox",
             "allocation_scope": self.scope,
             "workspace_path": self.visible_workspace,
-            "max_active": self.settings.open_sandbox_max_active,
+            "max_active": self.spec.max_active,
             "active_sandboxes": len(active),
             "sandboxes": active,
-            "domain": self.settings.open_sandbox_domain,
-            "protocol": self.settings.open_sandbox_protocol,
-            "image": self.settings.open_sandbox_image,
-            "use_server_proxy": self.settings.open_sandbox_use_server_proxy,
+            "domain": self.spec.domain,
+            "protocol": self.spec.protocol,
+            "image": self.spec.image,
+            "use_server_proxy": self.spec.use_server_proxy,
         }
 
     def is_expired(self) -> bool:
@@ -141,12 +139,23 @@ class SandboxManager:
     def close(self) -> None:
         with self._lock:
             self._closed = True
-            leases = list(self._leases.values())
+            leases = list(self._leases.items())
             self._leases.clear()
             self._initialized_workspaces.clear()
             self._synced_skills.clear()
-        for runtime in leases:
-            runtime.close()
+        failed: list[tuple[str, SandboxRuntime]] = []
+        errors: list[Exception] = []
+        for key, runtime in leases:
+            try:
+                runtime.close()
+            except Exception as exc:  # noqa: BLE001 - attempt every owned lease before reporting cleanup failure.
+                failed.append((key, runtime))
+                errors.append(exc)
+        if failed:
+            with self._lock:
+                self._leases.update(failed)
+        if errors:
+            raise ExceptionGroup("Failed to release one or more sandbox leases.", errors)
 
     def _sandbox_key(self, scope: _InvocationScope) -> str:
         if self.scope == "process":
@@ -157,7 +166,7 @@ class SandboxManager:
 
     def _workspace_key(self, scope: _InvocationScope) -> str:
         if self.scope == "process":
-            return f"workspace:{scope.run_key if scope.run_id or scope.a2a_task_id else scope.thread_key}"
+            return f"workspace:{scope.run_key if scope.run_id else scope.thread_key}"
         return self._sandbox_key(scope)
 
     def _workspace_path(self, workspace_key: str) -> str:
@@ -184,12 +193,11 @@ class SandboxManager:
             else:
                 return existing
 
-        if len(self._leases) >= self.settings.open_sandbox_max_active:
+        if len(self._leases) >= self.spec.max_active:
             raise RuntimeError(
-                "OpenSandbox pool is exhausted: "
-                f"{len(self._leases)}/{self.settings.open_sandbox_max_active} active sandboxes."
+                f"OpenSandbox pool is exhausted: {len(self._leases)}/{self.spec.max_active} active sandboxes."
             )
-        runtime = create_sandbox_runtime(self.settings)
+        runtime = create_sandbox_runtime(self.spec)
         if runtime is None:
             raise RuntimeError("OpenSandbox is not enabled for this runtime.")
         self._leases[sandbox_key] = runtime
@@ -430,12 +438,12 @@ class ScopedSandboxBackend(SandboxBackendProtocol):
         return {**info, "path": self._visible_path(info["path"], lease)}
 
 
-def create_sandbox_manager(settings: Settings) -> SandboxManager | None:
+def create_sandbox_manager(spec: SandboxSpec) -> SandboxManager | None:
     """Create the configured sandbox manager, if OpenSandbox is enabled."""
 
-    if not settings.open_sandbox_enabled:
+    if not spec.enabled:
         return None
-    return SandboxManager(settings)
+    return SandboxManager(spec)
 
 
 def _current_invocation_scope() -> _InvocationScope:
@@ -448,8 +456,6 @@ def _current_invocation_scope() -> _InvocationScope:
     return _InvocationScope(
         thread_id=_string_value(configurable.get("thread_id") or metadata.get("thread_id")),
         run_id=_string_value(configurable.get("run_id") or metadata.get("run_id")),
-        a2a_context_id=_string_value(configurable.get("a2a_context_id") or metadata.get("a2a_context_id")),
-        a2a_task_id=_string_value(configurable.get("a2a_task_id") or metadata.get("a2a_task_id")),
     )
 
 

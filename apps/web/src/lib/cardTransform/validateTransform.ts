@@ -17,7 +17,7 @@ type ValidateInput = {
   cardType?: CardType;
 };
 
-// Mirror of the backend REQUIRED_CONTENT_FIELD (services/agent/.../spaces/models.py):
+// Mirror of the Web host REQUIRED_CONTENT_FIELD (ops_pilot/web/spaces/models.py):
 // the one content field each card type must populate to render meaningfully.
 const REQUIRED_CONTENT_FIELD: Record<CardType, keyof CardContent> = {
   kpi: "metrics",

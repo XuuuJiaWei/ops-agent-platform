@@ -1,0 +1,50 @@
+[project]
+name = "rca100-benchmark"
+version = "0.1.0"
+description = "Standalone blind evaluator for the RCA100 AIOps benchmark"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "pyarrow>=21.0.0,<22",
+  "pydantic>=2.11.0,<3",
+]
+
+[dependency-groups]
+dev = [
+  "pyright>=1.1.411,<2",
+  "pytest>=9.0.2,<10",
+  "ruff>=0.14.8,<1",
+]
+
+[project.scripts]
+rca100-benchmark = "rca100_benchmark.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rca100_benchmark"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.pyright]
+include = ["src", "tests"]
+pythonVersion = "3.12"
+venvPath = "."
+venv = ".venv"
+typeCheckingMode = "standard"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
