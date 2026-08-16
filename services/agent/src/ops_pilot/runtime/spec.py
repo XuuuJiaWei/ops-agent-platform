@@ -6,19 +6,12 @@ already-declared composition; it never discovers a global configuration file.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
 from ops_pilot.mcp.spec import MCPServerCatalog
-
-if TYPE_CHECKING:
-    from ops_pilot.agent.extensions import RuntimeExtension
-
-    RuntimeExtensionFactory = Callable[["RuntimeSpec"], Awaitable[RuntimeExtension]]
-else:
-    RuntimeExtensionFactory = Callable[..., Awaitable[Any]]
 
 ModelProvider = Literal["sap", "openai", "deepseek", "anthropic", "google_genai", "ollama"]
 PersistenceBackend = Literal["memory", "postgres", "none"]
@@ -54,7 +47,7 @@ class ReliabilitySpec:
     tool_retry_backoff_factor: float = 2.0
     tool_retry_max_delay_seconds: float = 60.0
     tool_retry_jitter: bool = True
-    recursion_limit: int = 9999
+    recursion_limit: int = 256
 
 
 @dataclass(frozen=True)
@@ -141,9 +134,13 @@ class RuntimeSpec:
     persistence: PersistenceSpec = field(default_factory=PersistenceSpec)
     sandbox: SandboxSpec = field(default_factory=SandboxSpec)
     observability: ObservabilitySpec = field(default_factory=ObservabilitySpec)
-    extensions: tuple[RuntimeExtensionFactory, ...] = field(default_factory=tuple)
     tools: tuple[Any, ...] = field(default_factory=tuple)
+    middleware: tuple[Any, ...] = field(default_factory=tuple)
+    context_schema: type[Any] | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def with_tools(self, tools: Sequence[Any]) -> RuntimeSpec:
         return replace(self, tools=(*self.tools, *tools))
+
+    def with_middleware(self, middleware: Sequence[Any]) -> RuntimeSpec:
+        return replace(self, middleware=(*self.middleware, *middleware))

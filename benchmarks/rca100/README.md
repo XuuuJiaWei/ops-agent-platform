@@ -52,7 +52,10 @@ The command reads the public files under that single `case_directory` and writes
 }
 ```
 
-No specific agent framework, API client, or runtime lifecycle is imposed. An adapter for OpsPilot or another system belongs in that system, not in this benchmark package.
+No specific agent framework, API client, or runtime lifecycle is imposed. The
+OpsPilot adapter lives in `ops_pilot_platform.benchmarks.rca100`, outside the agent
+harness. It injects a case-scoped PyArrow query tool through LangChain's
+official `tools` and `ToolRuntime` context interfaces.
 
 ## Run
 
@@ -60,6 +63,12 @@ Run an agent script for one blind task:
 
 ```powershell
 uv run rca100-benchmark run --dataset-dir D:/datasets/RCA100 --task t001 --agent-command python D:/agents/my_rca_agent.py
+```
+
+Run the bundled OpsPilot adapter from this directory:
+
+```powershell
+uv run rca100-benchmark run --dataset-dir D:/datasets/RCA100 --task t001 --agent-command uv run --project ../../services --package ops-pilot-platform --extra rca100 ops_pilot rca100-agent
 ```
 
 Run the full manifest and persist results:

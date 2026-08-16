@@ -1,4 +1,4 @@
-"""ops_pilot backend package."""
+"""Host-neutral OpsPilot DeepAgents harness."""
 
 __all__ = ["__version__"]
 

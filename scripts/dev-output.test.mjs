@@ -27,7 +27,7 @@ test("preserves ordinary backend errors and verbose MCP diagnostics", () => {
   const traceback = "Traceback: application failure";
   const structuredBackendError = JSON.stringify({
     level: "ERROR",
-    logger: "ops_pilot.backend",
+    logger: "ops_pilot_platform.web.app",
     message: "application failure",
     exception: "full backend traceback",
   });

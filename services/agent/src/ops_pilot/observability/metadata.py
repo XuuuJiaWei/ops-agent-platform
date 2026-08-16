@@ -1,4 +1,4 @@
-"""Trace metadata builders shared by /chat and /a2a adapters."""
+"""Host-neutral LangChain trace metadata builders."""
 
 from __future__ import annotations
 
@@ -15,11 +15,8 @@ def build_trace_metadata(
     protocol: str,
     thread_id: str | None = None,
     run_id: str | None = None,
-    a2a_task_id: str | None = None,
-    a2a_context_id: str | None = None,
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    session_id = thread_id or a2a_context_id
     metadata: dict[str, Any] = {
         "assistant_id": runtime.assistant_id,
         "protocol": protocol,
@@ -28,16 +25,11 @@ def build_trace_metadata(
         "langfuse_trace_name": _trace_name(protocol),
         "langfuse_tags": _trace_tags(protocol),
     }
-    if session_id:
-        metadata["langfuse_session_id"] = session_id[:200]
     if thread_id:
         metadata["thread_id"] = thread_id
+        metadata["langfuse_session_id"] = thread_id[:200]
     if run_id:
         metadata["run_id"] = run_id
-    if a2a_task_id:
-        metadata["a2a_task_id"] = a2a_task_id
-    if a2a_context_id:
-        metadata["a2a_context_id"] = a2a_context_id
     if extra:
         metadata.update(extra)
     user_id = metadata.get("user_id") or metadata.get("userId")
@@ -53,8 +45,6 @@ def build_runnable_config(
     protocol: str,
     thread_id: str | None = None,
     run_id: str | None = None,
-    a2a_task_id: str | None = None,
-    a2a_context_id: str | None = None,
     configurable: dict[str, Any] | None = None,
     extra_metadata: dict[str, Any] | None = None,
 ) -> RunnableConfig:
@@ -63,14 +53,15 @@ def build_runnable_config(
         protocol=protocol,
         thread_id=thread_id,
         run_id=run_id,
-        a2a_task_id=a2a_task_id,
-        a2a_context_id=a2a_context_id,
         extra=extra_metadata,
     )
     config: RunnableConfig = {
         "metadata": metadata,
         "run_name": metadata["langfuse_trace_name"],
         "tags": metadata["langfuse_tags"],
+        # LangGraph requires recursion_limit at the top level. Keeping it here
+        # makes every host use the same guardrail.
+        "recursion_limit": runtime.reliability.recursion_limit,
     }
     if callbacks:
         config["callbacks"] = list(callbacks)
@@ -79,23 +70,14 @@ def build_runnable_config(
         effective_configurable.setdefault("thread_id", thread_id)
     if run_id:
         effective_configurable.setdefault("run_id", run_id)
-    if a2a_task_id:
-        effective_configurable.setdefault("a2a_task_id", a2a_task_id)
-    if a2a_context_id:
-        effective_configurable.setdefault("a2a_context_id", a2a_context_id)
     if effective_configurable:
         config["configurable"] = effective_configurable
     return config
 
 
 def _trace_name(protocol: str) -> str:
-    names = {
-        "a2a": "handle-a2a-task",
-        "copilotkit-agui": "handle-copilotkit-run",
-        "eval": "run-eval-case",
-        "smoke": "run-smoke-check",
-    }
-    return names.get(protocol, "run-agent")
+    normalized = "-".join(part for part in protocol.lower().replace(":", "-").split("-") if part)
+    return f"run-{normalized or 'agent'}"
 
 
 def build_model_metadata(runtime: RuntimeSpec, model: Any) -> dict[str, Any]:

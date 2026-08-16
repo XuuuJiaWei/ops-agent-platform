@@ -1,31 +1,44 @@
 # OpsPilot
 
-OpsPilot composes one DeepAgents runtime per entrypoint. The runtime capability
-catalog is declarative and entry-local; credentials never belong in it.
+OpsPilot composes one DeepAgents runtime per entrypoint from one validated
+configuration document. Credentials never belong in it.
 
 ```
-config/entries/web.yaml        → Web runtime + Spaces + CopilotKit/AG-UI
-config/entries/eval.yaml       → stateless evaluation runtime
-config/entries/benchmark.yaml  → isolated AIOpsLab runtime
-config/entries/langgraph.yaml  → LangGraph Platform runtime
-.env                           → model, database, MCP, sandbox, and tracing secrets
+config/runtime.example.yaml  → tracked defaults + entrypoint overrides
+config/runtime.yaml          → ignored local runtime choices
+.env                         → model, database, MCP, sandbox, and tracing secrets
 ```
 
 The browser owns CopilotKit's frontend tool declarations. The Node bridge only
 adapts the Web runtime to CopilotKit; it does not choose models or tools.
 
+```text
+apps/                  React UI and CopilotKit protocol bridge
+services/agent/        host-neutral DeepAgents harness library
+services/platform/     FastAPI/Web/A2A/AG-UI hosts and composition
+benchmarks/            standalone evaluators and benchmark infrastructure
+config/                one ignored runtime.yaml plus tracked example
+```
+
+```text
+apps/                  React UI and CopilotKit protocol bridge
+services/agent/        host-neutral DeepAgents harness library
+services/platform/     FastAPI/Web/A2A/AG-UI hosts and composition
+benchmarks/            standalone evaluators and benchmark infrastructure
+config/                one ignored runtime.yaml plus tracked example
+```
+
 ## Configure once
 
 ```powershell
 pnpm install
-cd services/agent; uv sync; cd ../..
+cd services; uv sync --all-packages; cd ..
 Copy-Item .env.example .env
+Copy-Item config/runtime.example.yaml config/runtime.yaml
 ```
 
-Choose the DeepAgents harness by editing the relevant file under
-`config/entries/`. The `deepagent` subtree follows `create_deep_agent`'s
-injection points. For example, the default Web entry is in
-[config/entries/web.yaml](config/entries/web.yaml):
+Edit the top-level defaults once and keep only real differences under `entrypoints`. The
+`deepagent` subtree follows `create_deep_agent`'s injection points:
 
 ```yaml
 deepagent:
@@ -33,16 +46,16 @@ deepagent:
     provider: openai
     name: dots-studio/dots-3-note-preview:free
     base-url: https://openrouter.ai/api/v1
-  tools:
-    mcp:
-      prometheus:
-        url: null
-  middleware:
-    todo-list: true
-  backend:
-    type: opensandbox
   checkpointer:
-    backend: memory
+    backend: none
+entrypoints:
+  web:
+    deepagent:
+      checkpointer:
+        backend: memory
+  eval:
+    deepagent:
+      name: ops-pilot-eval
 ```
 
 Put only secrets in `.env`:
@@ -66,7 +79,7 @@ pnpm sandbox:up
 pnpm dev
 ```
 
-The command reads `config/entries/web.yaml` and starts Vite, FastAPI/AG-UI, and
+The command selects `entrypoints.web` and starts Vite, FastAPI/AG-UI, and
 the CopilotKit bridge with one consistent host, port, agent id, and transport
 configuration. Start processes separately only when diagnosing one layer:
 
@@ -84,23 +97,14 @@ Bootstrap AIOpsLab once:
 pnpm benchmark:setup
 ```
 
-Then edit [config/entries/benchmark.yaml](config/entries/benchmark.yaml):
+Then edit `entrypoints.benchmark` in `config/runtime.yaml`:
 
 ```yaml
-deepagent:
-  model:
-    provider: openai
-    name: dots-studio/dots-3-note-preview:free
-    base-url: https://openrouter.ai/api/v1
-  tools:
-    mcp:
-      kubernetes:
-        kubeconfig: null
-  checkpointer:
-    backend: none
-benchmark:
-  aiopslab:
-    directory: D:/dev/projects/AIOpsLab
+entrypoints:
+  benchmark:
+    benchmark:
+      aiopslab:
+        directory: D:/dev/projects/AIOpsLab
 ```
 
 `OPENROUTER_API_KEY` remains in `.env`. Run a problem with its fully isolated
@@ -117,10 +121,10 @@ command, leaving normal Web, eval, and development environments untouched.
 
 ## RCA100 benchmark
 
-RCA100 lives as an independent package under [benchmarks/rca100](benchmarks/rca100/README.md). It is deliberately not part of the application runtime; any agent is invoked through its JSON-over-stdio contract.
+RCA100 lives as an independent evaluator under [benchmarks/rca100](benchmarks/rca100/README.md). Its OpsPilot adapter and case-scoped PyArrow tool live in the benchmark domain, outside `ops_pilot.agent`; the evaluator invokes it through JSON-over-stdio.
 
 ```powershell
-pnpm benchmark:rca100 -- run --dataset-dir D:/datasets/RCA100 --task t001 --agent-command python D:/agents/my_rca_agent.py
+pnpm benchmark:rca100 -- run --dataset-dir D:/datasets/RCA100 --task t001 --agent-command uv run --project ../../services --package ops-pilot-platform --extra rca100 ops_pilot rca100-agent
 ```
 
 ## Validate

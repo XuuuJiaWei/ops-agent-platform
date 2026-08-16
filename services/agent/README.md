@@ -1,43 +1,8 @@
-# OpsPilot agent service
+# OpsPilot agent harness
 
-The agent package exposes a host-neutral `build_agent_runtime(RuntimeSpec)`.
-It never loads a global YAML file or picks a default model, MCP server, or host
-extension.
+This package is host-neutral. It owns DeepAgents construction, models, MCP,
+sandbox, skills, persistence, reliability, and tracing. It does not load YAML,
+start a server, expose a protocol, or import a product domain.
 
-Runtime combinations live in `ops_pilot.entrypoints`:
-
-- `web.py` owns the AG-UI/A2A web surface and opts into Spaces and the
-  CopilotKit middleware.
-- `eval.py` owns the stateless evaluation surface.
-- `benchmark.py` owns the AIOpsLab surface and intentionally excludes web
-  extensions.
-- `langgraph.py` owns the LangGraph Platform surface.
-
-Each entry reads exactly one non-sensitive configuration file from
-`config/entries/<entry>.yaml`. `.env` supplies only explicit credential aliases
-such as `OPENROUTER_API_KEY`, `MODEL_API_KEY`, `DATABASE_URL`, and
-`MCP_BASIC_AUTH_HEADER`.
-
-```bash
-uv run ops_pilot profiles
-uv run ops_pilot serve
-uv run ops_pilot status --entry benchmark
-uv run ops_pilot benchmark --problem <problem-id>
-```
-
-For normal use, run benchmarks from the repository root instead:
-
-```bash
-pnpm benchmark:setup
-pnpm benchmark -- --problem <problem-id> --max-steps 30
-```
-
-The root launcher reads `benchmark.aiopslab.directory` from
-`config/entries/benchmark.yaml` and layers that editable AIOpsLab checkout over
-this project only for the benchmark process. The same file declares its model,
-`tools.mcp` catalog, `backend`, and `checkpointer`.
-
-The `deepagent` subtree holds `create_deep_agent`'s declarative inputs — model,
-tools, system prompt, middleware, skills, memory, permissions, backend,
-interrupts, checkpointer, debug, and name — and maps them to the entry-owned
-`RuntimeSpec`.
+Executable composition lives in the sibling `services/platform` package.
+Consumers inject domain tools and LangChain middleware through `RuntimeSpec`.

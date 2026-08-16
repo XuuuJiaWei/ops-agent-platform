@@ -41,7 +41,7 @@ def _create_with_init_llm(spec: ModelSpec) -> Any:
         from gen_ai_hub.proxy.langchain import init_llm
     except ImportError as exc:
         raise SAPModelInitializationError(
-            "SAP SDK dependency is not installed. Run 'uv sync' in services/agent."
+            "SAP SDK dependency is not installed. Run 'uv sync --all-packages' in services/."
         ) from exc
 
     proxy_client = get_proxy_client("gen-ai-hub")
@@ -61,7 +61,7 @@ def _create_with_proxy_chat_openai(spec: ModelSpec) -> Any:
         from gen_ai_hub.proxy.langchain import ChatOpenAI
     except ImportError as exc:
         raise SAPModelInitializationError(
-            "SAP SDK fallback classes are not installed. Run 'uv sync' in services/agent."
+            "SAP SDK fallback classes are not installed. Run 'uv sync --all-packages' in services/."
         ) from exc
 
     proxy_client = get_proxy_client("gen-ai-hub")
@@ -78,7 +78,7 @@ def _create_bedrock_chat_model(spec: ModelSpec, proxy_client: Any) -> Any:
         from gen_ai_hub.proxy.langchain.amazon import ChatBedrock
     except ImportError as exc:
         raise SAPModelInitializationError(
-            "SAP SDK Bedrock LangChain integration is not installed. Run 'uv sync' in services/agent."
+            "SAP SDK Bedrock LangChain integration is not installed. Run 'uv sync --all-packages' in services/."
         ) from exc
 
     deployment = proxy_client.select_deployment(model_name=spec.name)

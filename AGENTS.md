@@ -2,18 +2,18 @@
 
 ## Architecture
 
-`apps/web` is the Vite/CopilotKit UI and `apps/copilot-runtime` is its Node protocol bridge. Python application code lives in `services/agent/src/ops_pilot`; backend tests live in `services/agent/tests`.
+`apps/web` is the Vite/CopilotKit UI and `apps/copilot-runtime` is its Node protocol bridge. Python is an official uv workspace under `services/` with one shared lockfile:
 
-Every executable host owns an explicit runtime composition in `ops_pilot.entrypoints`:
+- `services/agent` is the host-neutral DeepAgents harness. It owns models, MCP, sandbox, skills, reliability, persistence, and tracing.
+- `services/platform` owns executable composition, FastAPI, CopilotKit/AG-UI, A2A, health, Spaces, LangGraph export, eval, and benchmark adapters.
 
-- `web` may opt into CopilotKit, Spaces, A2A, persistence, and MCP servers.
-- `eval`, `benchmark`, and `langgraph` each declare their own model, MCP catalog, tools, middleware, persistence, and sandbox choices.
-
-The core runtime consumes `RuntimeSpec` only. It must not load a profile file, infer host capabilities, or depend on the Web/CopilotKit protocol. Browser tools remain React declarations; secrets, model clients, and MCP transports remain in the owning backend entrypoint.
+Dependency direction is `platform -> agent`. The agent harness consumes `RuntimeSpec` only and exposes official DeepAgents/LangChain injection points (`tools`, `middleware`, and `context_schema`). Domain and protocol identifiers are mapped to generic `thread_id`, `run_id`, metadata, and configurable values at the platform boundary.
 
 ## Configuration and lifecycle
 
-Use the entrypoint-scoped `RuntimeEnvironment` Pydantic Settings module to load `config/entries/<entry>.yaml`. Each YAML file declares only that entrypoint's non-sensitive runtime composition; `.env` supplies explicit credential aliases. Place the DeepAgents harness below `deepagent`, using `model`, `tools`, `system-prompt`, `middleware`, `skills`, `memory`, `permissions`, `backend`, `interrupt-on`, `checkpointer`, `debug`, and `name`. Keep capability selection local to its entrypoint, never in a process-wide singleton.
+Use `ops_pilot_platform.entrypoints.RuntimeEnvironment` to merge top-level defaults with `entrypoints.<name>` from local `config/runtime.yaml`. Track `config/runtime.example.yaml`; keep `runtime.yaml` local and `.env` limited to explicit credential aliases. `deepagent` is a top-level key and mirrors `create_deep_agent` inputs. Entrypoints contain only real overrides.
+
+Spaces belongs to `ops_pilot_platform.web.spaces`. Agent-facing operations are CopilotKit `useFrontendTool` declarations in React.
 
 Use official SDK abstractions before hand-written adapters:
 
@@ -21,7 +21,7 @@ Use official SDK abstractions before hand-written adapters:
 - FastAPI `lifespan` for application-owned resources; startup acquires them and shutdown closes them.
 - LangChain/DeepAgents model factories, middleware, MCP adapters, backends, and checkpointers for agent execution.
 
-Every created client, pool, runtime extension, task store, or background task needs one clear owner and a matching shutdown path. Do not allocate durable resources per request.
+Every created client, pool, task store, or background task needs one clear owner and a matching shutdown path.
 
 ## Tooling
 
@@ -32,7 +32,7 @@ From the repository root:
 
 ```bash
 pnpm install
-cd services/agent && uv sync
+cd services && uv sync --all-packages
 
 pnpm dev
 pnpm lint
@@ -46,12 +46,12 @@ Use `pnpm run lint:web`, `pnpm run test:backend`, and the other scoped scripts w
 
 ## Code and tests
 
-Use TypeScript/React in `apps/web` and Python 3.12 in `services/agent`. Keep policy, prompts, tools, data access, sandbox/MCP lifecycle, and protocol adapters behind the backend composition boundary. Prefer deleting obsolete compatibility code and rebuilding focused tests over preserving stale configuration paths.
+Use TypeScript/React in `apps/web` and Python 3.12 in the `services` workspace. Keep the agent harness host-neutral; platform and benchmark domains inject capabilities through its public spec.
 
-Place Python unit tests in `services/agent/tests/unit` and integration tests in `services/agent/tests/integration`; use unique `test_*.py` basenames. Frontend tests use Vitest only; the Copilot Runtime bridge uses `node --test`.
+Co-locate Python tests with their workspace member under `services/<member>/tests`. Frontend tests use Vitest; the Copilot Runtime bridge uses `node --test`.
 
 ## Security and delivery
 
-Never commit secrets. Copy `.env.example` and use only its explicit credential variables; choose runtime capabilities in the applicable entrypoint YAML. Keep company data features disabled unless explicitly approved.
+Never commit secrets or `config/runtime.yaml`. Copy the tracked examples and keep company data features disabled unless explicitly approved.
 
 Use short imperative Conventional Commit messages. Before committing, run the relevant checks; run `pnpm check` for cross-stack or architectural changes. PRs describe runtime/data-boundary changes and include screenshots for UI changes.

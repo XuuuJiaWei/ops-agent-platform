@@ -15,7 +15,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
-$AgentDir = Join-Path $RepoRoot "services\agent"
+$ServicesDir = Join-Path $RepoRoot "services"
 
 function Assert-Command {
     param([string]$Name, [string]$Hint)
@@ -59,29 +59,32 @@ if ($config -match "(?m)^k8s_host:\s*") {
 }
 Set-Content -Path $AIOpsLabConfig -Value $config -Encoding utf8
 
-Push-Location $AgentDir
+Push-Location $ServicesDir
 try {
-    Invoke-Checked uv @("sync")
+    Invoke-Checked uv @("sync", "--all-packages")
     # This validates the exact ephemeral dependency mechanism used by
     # `pnpm benchmark`; it does not install AIOpsLab into .venv.
-    Invoke-Checked uv @("run", "--with-editable", $AIOpsLabDir, "python", "-c", "import aiopslab; print(aiopslab.__file__)")
+    $env:SETUPTOOLS_USE_DISTUTILS = "local"
+    Invoke-Checked uv @("run", "--package", "ops-pilot-platform", "--with", "setuptools==75.8.2", "--with-editable", $AIOpsLabDir, "python", "-c", "from aiopslab.orchestrator import Orchestrator; print(Orchestrator.__name__)")
 } finally {
     Pop-Location
 }
 
 Write-Host ""
-Write-Host "AIOpsLab is ready. Update $RepoRoot\config\entries\benchmark.yaml:"
+Write-Host "AIOpsLab is ready. Update $RepoRoot\config\runtime.yaml:"
+Write-Host "entrypoints:"
 Write-Host "  benchmark:"
-Write-Host "    aiopslab:"
-Write-Host "      directory: $AIOpsLabDir"
-Write-Host "  deepagent:"
-Write-Host "    model:"
-Write-Host "      provider: <sap|openai|deepseek|anthropic|...>"
-Write-Host "      name: <tool-calling-model>"
-Write-Host "    tools:"
-Write-Host "      mcp:"
-Write-Host "        kubernetes:"
-Write-Host "          kubeconfig: <optional read-only Kubernetes MCP path>"
+Write-Host "    benchmark:"
+Write-Host "      aiopslab:"
+Write-Host "        directory: $AIOpsLabDir"
+Write-Host "    deepagent:"
+Write-Host "      model:"
+Write-Host "        provider: <sap|openai|deepseek|anthropic|...>"
+Write-Host "        name: <tool-calling-model>"
+Write-Host "      tools:"
+Write-Host "        mcp:"
+Write-Host "          kubernetes:"
+Write-Host "            kubeconfig: <optional read-only Kubernetes MCP path>"
 Write-Host "Keep MODEL_API_KEY (or SAP AICORE_* credentials) in $RepoRoot\.env."
 Write-Host ""
 Write-Host "Run: pnpm benchmark -- --problem <problem-id> --max-steps 30"

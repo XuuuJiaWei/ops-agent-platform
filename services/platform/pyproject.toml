@@ -1,0 +1,66 @@
+[project]
+name = "ops-pilot-platform"
+version = "0.1.0"
+description = "OpsPilot executable hosts and protocol adapters"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "a2a-sdk[http-server,postgresql]>=1.1.2,<2",
+  "ag-ui-langgraph>=0.0.42,<1",
+  "copilotkit>=0.1.74,<1",
+  "fastapi>=0.141.1,<1",
+  "jmespath>=1.0.1,<2",
+  "ops-pilot",
+  "pydantic-settings>=2.14.2,<3",
+  "pyyaml>=6.0.2,<7",
+  "python-dotenv>=1.2.1,<2",
+  "uvicorn>=0.52.0,<1",
+]
+
+[project.optional-dependencies]
+rca100 = ["pyarrow>=21.0.0,<22"]
+
+[project.scripts]
+ops_pilot = "ops_pilot_platform.cli.main:main"
+
+[dependency-groups]
+dev = [
+  "pyright>=1.1.411,<2",
+  "pytest>=9.0.2,<10",
+  "pytest-asyncio>=1.3.0,<2",
+  "ruff>=0.14.8,<1",
+]
+
+[tool.uv.sources]
+ops-pilot = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ops_pilot_platform"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.pyright]
+include = ["src", "tests"]
+pythonVersion = "3.12"
+venvPath = ".."
+venv = ".venv"
+typeCheckingMode = "standard"
+
+[tool.ruff]
+line-length = 120
+indent-width = 4
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+fixable = ["ALL"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"

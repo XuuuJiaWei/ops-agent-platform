@@ -156,7 +156,7 @@ def _load_opensandbox_symbols() -> _OpenSandboxSymbols:
         from opensandbox import SandboxSync
         from opensandbox.config import ConnectionConfigSync
     except ImportError as exc:
-        raise RuntimeError("OpenSandbox support is not installed. Run 'uv sync' in services/agent.") from exc
+        raise RuntimeError("OpenSandbox support is not installed. Run 'uv sync --all-packages' in services/.") from exc
     return _OpenSandboxSymbols(
         backend_cls=OpensandboxBackend,
         sandbox_cls=SandboxSync,

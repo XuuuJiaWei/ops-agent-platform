@@ -8,20 +8,24 @@ import { fileURLToPath } from "node:url";
 import { buildBenchmarkCommand } from "./benchmark-command.mjs";
 
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
-const agentDir = join(rootDir, "services", "agent");
+const servicesDir = join(rootDir, "services");
 
 loadRootEnvironment();
 const aiopsLabDir = loadBenchmarkConfig().aiopslab_dir?.trim();
 if (!aiopsLabDir) {
   throw new Error(
-    "config/entries/benchmark.yaml requires benchmark.aiopslab.directory. Run `pnpm benchmark:setup` first.",
+    "config/runtime.yaml requires entrypoints.benchmark.benchmark.aiopslab.directory. Run `pnpm benchmark:setup` first.",
   );
 }
 if (!existsSync(aiopsLabDir)) {
   throw new Error(`OPS_PILOT_AIOPSLAB_DIR does not exist: ${aiopsLabDir}`);
 }
 
-const [command, args, options] = buildBenchmarkCommand(agentDir, aiopsLabDir, process.argv.slice(2));
+const benchmarkArgs = process.argv.slice(2);
+if (benchmarkArgs[0] === "--") {
+  benchmarkArgs.shift();
+}
+const [command, args, options] = buildBenchmarkCommand(servicesDir, aiopsLabDir, benchmarkArgs);
 const result = spawnSync(command, args, options);
 if (result.error) {
   throw result.error;
@@ -40,7 +44,7 @@ function loadRootEnvironment() {
 
 function loadBenchmarkConfig() {
   const result = spawnSync("uv", ["run", "ops_pilot", "benchmark-launch-config"], {
-    cwd: agentDir,
+    cwd: servicesDir,
     env: process.env,
     encoding: "utf8",
   });
@@ -48,7 +52,7 @@ function loadBenchmarkConfig() {
     throw result.error;
   }
   if (result.status !== 0) {
-    throw new Error(`Unable to load config/entries/benchmark.yaml:\n${result.stderr || result.stdout}`);
+    throw new Error(`Unable to load the benchmark entrypoint from config/runtime.yaml:\n${result.stderr || result.stdout}`);
   }
   try {
     return JSON.parse(result.stdout);

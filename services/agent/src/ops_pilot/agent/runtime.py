@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-import time
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
 from deepagents import create_deep_agent
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import MemorySaver
 
-from ops_pilot.agent.extensions import RuntimeExtension
 from ops_pilot.agent.results import extract_result_text
 from ops_pilot.mcp.registry import MCPRegistry, create_mcp_registry
 from ops_pilot.models import create_chat_model
@@ -23,9 +21,6 @@ from ops_pilot.runtime.spec import PersistenceSpec, RuntimeSpec
 from ops_pilot.sandbox import SandboxManager, SandboxRuntime, create_sandbox_manager
 from ops_pilot.skills.resolver import resolve_skill_paths
 from ops_pilot.skills.sync import sync_skill_paths_to_backend
-
-if TYPE_CHECKING:
-    from ops_pilot.eval.trace import AgentTrace
 
 
 @dataclass(frozen=True)
@@ -39,7 +34,6 @@ class AgentRuntime:
     sandbox: SandboxManager | SandboxRuntime | None = None
     model_metadata: dict[str, Any] = field(default_factory=dict)
     checkpointer_closer: Callable[[], Awaitable[None]] | None = None
-    extensions: tuple[RuntimeExtension, ...] = field(default_factory=tuple)
     run_controller: RunController = field(default_factory=RunController)
 
     def close(self) -> None:
@@ -52,8 +46,6 @@ class AgentRuntime:
                 if self.checkpointer_closer is not None:
                     await self.checkpointer_closer()
             finally:
-                for extension in reversed(self.extensions):
-                    await extension.aclose()
                 self.close()
         finally:
             flush_tracing(self.tracing)
@@ -64,8 +56,6 @@ class AgentRuntime:
         protocol: str,
         thread_id: str | None = None,
         run_id: str | None = None,
-        a2a_task_id: str | None = None,
-        a2a_context_id: str | None = None,
         configurable: dict[str, Any] | None = None,
         extra_metadata: dict[str, Any] | None = None,
     ) -> RunnableConfig:
@@ -76,8 +66,6 @@ class AgentRuntime:
             protocol=protocol,
             thread_id=thread_id,
             run_id=run_id,
-            a2a_task_id=a2a_task_id,
-            a2a_context_id=a2a_context_id,
             configurable=configurable,
             extra_metadata=metadata,
         )
@@ -89,93 +77,37 @@ class AgentRuntime:
         protocol: str,
         thread_id: str | None = None,
         run_id: str | None = None,
-        a2a_task_id: str | None = None,
-        a2a_context_id: str | None = None,
         configurable: dict[str, Any] | None = None,
         extra_metadata: dict[str, Any] | None = None,
+        context: Any | None = None,
     ) -> str:
         """Invoke the shared DeepAgent with one user text message."""
 
-        effective_run_id = run_id or a2a_task_id or f"{protocol}:{thread_id or uuid.uuid4()}"
+        effective_run_id = run_id or f"{protocol}:{thread_id or uuid.uuid4()}"
 
         async def invoke() -> Any:
-            return await self.graph.ainvoke(
-                {"messages": [{"role": "user", "content": text}]},
-                config=self.runnable_config(
+            invoke_kwargs: dict[str, Any] = {
+                "config": self.runnable_config(
                     protocol=protocol,
                     thread_id=thread_id,
                     run_id=effective_run_id,
-                    a2a_task_id=a2a_task_id,
-                    a2a_context_id=a2a_context_id,
                     configurable=configurable,
                     extra_metadata=extra_metadata,
                 ),
-                version="v2",
+                "version": "v2",
+            }
+            if context is not None:
+                invoke_kwargs["context"] = context
+            return await self.graph.ainvoke(
+                {"messages": [{"role": "user", "content": text}]},
+                **invoke_kwargs,
             )
 
         result = await self.run_controller.run(effective_run_id, invoke)
         return extract_result_text(_unwrap_graph_result(result))
 
-    async def ainvoke_trace(
-        self,
-        text: str,
-        *,
-        protocol: str,
-        thread_id: str | None = None,
-        run_id: str | None = None,
-        a2a_task_id: str | None = None,
-        a2a_context_id: str | None = None,
-        configurable: dict[str, Any] | None = None,
-        extra_metadata: dict[str, Any] | None = None,
-        deadline_seconds: float | None = None,
-    ) -> AgentTrace:
-        """Invoke the shared DeepAgent and return structured eval trace signals."""
-
-        from ops_pilot.eval.trace import build_agent_trace
-
-        started = time.perf_counter()
-        effective_run_id = run_id or a2a_task_id or f"{protocol}:{thread_id or uuid.uuid4()}"
-
-        async def invoke() -> Any:
-            return await self.graph.ainvoke(
-                {"messages": [{"role": "user", "content": text}]},
-                config=self.runnable_config(
-                    protocol=protocol,
-                    thread_id=thread_id,
-                    run_id=effective_run_id,
-                    a2a_task_id=a2a_task_id,
-                    a2a_context_id=a2a_context_id,
-                    configurable=configurable,
-                    extra_metadata=extra_metadata,
-                ),
-                version="v2",
-            )
-
-        try:
-            result = await self.run_controller.run(
-                effective_run_id,
-                invoke,
-                deadline_seconds=deadline_seconds,
-            )
-        except TimeoutError as exc:
-            effective_deadline = (
-                self.spec.reliability.run_deadline_seconds if deadline_seconds is None else deadline_seconds
-            )
-            if effective_deadline is None:
-                raise
-            raise TimeoutError(f"Agent invocation timed out after {effective_deadline:g}s.") from exc
-        return build_agent_trace(_unwrap_graph_result(result), latency_s=time.perf_counter() - started)
-
     async def cancel_run(self, run_id: str, *, reason: str = "cancel requested") -> bool:
         return await self.run_controller.cancel(run_id, reason=reason)
-
-    def extension(self, extension_type: type[Any]) -> Any:
-        """Return one explicitly-composed host extension by its concrete type."""
-
-        for extension in self.extensions:
-            if isinstance(extension, extension_type):
-                return extension
-        raise RuntimeError(f"Runtime extension is not enabled: {extension_type.__name__}.")
 
 
 async def build_agent_runtime(spec: RuntimeSpec) -> AgentRuntime:
@@ -199,15 +131,8 @@ async def build_agent_runtime(spec: RuntimeSpec) -> AgentRuntime:
 
     sandbox: SandboxManager | None = None
     checkpointer_closer: Callable[[], Awaitable[None]] | None = None
-    runtime_extensions: list[RuntimeExtension] = []
     try:
-        for create_extension in spec.extensions:
-            runtime_extensions.append(await create_extension(spec))
-        tools = [
-            *mcp_registry.tools,
-            *(tool for extension in runtime_extensions for tool in extension.tools),
-            *spec.tools,
-        ]
+        tools = [*mcp_registry.tools, *spec.tools]
         sandbox = create_sandbox_manager(spec.sandbox)
         middleware = _create_runtime_middleware(spec, mcp_registry.retry_tools, sandbox)
         checkpointer, checkpointer_closer = await _create_checkpointer(spec.persistence)
@@ -216,24 +141,20 @@ async def build_agent_runtime(spec: RuntimeSpec) -> AgentRuntime:
             model=model,
             tools=tools,
             skills=list(skills),
-            system_prompt=_system_prompt(
-                spec.system_prompt,
-                *(fragment for extension in runtime_extensions for fragment in extension.prompt_fragments),
-            ),
+            system_prompt=spec.system_prompt,
             checkpointer=checkpointer,
             backend=sandbox.backend if sandbox is not None else None,
             memory=list(spec.memory),
             permissions=[permission.as_deepagents_permission() for permission in spec.permissions],
             interrupt_on=spec.interrupt_on,
-            middleware=[*middleware, *(item for extension in runtime_extensions for item in extension.middleware)],
+            middleware=[*middleware, *spec.middleware],
+            context_schema=spec.context_schema,
             debug=spec.debug,
             name=spec.name,
         )
     except Exception:
         if checkpointer_closer is not None:
             await checkpointer_closer()
-        for extension in reversed(runtime_extensions):
-            await extension.aclose()
         if sandbox is not None:
             sandbox.close()
         flush_tracing(tracing)
@@ -248,13 +169,8 @@ async def build_agent_runtime(spec: RuntimeSpec) -> AgentRuntime:
         sandbox=sandbox,
         model_metadata=model_metadata,
         checkpointer_closer=checkpointer_closer,
-        extensions=tuple(runtime_extensions),
         run_controller=run_controller,
     )
-
-
-def _system_prompt(configured_prompt: str | None, *fragments: str) -> str | None:
-    return "\n\n".join(fragment for fragment in (configured_prompt, *fragments) if fragment) or None
 
 
 def _resolve_backend_skill_paths(
@@ -287,8 +203,8 @@ def _create_runtime_middleware(
 
         middleware.extend(
             (
-                ModelCallLimitMiddleware(run_limit=spec.reliability.model_call_limit, exit_behavior="error"),
-                ToolCallLimitMiddleware(run_limit=spec.reliability.tool_call_limit, exit_behavior="error"),
+                ModelCallLimitMiddleware(run_limit=spec.reliability.model_call_limit, exit_behavior="end"),
+                ToolCallLimitMiddleware(run_limit=spec.reliability.tool_call_limit, exit_behavior="continue"),
             )
         )
         if retry_tools:
@@ -333,6 +249,7 @@ def _create_deep_agent(
     permissions: list[dict[str, object]],
     interrupt_on: dict[str, Any] | None = None,
     middleware: Sequence[Any] = (),
+    context_schema: type[Any] | None = None,
     debug: bool = False,
     name: str | None = None,
 ) -> Any:
@@ -354,6 +271,8 @@ def _create_deep_agent(
         kwargs["interrupt_on"] = interrupt_on
 
     kwargs["middleware"] = list(middleware)
+    if context_schema is not None:
+        kwargs["context_schema"] = context_schema
 
     if checkpointer is not None:
         kwargs["checkpointer"] = checkpointer

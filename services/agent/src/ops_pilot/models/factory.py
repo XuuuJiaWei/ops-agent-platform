@@ -37,7 +37,8 @@ def _create_langchain_chat_model(spec: ModelSpec) -> Any:
     try:
         from langchain.chat_models import init_chat_model
     except ImportError as exc:  # pragma: no cover - langchain is a hard dep.
-        raise ModelInitializationError("langchain is not installed. Run 'uv sync' in services/agent.") from exc
+        message = "langchain is not installed. Run 'uv sync --all-packages' in services/."
+        raise ModelInitializationError(message) from exc
 
     provider = _init_chat_model_provider(spec.provider)
     kwargs: dict[str, Any] = {

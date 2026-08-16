@@ -1,11 +1,11 @@
 import { useDefaultRenderTool, useInterrupt } from "@copilotkit/react-core/v2";
 import { ApprovalDialog } from "@/copilot/ApprovalDialog";
-import { SpaceToolRenderers } from "@/copilot/SpaceToolRenderers";
+import { SpaceFrontendTools } from "@/copilot/SpaceFrontendTools";
 
 export function ChatRenderers() {
   useDefaultRenderTool();
   useInterrupt({
     render: (props) => <ApprovalDialog {...props} />,
   });
-  return <SpaceToolRenderers />;
+  return <SpaceFrontendTools />;
 }

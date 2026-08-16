@@ -10,7 +10,8 @@ import { buildLangGraphCommand, resolveCommandInvocation, resolvePackageBinary }
 import { DevProcessSupervisor, processResultExitCode } from "./dev-process.mjs";
 
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
-const agentDir = join(rootDir, "services", "agent");
+const servicesDir = join(rootDir, "services");
+const platformDir = join(servicesDir, "platform");
 const copilotDir = join(rootDir, "apps", "copilot-runtime");
 const webDir = join(rootDir, "apps", "web");
 const mode = process.argv[2] ?? "all";
@@ -78,7 +79,7 @@ async function runMode(processes, env, signal) {
     return processResultExitCode(await processes.start("copilot", ...copilotCommand(env)).closed);
   }
   if (mode === "langgraph") {
-    return processResultExitCode(await processes.start("langgraph", ...buildLangGraphCommand(agentDir, env)).closed);
+    return processResultExitCode(await processes.start("langgraph", ...buildLangGraphCommand(platformDir, env)).closed);
   }
 
   await waitForBackends(env, signal);
@@ -113,9 +114,9 @@ function startBackend(processes, env) {
 function backendCommand(env) {
   return [
     "uv",
-    ["run", "ops_pilot", "serve", "--host", env.BACKEND_HOST, "--port", env.BACKEND_PORT],
+    ["run", "--package", "ops-pilot-platform", "ops_pilot", "serve", "--host", env.BACKEND_HOST, "--port", env.BACKEND_PORT],
     {
-      cwd: agentDir,
+      cwd: servicesDir,
       env,
       stdio: ["inherit", "inherit", "pipe"],
     },
@@ -138,7 +139,8 @@ function assertWorkspace() {
     "apps/web/package.json",
     "apps/copilot-runtime/package.json",
     "services/agent/pyproject.toml",
-    "services/agent/langgraph.json",
+    "services/platform/pyproject.toml",
+    "services/platform/langgraph.json",
   ];
   const missingFiles = requiredFiles.filter((path) => !existsSync(join(rootDir, path)));
   if (missingFiles.length > 0) {
@@ -187,8 +189,8 @@ function resolveDevEnvironment(webConfig) {
 }
 
 function loadWebDevelopmentConfig() {
-  const result = spawnSync("uv", ["run", "ops_pilot", "web-development-config"], {
-    cwd: agentDir,
+  const result = spawnSync("uv", ["run", "--package", "ops-pilot-platform", "ops_pilot", "web-development-config"], {
+    cwd: servicesDir,
     env: process.env,
     encoding: "utf8",
   });
@@ -196,7 +198,7 @@ function loadWebDevelopmentConfig() {
     throw result.error;
   }
   if (result.status !== 0) {
-    throw new Error(`Unable to load config/entries/web.yaml:\n${result.stderr || result.stdout}`);
+    throw new Error(`Unable to load the web entrypoint from config/runtime.yaml:\n${result.stderr || result.stdout}`);
   }
   try {
     return JSON.parse(result.stdout);

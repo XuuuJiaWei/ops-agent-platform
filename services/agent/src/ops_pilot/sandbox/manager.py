@@ -53,16 +53,14 @@ class SandboxLease:
 class _InvocationScope:
     thread_id: str | None
     run_id: str | None
-    a2a_context_id: str | None
-    a2a_task_id: str | None
 
     @property
     def thread_key(self) -> str:
-        return self.thread_id or self.a2a_context_id or "process"
+        return self.thread_id or "process"
 
     @property
     def run_key(self) -> str:
-        return self.run_id or self.a2a_task_id or self.thread_key
+        return self.run_id or self.thread_key
 
 
 class SandboxManager:
@@ -157,7 +155,7 @@ class SandboxManager:
 
     def _workspace_key(self, scope: _InvocationScope) -> str:
         if self.scope == "process":
-            return f"workspace:{scope.run_key if scope.run_id or scope.a2a_task_id else scope.thread_key}"
+            return f"workspace:{scope.run_key if scope.run_id else scope.thread_key}"
         return self._sandbox_key(scope)
 
     def _workspace_path(self, workspace_key: str) -> str:
@@ -447,8 +445,6 @@ def _current_invocation_scope() -> _InvocationScope:
     return _InvocationScope(
         thread_id=_string_value(configurable.get("thread_id") or metadata.get("thread_id")),
         run_id=_string_value(configurable.get("run_id") or metadata.get("run_id")),
-        a2a_context_id=_string_value(configurable.get("a2a_context_id") or metadata.get("a2a_context_id")),
-        a2a_task_id=_string_value(configurable.get("a2a_task_id") or metadata.get("a2a_task_id")),
     )
 
 
