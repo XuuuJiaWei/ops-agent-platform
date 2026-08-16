@@ -30,7 +30,7 @@ def reset_replay_case(token: Token[str | None]) -> None:
 
 
 @tool
-def search_traces(query: str) -> str:
+async def search_traces(query: str) -> str:
     """Search a deterministic replay of recent distributed traces for an incident.
 
     The query should describe the service, operation, error, or latency signal to
@@ -42,7 +42,7 @@ def search_traces(query: str) -> str:
 
 
 @tool
-def query(query: str) -> str:
+async def query(query: str) -> str:
     """Run a PromQL-style query against a deterministic replayed metric snapshot.
 
     Replay mode is intended for regression tests: it preserves the evidence an
