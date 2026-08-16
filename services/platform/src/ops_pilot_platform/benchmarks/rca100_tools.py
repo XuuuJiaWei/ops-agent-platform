@@ -18,16 +18,21 @@ from langchain.messages import ToolMessage
 from langchain.tools import ToolRuntime, tool
 from langchain.tools.tool_node import ToolCallRequest
 from langgraph.types import Command
-from pydantic import Field
+from pydantic import AwareDatetime, Field
 
 RCA100Source = Literal["metrics", "logs", "traces", "events", "alerts"]
 Direction = Literal["forward", "backward"]
 Domain = Literal["apm", "k8s"]
+TraceStatus = Literal["UNSET", "OK", "ERROR"]
 
 _DATA_TIMEZONE = timezone(timedelta(hours=8))
 _DEFAULT_LIMIT = 10
 _MAX_LIMIT = 100
+_MAX_LOG_STAT_ROWS = 100_000
 _MESSAGE_LIMIT = 500
+_MAX_QUERY_WINDOW = timedelta(hours=1)
+_TRACE_STATUS_CODES: dict[TraceStatus, str] = {"UNSET": "0", "OK": "1", "ERROR": "2"}
+_TRACE_STATUS_NAMES = {value: key for key, value in _TRACE_STATUS_CODES.items()}
 _RCA100_TOOL_NAMES = frozenset(
     {
         "list_metric_names",
@@ -36,13 +41,15 @@ _RCA100_TOOL_NAMES = frozenset(
         "query_log_stats",
         "query_logs",
         "query_metric",
+        "query_metric_range",
         "query_topology",
         "query_traces",
     }
 )
 
-StartTime = Annotated[datetime, Field(description="Inclusive RFC 3339 start time with a UTC offset.")]
-EndTime = Annotated[datetime, Field(description="Inclusive RFC 3339 end time with a UTC offset.")]
+StartTime = Annotated[AwareDatetime, Field(description="Inclusive RFC 3339 start time with a UTC offset.")]
+EndTime = Annotated[AwareDatetime, Field(description="Inclusive RFC 3339 end time with a UTC offset.")]
+EvaluationTime = Annotated[AwareDatetime, Field(description="RFC 3339 evaluation time with a UTC offset.")]
 ResultLimit = Annotated[int, Field(ge=1, le=_MAX_LIMIT, description="Maximum records to return.")]
 
 
@@ -77,21 +84,14 @@ class RCA100ToolCacheMiddleware(AgentMiddleware):
             return await handler(request)
 
         key = _tool_cache_key(name, request.tool_call.get("args"))
-        if context.cached_tool_result(key) is not None:
+        cached = context.cached_tool_result(key)
+        if cached is not None:
             return ToolMessage(
                 name=name,
                 tool_call_id=str(request.tool_call["id"]),
                 status="success",
-                content=_success(
-                    data={
-                        "cache_hit": True,
-                        "message": "This identical read-only query already completed successfully.",
-                    },
-                    meta={"source": name, "query_fingerprint": key[-12:]},
-                    warnings=[
-                        "Reuse the earlier ToolMessage for this query. Repeating it cannot produce new evidence."
-                    ],
-                ),
+                content=cached,
+                additional_kwargs={"cache_hit": True, "query_fingerprint": key[-12:]},
             )
 
         result = await handler(request)
@@ -146,6 +146,90 @@ def list_metric_names(
 def query_metric(
     runtime: ToolRuntime[RCA100Context],
     metric: Annotated[str, Field(min_length=1, description="One exact metric name returned by list_metric_names.")],
+    time: EvaluationTime,
+    entity_name: Annotated[str | None, Field(min_length=1, description="Optional exact entity name.")] = None,
+    entity_id: Annotated[str | None, Field(min_length=1, description="Optional exact entity identifier.")] = None,
+    entity_domain: Annotated[Domain | None, Field(description="Optional exact observability domain.")] = None,
+    entity_set: Annotated[str | None, Field(min_length=1, description="Optional exact entity-set name.")] = None,
+    lookback_seconds: Annotated[
+        int,
+        Field(ge=1, le=600, description="Maximum age of the latest sample at or before the evaluation time."),
+    ] = 60,
+    limit: Annotated[int, Field(ge=1, le=50, description="Maximum instant-vector series to return.")] = 20,
+) -> str:
+    """Evaluate one metric at an instant; return a bounded Prometheus-style vector."""
+
+    evaluation_epoch = _epoch(time, unit="us")
+    start_epoch = evaluation_epoch - lookback_seconds * 1_000_000
+    dataset = _dataset(runtime, "metrics")
+    expression = _and(
+        _equals("metric", metric),
+        _equals("entity_name", entity_name),
+        _equals("entity_id", entity_id),
+        _equals("domain", entity_domain),
+        _equals("entity_set", entity_set),
+        _lower_bound("time", start_epoch),
+        _upper_bound("time", evaluation_epoch),
+    )
+    table = dataset.to_table(
+        columns=["time", "domain", "entity_set", "entity_id", "entity_name", "metric", "value", "service"],
+        filter=expression,
+    )
+    latest_by_series: dict[tuple[str, ...], dict[str, Any]] = {}
+    for row in table.to_pylist():
+        key = tuple(
+            str(row.get(field) or "") for field in ("domain", "entity_set", "entity_id", "entity_name", "service")
+        )
+        previous = latest_by_series.get(key)
+        if previous is None or int(row["time"]) > int(previous["time"]):
+            latest_by_series[key] = row
+
+    ordered = sorted(
+        latest_by_series.values(),
+        key=lambda row: (-abs(float(row["value"])), str(row.get("entity_name") or "")),
+    )
+    result = [
+        {
+            "metric": {
+                "__name__": metric,
+                **{
+                    name: str(row[name])
+                    for name in ("domain", "entity_set", "entity_id", "entity_name", "service")
+                    if row.get(name) not in (None, "")
+                },
+            },
+            "value": [int(row["time"]) / 1_000_000, str(float(row["value"]))],
+        }
+        for row in ordered[:limit]
+    ]
+    return _success(
+        data={"resultType": "vector", "result": result},
+        meta={
+            "source": "metrics",
+            "evaluation_time": time.isoformat(),
+            "lookback_seconds": lookback_seconds,
+            "returned_series": len(result),
+            "total_series": len(latest_by_series),
+            "limit": limit,
+            "truncated": len(latest_by_series) > limit,
+            "filters": _present(
+                metric=metric,
+                entity_domain=entity_domain,
+                entity_set=entity_set,
+                entity_name=entity_name,
+                entity_id=entity_id,
+            ),
+        },
+        empty_message=(
+            "No sample exists at or before this time within lookback_seconds. Change one selector or lookback."
+        ),
+    )
+
+
+@tool
+def query_metric_range(
+    runtime: ToolRuntime[RCA100Context],
+    metric: Annotated[str, Field(min_length=1, description="One exact metric name returned by list_metric_names.")],
     start_time: StartTime,
     end_time: EndTime,
     entity_name: Annotated[str | None, Field(min_length=1, description="Optional exact entity name.")] = None,
@@ -155,8 +239,9 @@ def query_metric(
     limit: Annotated[int, Field(ge=1, le=50, description="Maximum distinct time series to return.")] = 10,
     sample_limit: Annotated[int, Field(ge=2, le=100, description="Maximum sampled points per series.")] = 20,
 ) -> str:
-    """Query one exact metric over a bounded time range and return compact Prometheus-style series."""
+    """Explore one metric over a range and return compact Prometheus-style matrix series."""
 
+    _validate_window(start_time, end_time)
     dataset = _dataset(runtime, "metrics")
     expression = _and(
         _equals("metric", metric),
@@ -195,7 +280,7 @@ def query_metric(
         result.append(
             {
                 "metric": {"__name__": metric, **labels[key]},
-                "values": [[_iso_epoch(timestamp, unit="us"), value] for timestamp, value in selected],
+                "values": [[timestamp / 1_000_000, str(value)] for timestamp, value in selected],
                 "statistics": {
                     "samples": len(samples),
                     "min": min(values),
@@ -243,22 +328,35 @@ def query_log_stats(
 ) -> str:
     """Count matching log streams before retrieving lines, following Grafana Loki's low-cost stats pattern."""
 
-    rows = _all_log_rows(runtime, start_time, end_time, keyword, pod_name, namespace)
+    _validate_window(start_time, end_time)
+    stats, matching_lines, truncated = _aggregate_log_stats(
+        runtime,
+        start_time,
+        end_time,
+        keyword,
+        pod_name,
+        namespace,
+    )
     return _success(
         data={
-            "matching_lines": len(rows),
-            "pods": _top_counts(row.get("_pod_name_") for row in rows),
-            "namespaces": _top_counts(row.get("_namespace_") for row in rows),
-            "containers": _top_counts(row.get("_container_name_") for row in rows),
+            "matching_lines": matching_lines,
+            **stats,
         },
         meta={
             "source": "logs",
+            "scan_limit": _MAX_LOG_STAT_ROWS,
+            "truncated": truncated,
             "time_range": _window(start_time, end_time),
             "filters": _present(keyword=keyword, pod_name=pod_name, namespace=namespace),
         },
         empty_message=(
             "No log lines matched this valid query. Change one selector or time range; "
             "an unchanged retry is deterministic."
+        ),
+        warnings=(
+            [f"Aggregation stopped after {_MAX_LOG_STAT_ROWS} matching lines; counts are lower bounds."]
+            if truncated
+            else None
         ),
     )
 
@@ -276,10 +374,18 @@ def query_logs(
 ) -> str:
     """Return bounded application log lines; use query_log_stats first to avoid empty-stream searches."""
 
-    rows = _all_log_rows(runtime, start_time, end_time, keyword, pod_name, namespace)
-    ordered = sorted(rows, key=lambda row: str(row.get("_time_", "")), reverse=direction == "backward")
-    selected = ordered[: limit + 1]
-    truncated = len(selected) > limit
+    _validate_window(start_time, end_time)
+    dataset = _dataset(runtime, "logs")
+    expression = _log_expression(start_time, end_time, pod_name, namespace)
+    rows, truncated = _scan_rows(
+        dataset,
+        columns=["_time_", "_namespace_", "_pod_name_", "_container_name_", "content"],
+        expression=expression,
+        contains=(("content", keyword),),
+        limit=limit,
+        direction=direction,
+        order_column="_time_",
+    )
     entries = [
         {
             "timestamp": row.get("_time_"),
@@ -288,7 +394,7 @@ def query_logs(
             "container": row.get("_container_name_"),
             "message": _clip(row.get("content")),
         }
-        for row in selected[:limit]
+        for row in rows
     ]
     return _success(
         data={"resultType": "streams", "result": entries},
@@ -316,19 +422,23 @@ def query_traces(
     service_name: Annotated[str | None, Field(min_length=1, description="Optional exact service name.")] = None,
     span_name: Annotated[str | None, Field(min_length=1, description="Optional exact span operation.")] = None,
     trace_id: Annotated[str | None, Field(min_length=1, description="Optional exact trace identifier.")] = None,
-    status_code: Annotated[str | None, Field(min_length=1, description="Optional exact span status code.")] = None,
+    status_code: Annotated[
+        TraceStatus | None,
+        Field(description="Optional OpenTelemetry span status: UNSET, OK, or ERROR."),
+    ] = None,
     keyword: Annotated[str | None, Field(min_length=1, description="Text in status, attributes, or events.")] = None,
     limit: ResultLimit = _DEFAULT_LIMIT,
     direction: Annotated[Direction, Field(description="Newest-first or oldest-first ordering.")] = "backward",
 ) -> str:
     """Search bounded trace spans; pass a returned trace_id to retrieve that trace's spans."""
 
+    _validate_window(start_time, end_time)
     dataset = _dataset(runtime, "traces")
     expression = _and(
         _equals("serviceName", service_name),
         _equals("spanName", span_name),
         _equals("traceId", trace_id),
-        _equals("statusCode", status_code),
+        _equals("statusCode", _TRACE_STATUS_CODES.get(status_code) if status_code is not None else None),
         _lower_bound("startTime", str(_epoch(start_time, unit="ns"))),
         _upper_bound("startTime", str(_epoch(end_time, unit="ns"))),
     )
@@ -391,6 +501,7 @@ def query_events(
 ) -> str:
     """Query compact Kubernetes event records over a bounded time range."""
 
+    _validate_window(start_time, end_time)
     table = _dataset(runtime, "events").to_table(columns=["eventId", "hostname", "level", "pod_name", "clusterName"])
     events: list[dict[str, Any]] = []
     for row in table.to_pylist():
@@ -446,6 +557,7 @@ def query_alerts(
     runtime: ToolRuntime[RCA100Context],
     start_time: StartTime,
     end_time: EndTime,
+    alert_id: Annotated[str | None, Field(min_length=1, description="Optional exact alert event identifier.")] = None,
     subject: Annotated[str | None, Field(min_length=1, description="Case-insensitive subject fragment.")] = None,
     status: Annotated[str | None, Field(min_length=1, description="Optional exact lifecycle status.")] = None,
     limit: ResultLimit = _DEFAULT_LIMIT,
@@ -453,8 +565,10 @@ def query_alerts(
 ) -> str:
     """Query compact alert lifecycle records over a bounded time range."""
 
+    _validate_window(start_time, end_time)
     dataset = _dataset(runtime, "alerts")
     expression = _and(
+        _equals("id", alert_id),
         _equals("status", status),
         _lower_bound("time_s", int(start_time.timestamp())),
         _upper_bound("time_s", int(end_time.timestamp())),
@@ -478,7 +592,7 @@ def query_alerts(
             "direction": direction,
             "truncated": truncated,
             "time_range": _window(start_time, end_time),
-            "filters": _present(subject=subject, status=status),
+            "filters": _present(alert_id=alert_id, subject=subject, status=status),
         },
         empty_message="No alerts matched this valid query. Change one selector or time range.",
     )
@@ -552,6 +666,7 @@ def query_topology(
 RCA100_TOOLS = (
     list_metric_names,
     query_metric,
+    query_metric_range,
     query_log_stats,
     query_logs,
     query_traces,
@@ -565,31 +680,74 @@ def _dataset(runtime: ToolRuntime[RCA100Context], source: RCA100Source) -> arrow
     return arrow_dataset.dataset(runtime.context.case_directory / f"{source}.parquet", format="parquet")
 
 
-def _all_log_rows(
+def _log_expression(
+    start_time: datetime,
+    end_time: datetime,
+    pod_name: str | None,
+    namespace: str | None,
+) -> arrow_dataset.Expression | None:
+    return _and(
+        _equals("_pod_name_", pod_name),
+        _equals("_namespace_", namespace),
+        _lower_bound("_time_", _local_time_text(start_time)),
+        _upper_bound("_time_", _local_time_text(end_time)),
+    )
+
+
+def _aggregate_log_stats(
     runtime: ToolRuntime[RCA100Context],
     start_time: datetime,
     end_time: datetime,
     keyword: str | None,
     pod_name: str | None,
     namespace: str | None,
-) -> list[dict[str, Any]]:
+) -> tuple[dict[str, Any], int, bool]:
     dataset = _dataset(runtime, "logs")
-    expression = _and(
-        _equals("_pod_name_", pod_name),
-        _equals("_namespace_", namespace),
-        _lower_bound("_time_", _local_time_text(start_time)),
-        _upper_bound("_time_", _local_time_text(end_time)),
+    columns = ["_namespace_", "_pod_name_", "_container_name_", "content"]
+    scanner = dataset.scanner(
+        columns=columns,
+        filter=_log_expression(start_time, end_time, pod_name, namespace),
+        batch_size=8192,
     )
-    rows, _ = _scan_rows(
-        dataset,
-        columns=["_time_", "_namespace_", "_pod_name_", "_container_name_", "content"],
-        expression=expression,
-        contains=(("content", keyword),),
-        limit=None,
-        direction="forward",
-        order_column="_time_",
+    compute = cast(Any, arrow_compute)
+    pods: Counter[str] = Counter()
+    namespaces: Counter[str] = Counter()
+    containers: Counter[str] = Counter()
+    patterns: Counter[tuple[str, str, str]] = Counter()
+    matching_lines = 0
+    truncated = False
+
+    for batch in scanner.to_batches():
+        if keyword:
+            mask = compute.fill_null(compute.match_substring(batch["content"], keyword, ignore_case=True), False)
+            batch = batch.filter(mask)
+        for row in batch.to_pylist():
+            if matching_lines >= _MAX_LOG_STAT_ROWS:
+                truncated = True
+                break
+            matching_lines += 1
+            _increment(pods, row.get("_pod_name_"))
+            _increment(namespaces, row.get("_namespace_"))
+            _increment(containers, row.get("_container_name_"))
+            pattern = _log_error_pattern(row)
+            if pattern is not None:
+                patterns[pattern] += 1
+        if truncated:
+            break
+
+    return (
+        {
+            "pods": _counter_rows(pods),
+            "namespaces": _counter_rows(namespaces),
+            "containers": _counter_rows(containers),
+            "error_patterns": [
+                {"message": _clip(message), "pod": pod, "level": level, "count": count}
+                for (message, pod, level), count in patterns.most_common(10)
+            ],
+        },
+        matching_lines,
+        truncated,
     )
-    return rows
 
 
 def _scan_rows(
@@ -653,7 +811,7 @@ def _compact_span(row: dict[str, Any]) -> dict[str, Any]:
         "duration_ms": int(row.get("duration") or 0) / 1_000_000,
         "service": row.get("serviceName"),
         "operation": row.get("spanName"),
-        "status_code": row.get("statusCode"),
+        "status_code": _TRACE_STATUS_NAMES.get(str(row.get("statusCode")), str(row.get("statusCode") or "")),
         "status_message": _clip(row.get("statusMessage")),
         "attributes": selected_attributes,
         "events": event_names[:10],
@@ -732,9 +890,23 @@ def _is_empty(data: Any) -> bool:
     return False
 
 
-def _top_counts(values: Any, limit: int = 10) -> list[dict[str, Any]]:
-    counts = Counter(str(value) for value in values if value not in (None, ""))
-    return [{"value": value, "count": count} for value, count in counts.most_common(limit)]
+def _increment(counter: Counter[str], value: Any) -> None:
+    if value not in (None, ""):
+        counter[str(value)] += 1
+
+
+def _counter_rows(counter: Counter[str], limit: int = 10) -> list[dict[str, Any]]:
+    return [{"value": value, "count": count} for value, count in counter.most_common(limit)]
+
+
+def _log_error_pattern(row: dict[str, Any]) -> tuple[str, str, str] | None:
+    payload = _json_object(row.get("content"))
+    error = payload.get("err")
+    error_payload = error if isinstance(error, dict) else {}
+    message = error_payload.get("message") or payload.get("message") or payload.get("msg")
+    if not message:
+        return None
+    return str(message), str(row.get("_pod_name_") or ""), str(payload.get("level") or "")
 
 
 def _evenly_sample(samples: list[tuple[int, float]], limit: int) -> list[tuple[int, float]]:
@@ -800,6 +972,13 @@ def _local_time_text(value: datetime) -> str:
 
 def _window(start_time: datetime, end_time: datetime) -> dict[str, str]:
     return {"start": start_time.isoformat(), "end": end_time.isoformat()}
+
+
+def _validate_window(start_time: datetime, end_time: datetime) -> None:
+    if end_time < start_time:
+        raise ValueError("end_time must be greater than or equal to start_time.")
+    if end_time - start_time > _MAX_QUERY_WINDOW:
+        raise ValueError("The maximum observability query window is 1 hour; narrow the incident interval.")
 
 
 def _time_range(values: Any, *, unit: Literal["us", "ns"]) -> dict[str, str] | None:

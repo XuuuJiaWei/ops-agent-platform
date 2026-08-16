@@ -60,14 +60,10 @@ class CommandAgent:
             )
         except subprocess.TimeoutExpired as exc:
             _terminate_process_tree(process)
-            _stdout, stderr = process.communicate()
-            detail = _stderr_tail(stderr)
-            message = f"Agent command exceeded {self.timeout_seconds:g} seconds."
-            if detail:
-                message += f" Last agent events:\n{detail}"
-            raise TimeoutError(message) from exc
+            process.communicate()
+            raise TimeoutError(f"Agent command exceeded {self.timeout_seconds:g} seconds.") from exc
         if process.returncode != 0:
-            raise RuntimeError(f"Agent command exited with status {process.returncode}: {stderr.strip()}")
+            raise RuntimeError(f"Agent command exited with status {process.returncode}.")
         return AgentExecution(
             output=stdout,
             metrics=_parse_agent_metrics(stderr),
@@ -128,29 +124,40 @@ class RCA100Runner:
         )
         return result
 
-    def run_suite(self, task_ids: Sequence[str]) -> dict[str, Any]:
+    def run_suite(
+        self,
+        task_ids: Sequence[str],
+        *,
+        on_progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
         runs: list[dict[str, Any]] = []
         for task_id in task_ids:
             try:
                 runs.append(self.run_task(task_id))
             except Exception as exc:  # noqa: BLE001 - retain results for every independently runnable task.
                 runs.append({"benchmark": "rca100", "task_id": task_id, "error": str(exc)})
-        scores = [
-            float(metrics["final_score"])
-            for run in runs
-            if isinstance((metrics := run.get("task_metrics")), dict) and "final_score" in metrics
-        ]
-        return {
-            "benchmark": "rca100",
-            "tasks_requested": list(task_ids),
-            "runs": runs,
-            "summary": {
-                "completed": sum("error" not in run for run in runs),
-                "failed": sum("error" in run for run in runs),
-                "evaluated": len(scores),
-                "mean_final_score": sum(scores) / len(scores) if scores else None,
-            },
-        }
+            if on_progress is not None:
+                on_progress(_suite_result(task_ids, runs))
+        return _suite_result(task_ids, runs)
+
+
+def _suite_result(task_ids: Sequence[str], runs: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    scores = [
+        float(metrics["final_score"])
+        for run in runs
+        if isinstance((metrics := run.get("task_metrics")), dict) and "final_score" in metrics
+    ]
+    return {
+        "benchmark": "rca100",
+        "tasks_requested": list(task_ids),
+        "runs": list(runs),
+        "summary": {
+            "completed": sum("error" not in run for run in runs),
+            "failed": sum("error" in run for run in runs),
+            "evaluated": len(scores),
+            "mean_final_score": sum(scores) / len(scores) if scores else None,
+        },
+    }
 
 
 def parse_prediction(response: str) -> RCA100Prediction:
@@ -200,7 +207,3 @@ def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
         )
         return
     os.killpg(process.pid, signal.SIGKILL)
-
-
-def _stderr_tail(stderr: str, *, lines: int = 20) -> str:
-    return "\n".join(stderr.splitlines()[-lines:])

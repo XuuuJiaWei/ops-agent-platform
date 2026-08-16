@@ -10,6 +10,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, cast
 
 from deepagents import create_deep_agent
+from deepagents.middleware import FilesystemPermission
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import MemorySaver
 
@@ -138,7 +139,13 @@ async def build_agent_runtime(spec: RuntimeSpec) -> AgentRuntime:
         sandbox = create_sandbox_manager(spec.sandbox)
         if sandbox is not None:
             lifecycle.push_async_callback(_close_sandbox, sandbox)
-        middleware = _create_runtime_middleware(spec, mcp_registry.retry_tools, sandbox)
+        filesystem_permissions = _materialize_filesystem_permissions(spec)
+        middleware = _create_runtime_middleware(
+            spec,
+            mcp_registry.retry_tools,
+            sandbox,
+            filesystem_permissions,
+        )
         composed_middleware = [*middleware, *spec.middleware]
         if spec.observability.logging.enabled:
             # Keep observability innermost so it records the effective request
@@ -157,7 +164,7 @@ async def build_agent_runtime(spec: RuntimeSpec) -> AgentRuntime:
             backend=sandbox.backend if sandbox is not None else spec.backend,
             subagents=list(spec.subagents),
             memory=list(spec.memory),
-            permissions=[permission.as_deepagents_permission() for permission in spec.permissions],
+            permissions=filesystem_permissions,
             interrupt_on=spec.interrupt_on,
             middleware=composed_middleware,
             context_schema=spec.context_schema,
@@ -221,6 +228,7 @@ def _create_runtime_middleware(
     spec: RuntimeSpec,
     retry_tools: tuple[str, ...],
     sandbox: SandboxManager | SandboxRuntime | None,
+    filesystem_permissions: list[FilesystemPermission],
 ) -> list[Any]:
     """Build the production guardrails from LangChain's official middleware."""
 
@@ -262,10 +270,21 @@ def _create_runtime_middleware(
             FilesystemMiddleware(
                 backend=sandbox.backend if sandbox is not None else spec.backend,
                 tools=cast(Any, list(spec.filesystem_tools)),
-                _permissions=cast(Any, [permission.as_deepagents_permission() for permission in spec.permissions]),
+                _permissions=filesystem_permissions,
             )
         )
     return middleware
+
+
+def _materialize_filesystem_permissions(spec: RuntimeSpec) -> list[FilesystemPermission]:
+    return [
+        FilesystemPermission(
+            operations=list(permission.operations),
+            paths=list(permission.paths),
+            mode=permission.mode,
+        )
+        for permission in spec.permissions
+    ]
 
 
 def _create_deep_agent(
@@ -278,7 +297,7 @@ def _create_deep_agent(
     backend: Any | None,
     subagents: list[Any],
     memory: list[str],
-    permissions: list[dict[str, object]],
+    permissions: list[FilesystemPermission],
     interrupt_on: dict[str, Any] | None = None,
     middleware: Sequence[Any] = (),
     context_schema: type[Any] | None = None,

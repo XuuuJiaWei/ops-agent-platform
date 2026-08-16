@@ -54,9 +54,15 @@ The command reads the public files under that single `case_directory` and writes
 
 No specific agent framework, API client, or runtime lifecycle is imposed. The
 OpsPilot adapter lives in `ops_pilot_platform.benchmarks.rca100`, outside the agent
-harness. It injects the case-scoped `query_metric`, `query_logs`,
-`query_traces`, `query_events`, `query_alerts`, and `query_topology` tools
-through LangChain's official `tools` and `ToolRuntime` context interfaces.
+harness. It injects nine case-scoped discovery, metric, log, trace, event, alert, and
+topology tools through LangChain's official `tools` and `ToolRuntime` context
+interfaces.
+
+`query_metric` returns a bounded Prometheus-style instant vector for evidence at an
+alert timestamp, while `query_metric_range` returns a bounded matrix for trend
+exploration. Values use Prometheus' `[unix_timestamp, string_value]` sample shape.
+RCA100 metrics do not publish a unit column, so the tools do not invent units. Log
+statistics aggregate structured error patterns before raw lines are retrieved.
 
 ## Run
 
@@ -71,6 +77,9 @@ Run the bundled OpsPilot adapter from this directory:
 ```powershell
 uv run rca100-benchmark run --dataset-dir D:/datasets/RCA100 --task t001 --agent-command uv run --project ../../services --package ops-pilot-platform --extra rca100 ops_pilot rca100-agent
 ```
+
+From the repository root, `pnpm benchmark:rca100 -- run ...` automatically writes a
+timestamped JSON artifact under `artifacts/rca100/` unless `--output` is supplied.
 
 Run the full manifest and persist results:
 

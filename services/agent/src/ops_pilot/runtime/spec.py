@@ -70,13 +70,6 @@ class FilesystemPermissionSpec:
     paths: tuple[str, ...]
     mode: FilesystemPermissionMode = "allow"
 
-    def as_deepagents_permission(self) -> dict[str, object]:
-        return {
-            "operations": list(self.operations),
-            "paths": list(self.paths),
-            "mode": self.mode,
-        }
-
 
 @dataclass(frozen=True)
 class SandboxSpec:

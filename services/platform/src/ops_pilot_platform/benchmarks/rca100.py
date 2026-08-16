@@ -2,19 +2,24 @@
 
 import json
 import sys
+import time
 from collections import Counter
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from dataclasses import field as dataclass_field
+from hashlib import sha256
 from pathlib import Path
 from typing import Any, Literal, Self
 
 from deepagents import GeneralPurposeSubagentProfile, HarnessProfile, register_harness_profile
 from langchain.agents.middleware import AgentMiddleware, AgentState
-from langchain.messages import AIMessage
+from langchain.messages import AIMessage, ToolMessage
+from langchain.tools.tool_node import ToolCallRequest
 from langchain_core.output_parsers import PydanticOutputParser
 from langgraph.runtime import Runtime
+from langgraph.types import Command
 from ops_pilot.agent.runtime import agent_runtime
-from ops_pilot.runtime.spec import RuntimeSpec
+from ops_pilot.runtime.spec import FilesystemPermissionSpec, RuntimeSpec
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ops_pilot_platform.benchmarks.rca100_tools import RCA100_TOOLS, RCA100Context, RCA100ToolCacheMiddleware
@@ -23,22 +28,21 @@ from ops_pilot_platform.entrypoints.benchmark import build_rca100_runtime_spec
 _FILESYSTEM_TOOLS = frozenset({"delete", "edit_file", "execute", "glob", "grep", "ls", "read_file", "write_file"})
 
 
-class RCAToolFilterMiddleware(AgentMiddleware):
-    """Hide DeepAgents filesystem scaffolding from this observation-only worker."""
-
-    async def awrap_model_call(self, request: Any, handler: Any) -> Any:
-        tools = [tool for tool in request.tools if _tool_name(tool) not in _FILESYSTEM_TOOLS]
-        return await handler(request.override(tools=tools))
-
-
 @dataclass
 class RCABenchmarkTelemetry(AgentMiddleware[AgentState, Any, Any]):
     """Observe benchmark execution through LangChain's middleware seam."""
 
     model_calls: int = 0
     tool_calls: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
     total_tokens: int = 0
     tool_counts: Counter[str] = dataclass_field(default_factory=Counter)
+    model_provider: str = ""
+    model_name: str = ""
+    tool_event_sequence: int = 0
+    model_events: list[dict[str, Any]] = dataclass_field(default_factory=list)
+    tool_events: list[dict[str, Any]] = dataclass_field(default_factory=list)
 
     def after_model(self, state: AgentState, runtime: Runtime[Any]) -> None:
         del runtime
@@ -50,7 +54,21 @@ class RCABenchmarkTelemetry(AgentMiddleware[AgentState, Any, Any]):
         self.tool_calls += len(tools)
         self.tool_counts.update(tools)
         usage = message.usage_metadata or {}
-        self.total_tokens += int(usage.get("total_tokens", 0) or 0)
+        input_tokens = int(usage.get("input_tokens", 0) or 0)
+        output_tokens = int(usage.get("output_tokens", 0) or 0)
+        total_tokens = int(usage.get("total_tokens", 0) or 0)
+        self.input_tokens += input_tokens
+        self.output_tokens += output_tokens
+        self.total_tokens += total_tokens
+        self.model_events.append(
+            {
+                "sequence": self.model_calls,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens": total_tokens,
+                "tools": tools,
+            }
+        )
         sys.stderr.write(
             "RCA100_EVENT:"
             + json.dumps(
@@ -61,11 +79,55 @@ class RCABenchmarkTelemetry(AgentMiddleware[AgentState, Any, Any]):
         )
         sys.stderr.flush()
 
+    async def awrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[Any]]],
+    ) -> ToolMessage | Command[Any]:
+        started = time.perf_counter()
+        self.tool_event_sequence += 1
+        event: dict[str, Any] = {
+            "sequence": self.tool_event_sequence,
+            "name": str(request.tool_call.get("name", "unknown")),
+            "argument_keys": sorted(str(key) for key in (request.tool_call.get("args") or {})),
+            "arguments_sha256": _stable_hash(request.tool_call.get("args") or {}),
+        }
+        try:
+            result = await handler(request)
+        except Exception as exc:
+            event.update(
+                {
+                    "status": "error",
+                    "duration_ms": round((time.perf_counter() - started) * 1000, 3),
+                    "error_type": type(exc).__name__,
+                }
+            )
+            self.tool_events.append(event)
+            raise
+
+        content = result.content if isinstance(result, ToolMessage) else ""
+        rendered = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False, default=str)
+        event.update(
+            {
+                "status": result.status if isinstance(result, ToolMessage) else "command",
+                "duration_ms": round((time.perf_counter() - started) * 1000, 3),
+                "result_chars": len(rendered),
+                "result_sha256": sha256(rendered.encode("utf-8")).hexdigest(),
+            }
+        )
+        self.tool_events.append(event)
+        return result
+
     def snapshot(self) -> dict[str, Any]:
         return {
             "model_calls": self.model_calls,
             "tool_calls": self.tool_calls,
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
             "total_tokens": self.total_tokens,
+            "model": {"provider": self.model_provider, "name": self.model_name},
+            "model_events": self.model_events,
+            "tool_events": self.tool_events,
             "tools": dict(sorted(self.tool_counts.items())),
         }
 
@@ -101,11 +163,11 @@ class IncidentEvidence(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    source_type: str
-    signal: str
-    comparator: str
+    source_type: Literal["metric", "log", "trace", "event", "alert", "topology"]
+    signal: str = Field(description="Exact observability signal name, without an entity-name prefix.")
+    comparator: str = Field(min_length=1, max_length=32, description="Comparator reported by the observation.")
     value: float
-    unit: str = ""
+    unit: str = Field(default="", description="Unit reported by the observation tool; preserve it exactly.")
 
 
 class IncidentReasoningStep(BaseModel):
@@ -124,8 +186,16 @@ class IncidentDiagnosis(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    root_cause_entities: list[str] = Field(default_factory=list)
-    root_cause_types: list[str] = Field(default_factory=list)
+    root_cause_entities: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Minimal canonical root entities; omit downstream operations once their root service is identified."
+        ),
+    )
+    root_cause_types: list[str] = Field(
+        default_factory=list,
+        description="Canonical lowerCamelCase fault category identifiers, not free-form explanations.",
+    )
     reasoning: list[IncidentReasoningStep] = Field(default_factory=list)
 
 
@@ -143,11 +213,16 @@ def build_rca100_agent_spec(
         base_spec,
         skills=(),
         memory=(),
-        permissions=(),
+        permissions=(
+            FilesystemPermissionSpec(
+                operations=("read", "write"),
+                paths=("/**",),
+                mode="deny",
+            ),
+        ),
         filesystem_tools=None,
         middleware=(
             *base_spec.middleware,
-            RCAToolFilterMiddleware(),
             RCA100ToolCacheMiddleware(),
             *((telemetry,) if telemetry is not None else ()),
         ),
@@ -160,6 +235,8 @@ async def run_rca100_agent() -> None:
     request = RCA100Request.model_validate_json(sys.stdin.read())
     telemetry = RCABenchmarkTelemetry()
     spec = build_rca100_agent_spec(telemetry=telemetry)
+    telemetry.model_provider = spec.model.provider
+    telemetry.model_name = spec.model.name
     _configure_isolated_harness(spec)
     try:
         async with agent_runtime(spec) as runtime:
@@ -184,15 +261,15 @@ def _configure_isolated_harness(spec: RuntimeSpec) -> None:
     register_harness_profile(
         f"{provider}:{spec.model.name}",
         HarnessProfile(
+            excluded_tools=_FILESYSTEM_TOOLS,
             general_purpose_subagent=GeneralPurposeSubagentProfile(enabled=False),
         ),
     )
 
 
-def _tool_name(tool: Any) -> str:
-    if isinstance(tool, dict):
-        return str(tool.get("name", ""))
-    return str(getattr(tool, "name", ""))
+def _stable_hash(value: Any) -> str:
+    rendered = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    return sha256(rendered.encode("utf-8")).hexdigest()
 
 
 def _diagnosis_prompt(request: RCA100Request) -> str:

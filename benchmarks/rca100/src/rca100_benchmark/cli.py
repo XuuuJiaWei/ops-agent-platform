@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+from datetime import UTC, datetime
 from pathlib import Path
+from tempfile import NamedTemporaryFile
+from typing import Any, Literal
 
 from rca100_benchmark.dataset import discover_tasks
 from rca100_benchmark.runner import CommandAgent, RCA100Runner
@@ -45,13 +49,101 @@ def main(argv: list[str] | None = None) -> int:
         answer_key_directory=args.answer_key_dir,
         agent=CommandAgent(command=tuple(args.agent_command), timeout_seconds=args.timeout_seconds),
     )
-    result = runner.run_suite(task_ids)
-    rendered = json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True)
+    started_at = datetime.now(UTC)
     if args.output is not None:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(rendered, encoding="utf-8")
+        _write_artifact(
+            args.output,
+            _empty_suite(task_ids),
+            args=args,
+            started_at=started_at,
+            status="running",
+        )
+
+    def save_progress(progress: dict[str, Any]) -> None:
+        if args.output is not None:
+            _write_artifact(args.output, progress, args=args, started_at=started_at, status="running")
+
+    result = runner.run_suite(task_ids, on_progress=save_progress)
+    artifact = _artifact(result, args=args, started_at=started_at, status="completed")
+    rendered = json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True)
+    if args.output is not None:
+        _write_json_atomic(args.output, rendered)
     print(rendered)
     return 1 if result["summary"]["failed"] else 0
+
+
+def _empty_suite(task_ids: tuple[str, ...]) -> dict[str, Any]:
+    return {
+        "benchmark": "rca100",
+        "tasks_requested": list(task_ids),
+        "runs": [],
+        "summary": {"completed": 0, "failed": 0, "evaluated": 0, "mean_final_score": None},
+    }
+
+
+def _artifact(
+    result: dict[str, Any],
+    *,
+    args: argparse.Namespace,
+    started_at: datetime,
+    status: Literal["running", "completed"],
+) -> dict[str, Any]:
+    return {
+        **result,
+        "artifact_schema_version": 1,
+        "run": {
+            "status": status,
+            "started_at": started_at.isoformat(),
+            "finished_at": datetime.now(UTC).isoformat() if status == "completed" else None,
+            "dataset": "RCA100",
+            "evaluator_enabled": args.answer_key_dir is not None,
+            "timeout_seconds": args.timeout_seconds,
+            "agent": {
+                "executable": Path(args.agent_command[0]).name,
+                "argument_count": len(args.agent_command) - 1,
+            },
+        },
+    }
+
+
+def _write_artifact(
+    output: Path,
+    result: dict[str, Any],
+    *,
+    args: argparse.Namespace,
+    started_at: datetime,
+    status: Literal["running", "completed"],
+) -> None:
+    rendered = json.dumps(
+        _artifact(result, args=args, started_at=started_at, status=status),
+        ensure_ascii=False,
+        indent=2,
+        sort_keys=True,
+    )
+    _write_json_atomic(output, rendered)
+
+
+def _write_json_atomic(output: Path, rendered: str) -> None:
+    output = output.expanduser().resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: Path | None = None
+    try:
+        with NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=output.parent,
+            prefix=f".{output.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            temporary.write(rendered)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+            temporary_path = Path(temporary.name)
+        temporary_path.replace(output)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

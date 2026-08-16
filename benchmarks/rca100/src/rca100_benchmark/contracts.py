@@ -10,11 +10,11 @@ from pydantic import BaseModel, ConfigDict, Field
 class RCA100Evidence(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    source_type: str
-    signal: str
-    comparator: str
+    source_type: Literal["metric", "log", "trace", "event", "alert", "topology"]
+    signal: str = Field(description="Exact observability signal name, without an entity-name prefix.")
+    comparator: str = Field(min_length=1, max_length=32, description="Comparator reported by the observation.")
     value: float
-    unit: str = ""
+    unit: str = Field(default="", description="Unit reported by the observation tool; preserve it exactly.")
 
 
 class RCA100ReasoningStep(BaseModel):
@@ -31,6 +31,14 @@ class RCA100Prediction(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    root_cause_entities: list[str] = Field(default_factory=list)
-    root_cause_types: list[str] = Field(default_factory=list)
+    root_cause_entities: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Minimal canonical root entities; omit downstream operations once their root service is identified."
+        ),
+    )
+    root_cause_types: list[str] = Field(
+        default_factory=list,
+        description="Canonical lowerCamelCase fault category identifiers, not free-form explanations.",
+    )
     reasoning: list[RCA100ReasoningStep] = Field(default_factory=list)

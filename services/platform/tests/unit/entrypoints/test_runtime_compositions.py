@@ -117,11 +117,9 @@ def test_deepagent_injection_points_are_mapped_from_one_normalized_composition()
     assert runtime.name == "configured-agent"
     assert runtime.system_prompt == "Follow the runbook."
     assert runtime.memory == ("/memory/AGENTS.md",)
-    assert runtime.permissions[0].as_deepagents_permission() == {
-        "operations": ["read"],
-        "paths": ["/workspace/**"],
-        "mode": "allow",
-    }
+    assert runtime.permissions[0].operations == ("read",)
+    assert runtime.permissions[0].paths == ("/workspace/**",)
+    assert runtime.permissions[0].mode == "allow"
     assert runtime.todo_list_enabled is True
     assert runtime.filesystem_tools == ("read_file", "ls", "glob")
     assert runtime.interrupt_on == {"delete_file": True}
