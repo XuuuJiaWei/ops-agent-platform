@@ -11,7 +11,7 @@ Dependency direction is `platform -> agent`. The agent harness consumes `Runtime
 
 ## Configuration and lifecycle
 
-Use `ops_pilot_platform.entrypoints.RuntimeEnvironment` to merge top-level defaults with `entrypoints.<name>` from local `config/runtime.yaml`. Track `config/runtime.example.yaml`; keep `runtime.yaml` local and `.env` limited to explicit credential aliases. `deepagent` is a top-level key and mirrors `create_deep_agent` inputs. Entrypoints contain only real overrides.
+Use `ops_pilot_platform.entrypoints.RuntimeEnvironment` to merge top-level defaults with `entrypoints.<name>` from local `config/runtime.yaml`. Track `config/runtime.example.yaml`; keep `runtime.yaml` local and `.env` limited to explicit credential aliases. `deepagent` is a top-level key and mirrors `create_deep_agent` inputs. Entrypoints contain only real overrides. `system-prompt` accepts inline text or a prompt document under `config/prompts/` (`*.md`/`*.txt`, relative to the repo root); the platform resolves it when composing the runtime spec.
 
 Spaces belongs to `ops_pilot_platform.web.spaces`. Agent-facing operations are CopilotKit `useFrontendTool` declarations in React.
 

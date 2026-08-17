@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from ops_pilot.mcp.spec import MCPServerCatalog, MCPServerSpec
@@ -17,6 +18,32 @@ from ops_pilot.runtime.spec import (
 )
 
 from ops_pilot_platform.entrypoints.environment import RuntimeEnvironment
+from ops_pilot_platform.paths import REPO_ROOT
+
+_PROMPT_FILE_SUFFIXES = (".md", ".markdown", ".txt")
+
+
+def _resolve_system_prompt(value: str | None) -> str | None:
+    """Resolve ``system-prompt`` as a prompt file or inline text.
+
+    ``system-prompt`` accepts either inline prompt text or the path of a prompt
+    document (``*.md``/``*.markdown``/``*.txt``) relative to the repository root
+    or absolute. A path-style value that does not resolve to an existing file
+    fails fast instead of silently becoming the prompt text.
+    """
+
+    if not value:
+        return None
+    candidate = Path(value).expanduser()
+    if candidate.suffix.lower() not in _PROMPT_FILE_SUFFIXES:
+        return value
+    paths = [candidate] if candidate.is_absolute() else [REPO_ROOT / candidate, candidate]
+    for path in paths:
+        if path.is_file():
+            return path.read_text(encoding="utf-8").strip()
+    raise FileNotFoundError(
+        f"system-prompt references prompt file {value!r}, but no such file exists under {REPO_ROOT}."
+    )
 
 
 def runtime_spec_from_environment(
@@ -72,7 +99,7 @@ def deepagent_fields_from_environment(environment: RuntimeEnvironment) -> dict[s
 
     deepagent = environment.deepagent
     return {
-        "system_prompt": deepagent.system_prompt,
+        "system_prompt": _resolve_system_prompt(deepagent.system_prompt),
         "skills": deepagent.skills,
         "memory": deepagent.memory,
         "permissions": tuple(

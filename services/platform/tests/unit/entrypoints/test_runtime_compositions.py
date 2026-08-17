@@ -127,6 +127,27 @@ def test_deepagent_injection_points_are_mapped_from_one_normalized_composition()
     assert runtime.debug is True
 
 
+def test_system_prompt_resolves_prompt_file(tmp_path) -> None:
+    prompt = tmp_path / "agent.md"
+    prompt.write_text("Follow the runbook.\n", encoding="utf-8")
+    environment = RuntimeEnvironment.model_validate({"deepagent": {"system_prompt": str(prompt)}})
+    runtime = build_eval_runtime_spec(environment)
+    assert runtime.system_prompt == "Follow the runbook."
+
+
+def test_system_prompt_missing_prompt_file_fails_fast(tmp_path) -> None:
+    environment = RuntimeEnvironment.model_validate(
+        {"deepagent": {"system_prompt": str(tmp_path / "missing.md")}}
+    )
+    with pytest.raises(FileNotFoundError):
+        build_eval_runtime_spec(environment)
+
+
+def test_rca100_config_points_to_prompt_file() -> None:
+    environment = RuntimeEnvironment.for_entrypoint("rca100")
+    assert environment.deepagent.system_prompt == "config/prompts/sre-system.md"
+
+
 def test_entrypoint_yaml_rejects_nested_secrets(tmp_path) -> None:
     config = tmp_path / "entry.yaml"
     config.write_text(
